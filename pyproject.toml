@@ -1,0 +1,17 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "horizon"
+version = "0.1.0"
+requires-python = ">=3.11"
+dependencies = [
+    "PySide6",
+]
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/horizon"]
+
+[project.scripts]
+horizon = "horizon.__main__:main"
