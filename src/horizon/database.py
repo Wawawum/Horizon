@@ -9,6 +9,17 @@ CREATE TABLE IF NOT EXISTS projects (
     name        TEXT    NOT NULL CHECK(length(name) <= 255),
     description TEXT    NOT NULL DEFAULT ''
 );
+
+CREATE TABLE IF NOT EXISTS tasks (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id  INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title       TEXT    NOT NULL CHECK(length(title) <= 255),
+    description TEXT    NOT NULL DEFAULT '',
+    state       TEXT    NOT NULL DEFAULT 'New'
+                CHECK(state IN ('New','In-Progress','On hold','Completed','Cancelled')),
+    priority    TEXT    NOT NULL DEFAULT 'Medium'
+                CHECK(priority IN ('Low','Medium','High'))
+);
 """
 
 
@@ -18,6 +29,7 @@ class Database:
         self._conn = sqlite3.connect(str(path))
         self._conn.row_factory = sqlite3.Row
         self._conn.execute("PRAGMA journal_mode=WAL;")
+        self._conn.execute("PRAGMA foreign_keys = ON;")
         self._conn.executescript(_DDL)
 
     @property
