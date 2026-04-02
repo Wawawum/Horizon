@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
 )
 
-from horizon.task import TaskPriority, TaskState
+from horizon.task import TaskBucket, TaskPriority, TaskState
 
 
 class NewProjectDialog(QDialog):
@@ -78,6 +78,10 @@ class NewTaskDialog(QDialog):
         if medium_idx >= 0:
             self._priority_combo.setCurrentIndex(medium_idx)
 
+        self._bucket_combo = QComboBox()
+        for member in TaskBucket:
+            self._bucket_combo.addItem(member.value, userData=member)
+
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -94,6 +98,8 @@ class NewTaskDialog(QDialog):
         layout.addWidget(self._state_combo)
         layout.addWidget(QLabel("Priority"))
         layout.addWidget(self._priority_combo)
+        layout.addWidget(QLabel("Bucket"))
+        layout.addWidget(self._bucket_combo)
         layout.addWidget(btn_box)
 
     def _on_accepted(self) -> None:
@@ -113,6 +119,9 @@ class NewTaskDialog(QDialog):
 
     def priority(self) -> TaskPriority:
         return self._priority_combo.currentData()
+
+    def bucket(self) -> TaskBucket:
+        return self._bucket_combo.currentData()
 
 
 class TaskDetailDialog(QDialog):
@@ -137,6 +146,11 @@ class TaskDetailDialog(QDialog):
             self._priority_combo.addItem(member.value, userData=member)
         self._priority_combo.setCurrentIndex(self._priority_combo.findData(task.priority))
 
+        self._bucket_combo = QComboBox()
+        for member in TaskBucket:
+            self._bucket_combo.addItem(member.value, userData=member)
+        self._bucket_combo.setCurrentIndex(self._bucket_combo.findData(task.bucket))
+
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -153,6 +167,8 @@ class TaskDetailDialog(QDialog):
         layout.addWidget(self._state_combo)
         layout.addWidget(QLabel("Priority"))
         layout.addWidget(self._priority_combo)
+        layout.addWidget(QLabel("Bucket"))
+        layout.addWidget(self._bucket_combo)
         layout.addWidget(btn_box)
 
     def _on_accepted(self) -> None:
@@ -172,3 +188,6 @@ class TaskDetailDialog(QDialog):
 
     def priority(self) -> TaskPriority:
         return self._priority_combo.currentData()
+
+    def bucket(self) -> TaskBucket:
+        return self._bucket_combo.currentData()

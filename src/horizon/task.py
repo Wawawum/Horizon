@@ -1,4 +1,4 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import Enum
 
 from horizon.database import Database
@@ -18,6 +18,13 @@ class TaskPriority(Enum):
     High   = "High"
 
 
+class TaskBucket(Enum):
+    Inbox     = "Inbox"
+    Today     = "Today"
+    On_Hold   = "On hold"
+    Completed = "Completed"
+
+
 @dataclass
 class Task:
     id:          int | None
@@ -26,6 +33,7 @@ class Task:
     description: str
     state:       TaskState
     priority:    TaskPriority
+    bucket:      TaskBucket = field(default=TaskBucket.Inbox)
 
 
 class TaskRepository:
@@ -39,18 +47,19 @@ class TaskRepository:
         description: str = "",
         state: TaskState = TaskState.New,
         priority: TaskPriority = TaskPriority.Medium,
+        bucket: TaskBucket = TaskBucket.Inbox,
     ) -> Task:
         cur = self._db.conn.execute(
-            "INSERT INTO tasks (project_id, title, description, state, priority)"
-            " VALUES (?, ?, ?, ?, ?)",
-            (project_id, title, description, state.value, priority.value),
+            "INSERT INTO tasks (project_id, title, description, state, priority, bucket)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, title, description, state.value, priority.value, bucket.value),
         )
         self._db.conn.commit()
-        return Task(cur.lastrowid, project_id, title, description, state, priority)
+        return Task(cur.lastrowid, project_id, title, description, state, priority, bucket)
 
     def get(self, task_id: int) -> "Task | None":
         row = self._db.conn.execute(
-            "SELECT id, project_id, title, description, state, priority"
+            "SELECT id, project_id, title, description, state, priority, bucket"
             " FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
@@ -63,19 +72,20 @@ class TaskRepository:
             description=row["description"],
             state=TaskState(row["state"]),
             priority=TaskPriority(row["priority"]),
+            bucket=TaskBucket(row["bucket"]),
         )
 
     def update(self, task: Task) -> None:
         self._db.conn.execute(
-            "UPDATE tasks SET title=?, description=?, state=?, priority=?"
+            "UPDATE tasks SET title=?, description=?, state=?, priority=?, bucket=?"
             " WHERE id=?",
-            (task.title, task.description, task.state.value, task.priority.value, task.id),
+            (task.title, task.description, task.state.value, task.priority.value, task.bucket.value, task.id),
         )
         self._db.conn.commit()
 
     def list_for_project(self, project_id: int) -> list[Task]:
         rows = self._db.conn.execute(
-            "SELECT id, project_id, title, description, state, priority"
+            "SELECT id, project_id, title, description, state, priority, bucket"
             " FROM tasks WHERE project_id = ? ORDER BY id",
             (project_id,),
         ).fetchall()
@@ -87,6 +97,7 @@ class TaskRepository:
                 description=r["description"],
                 state=TaskState(r["state"]),
                 priority=TaskPriority(r["priority"]),
+                bucket=TaskBucket(r["bucket"]),
             )
             for r in rows
         ]

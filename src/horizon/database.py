@@ -18,9 +18,16 @@ CREATE TABLE IF NOT EXISTS tasks (
     state       TEXT    NOT NULL DEFAULT 'New'
                 CHECK(state IN ('New','In-Progress','On hold','Completed','Cancelled')),
     priority    TEXT    NOT NULL DEFAULT 'Medium'
-                CHECK(priority IN ('Low','Medium','High'))
+                CHECK(priority IN ('Low','Medium','High')),
+    bucket      TEXT    NOT NULL DEFAULT 'Inbox'
+                CHECK(bucket IN ('Inbox','Today','On hold','Completed'))
 );
 """
+
+_MIGRATIONS = [
+    "ALTER TABLE tasks ADD COLUMN bucket TEXT NOT NULL DEFAULT 'Inbox'"
+    " CHECK(bucket IN ('Inbox','Today','On hold','Completed'))",
+]
 
 
 class Database:
@@ -31,6 +38,15 @@ class Database:
         self._conn.execute("PRAGMA journal_mode=WAL;")
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._conn.executescript(_DDL)
+        self._run_migrations()
+
+    def _run_migrations(self) -> None:
+        for sql in _MIGRATIONS:
+            try:
+                self._conn.execute(sql)
+                self._conn.commit()
+            except sqlite3.OperationalError:
+                pass  # column already exists
 
     @property
     def conn(self) -> sqlite3.Connection:

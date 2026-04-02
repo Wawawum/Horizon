@@ -139,8 +139,8 @@ class ProjectDetailWidget(QWidget):
 
         # Task table
         self._task_table = QTableWidget()
-        self._task_table.setColumnCount(3)
-        self._task_table.setHorizontalHeaderLabels(["Title", "State", "Priority"])
+        self._task_table.setColumnCount(4)
+        self._task_table.setHorizontalHeaderLabels(["Title", "State", "Priority", "Bucket"])
         self._task_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._task_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._task_table.verticalHeader().setVisible(False)
@@ -176,6 +176,7 @@ class ProjectDetailWidget(QWidget):
             self._task_table.setItem(i, 0, title_item)
             self._task_table.setItem(i, 1, QTableWidgetItem(task.state.value))
             self._task_table.setItem(i, 2, QTableWidgetItem(task.priority.value))
+            self._task_table.setItem(i, 3, QTableWidgetItem(task.bucket.value))
 
     def _on_task_double_clicked(self, row: int, _col: int) -> None:
         task_id = self._task_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
@@ -188,6 +189,7 @@ class ProjectDetailWidget(QWidget):
             task.description = dialog.description()
             task.state = dialog.state()
             task.priority = dialog.priority()
+            task.bucket = dialog.bucket()
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
 
@@ -202,6 +204,7 @@ class ProjectDetailWidget(QWidget):
                 description=dialog.description(),
                 state=dialog.state(),
                 priority=dialog.priority(),
+                bucket=dialog.bucket(),
             )
             self._load_tasks(self._current_project_id)
 
