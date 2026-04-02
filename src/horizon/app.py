@@ -1,9 +1,10 @@
 from PySide6.QtCore import Qt
-from PySide6.QtWidgets import QLabel, QMainWindow, QSplitter
+from PySide6.QtWidgets import QMainWindow, QSplitter
 
 from horizon.database import Database
 from horizon.project import ProjectRepository
-from horizon.widgets import ProjectListWidget
+from horizon.task import TaskRepository
+from horizon.widgets import ProjectDetailWidget, ProjectListWidget
 
 
 class MainWindow(QMainWindow):
@@ -14,15 +15,17 @@ class MainWindow(QMainWindow):
         self.resize(800, 600)
 
         repo = ProjectRepository(db)
+        task_repo = TaskRepository(db)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._project_list = ProjectListWidget(repo)
         splitter.addWidget(self._project_list)
 
-        placeholder = QLabel("Select a project")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        splitter.addWidget(placeholder)
+        self._project_detail = ProjectDetailWidget(task_repo)
+        splitter.addWidget(self._project_detail)
+
+        self._project_list.project_selected.connect(self._project_detail.load_project)
 
         splitter.setStretchFactor(0, 0)  # left panel keeps its natural width
         splitter.setStretchFactor(1, 1)  # right panel absorbs extra space
