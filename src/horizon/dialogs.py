@@ -1,11 +1,15 @@
+from PySide6.QtCore import QEvent, Qt
+from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFrame,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QTextEdit,
     QVBoxLayout,
 )
 
@@ -133,8 +137,16 @@ class TaskDetailDialog(QDialog):
         self._title_edit = QLineEdit(task.title)
         self._title_edit.setMaxLength(255)
 
-        self._desc_edit = QPlainTextEdit(task.description)
-        self._desc_edit.setFixedHeight(80)
+        self._desc_raw: str = task.description
+        self._desc_edit = QTextEdit()
+        self._desc_edit.setMinimumHeight(80)
+        self._desc_edit.setReadOnly(True)
+        self._desc_edit.setFrameShape(QFrame.Shape.NoFrame)
+        if self._desc_raw:
+            self._desc_edit.setMarkdown(self._desc_raw)
+        self._desc_edit.installEventFilter(self)
+        self._desc_edit.viewport().installEventFilter(self)
+        self._desc_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
         self._state_combo = QComboBox()
         for member in TaskState:
@@ -171,6 +183,34 @@ class TaskDetailDialog(QDialog):
         layout.addWidget(self._bucket_combo)
         layout.addWidget(btn_box)
 
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._desc_edit.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and self._desc_edit.isReadOnly():
+                self._enter_desc_edit()
+                return True
+        if obj is self._desc_edit:
+            if event.type() == QEvent.Type.FocusOut and not self._desc_edit.isReadOnly():
+                self._save_and_render_desc()
+        return super().eventFilter(obj, event)
+
+    def _enter_desc_edit(self) -> None:
+        self._desc_edit.setFrameShape(QFrame.Shape.StyledPanel)
+        self._desc_edit.setReadOnly(False)
+        self._desc_edit.setPlainText(self._desc_raw)
+        self._desc_edit.viewport().unsetCursor()
+        self._desc_edit.moveCursor(QTextCursor.MoveOperation.End)
+        self._desc_edit.setFocus()
+
+    def _save_and_render_desc(self) -> None:
+        self._desc_raw = self._desc_edit.toPlainText()
+        if self._desc_raw:
+            self._desc_edit.setMarkdown(self._desc_raw)
+        else:
+            self._desc_edit.setPlainText("")
+        self._desc_edit.setReadOnly(True)
+        self._desc_edit.setFrameShape(QFrame.Shape.NoFrame)
+        self._desc_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+
     def _on_accepted(self) -> None:
         if not self._title_edit.text().strip():
             QMessageBox.warning(self, "Validation Error", "Task title cannot be blank.")
@@ -181,7 +221,7 @@ class TaskDetailDialog(QDialog):
         return self._title_edit.text().strip()
 
     def description(self) -> str:
-        return self._desc_edit.toPlainText()
+        return self._desc_raw
 
     def state(self) -> TaskState:
         return self._state_combo.currentData()
