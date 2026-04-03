@@ -1,4 +1,5 @@
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData
+from PySide6.QtGui import QDrag
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -71,8 +72,60 @@ class ProjectListWidget(QWidget):
             self._load_projects()
 
 
+_KANBAN_MIME = "application/x-horizon-task-id"
+
+
+class KanbanColumnWidget(QListWidget):
+    task_dropped = Signal(int, object)  # (task_id, target_bucket: TaskBucket)
+
+    def __init__(self, bucket: TaskBucket, parent=None) -> None:
+        super().__init__(parent)
+        self._bucket = bucket
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        self.setDefaultDropAction(Qt.DropAction.IgnoreAction)
+
+    def startDrag(self, supported_actions) -> None:
+        item = self.currentItem()
+        if item is None:
+            return
+        task_id: int = item.data(Qt.ItemDataRole.UserRole)
+        mime = QMimeData()
+        mime.setData(_KANBAN_MIME, QByteArray(str(task_id).encode()))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+        drag.exec(Qt.DropAction.MoveAction)
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_KANBAN_MIME):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_KANBAN_MIME):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dropEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(_KANBAN_MIME):
+            event.ignore()
+            return
+        source = event.source()
+        if isinstance(source, KanbanColumnWidget) and source._bucket == self._bucket:
+            event.ignore()
+            return
+        task_id = int(event.mimeData().data(_KANBAN_MIME).data().decode())
+        event.acceptProposedAction()
+        self.task_dropped.emit(task_id, self._bucket)
+
+
 class KanbanBoardWidget(QWidget):
     task_edit_requested = Signal(int)  # emits task_id
+    task_bucket_changed = Signal(int, object)  # (task_id, new_bucket: TaskBucket)
 
     COLUMNS = [
         TaskBucket.Inbox,
@@ -102,9 +155,9 @@ class KanbanBoardWidget(QWidget):
             header.setFont(font)
             col_layout.addWidget(header)
 
-            list_widget = QListWidget()
-            list_widget.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+            list_widget = KanbanColumnWidget(bucket)
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+            list_widget.task_dropped.connect(self._on_task_dropped)
             col_layout.addWidget(list_widget, stretch=1)
 
             self._columns[bucket] = list_widget
@@ -128,6 +181,9 @@ class KanbanBoardWidget(QWidget):
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         self.task_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_task_dropped(self, task_id: int, target_bucket) -> None:
+        self.task_bucket_changed.emit(task_id, target_bucket)
 
 
 class ProjectDetailWidget(QWidget):
@@ -221,6 +277,7 @@ class ProjectDetailWidget(QWidget):
         # Kanban board (board view)
         self._kanban_board = KanbanBoardWidget()
         self._kanban_board.task_edit_requested.connect(self._on_kanban_task_edit_requested)
+        self._kanban_board.task_bucket_changed.connect(self._on_kanban_bucket_changed)
 
         # Inner stack: index 0 = List, index 1 = Board
         self._task_view_stack = QStackedWidget()
@@ -290,6 +347,14 @@ class ProjectDetailWidget(QWidget):
             task.bucket = dialog.bucket()
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
+
+    def _on_kanban_bucket_changed(self, task_id: int, new_bucket) -> None:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        task.bucket = new_bucket
+        self._task_repo.update(task)
+        self._load_tasks(self._current_project_id)
 
     def _on_new_task(self) -> None:
         if self._current_project_id is None:
