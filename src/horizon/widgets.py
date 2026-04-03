@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect
-from PySide6.QtGui import QColor, QDrag
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QEvent
+from PySide6.QtGui import QColor, QDrag, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -275,10 +275,13 @@ class HomeWidget(QWidget):
 
 
 class ProjectDetailWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
+        self._project_repo = project_repo
+        self._current_project = None
         self._current_project_id: int | None = None
+        self._desc_raw: str = ""
 
         # --- Empty state page ---
         empty_label = QLabel("Select a project from the list")
@@ -324,6 +327,9 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.setReadOnly(True)
         self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
         self._desc_text.setVisible(False)
+        self._desc_text.installEventFilter(self)
+        self._desc_text.viewport().installEventFilter(self)
+        self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         content_layout.addWidget(self._desc_text)
 
         # Separator before tasks
@@ -381,6 +387,38 @@ class ProjectDetailWidget(QWidget):
         root_layout = QVBoxLayout(self)
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.addWidget(self._stack)
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._desc_text.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and self._desc_text.isReadOnly():
+                self._enter_desc_edit()
+                return True
+        if obj is self._desc_text:
+            if event.type() == QEvent.Type.FocusOut and not self._desc_text.isReadOnly():
+                self._save_and_render_desc()
+        return super().eventFilter(obj, event)
+
+    def _enter_desc_edit(self) -> None:
+        self._desc_text.setFrameShape(QFrame.Shape.StyledPanel)
+        self._desc_text.setReadOnly(False)
+        self._desc_text.setPlainText(self._desc_raw)
+        self._desc_text.viewport().unsetCursor()
+        self._desc_text.moveCursor(QTextCursor.MoveOperation.End)
+        self._desc_text.setFocus()
+
+    def _save_and_render_desc(self) -> None:
+        if self._current_project is None:
+            return
+        self._desc_raw = self._desc_text.toPlainText()
+        self._current_project.description = self._desc_raw
+        self._project_repo.update(self._current_project)
+        if self._desc_raw:
+            self._desc_text.setMarkdown(self._desc_raw)
+        else:
+            self._desc_text.setPlainText("")
+        self._desc_text.setReadOnly(True)
+        self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
+        self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
     def _on_desc_toggled(self, expanded: bool) -> None:
         self._desc_text.setVisible(expanded)
@@ -461,11 +499,19 @@ class ProjectDetailWidget(QWidget):
 
     def load_project(self, project) -> None:
         if project is None:
+            self._current_project = None
             self._current_project_id = None
             self._stack.setCurrentIndex(0)
         else:
+            self._current_project = project
             self._current_project_id = project.id
             self._name_label.setText(project.name)
-            self._desc_text.setPlainText(project.description)
+            self._desc_raw = project.description
+            if self._desc_raw:
+                self._desc_text.setMarkdown(self._desc_raw)
+            else:
+                self._desc_text.setPlainText("")
+            self._desc_text.setReadOnly(True)
+            self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
             self._load_tasks(project.id)
             self._stack.setCurrentIndex(1)

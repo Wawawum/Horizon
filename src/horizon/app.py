@@ -27,7 +27,7 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo)
+        self._project_detail = ProjectDetailWidget(task_repo, repo)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         splitter.addWidget(self._right_stack)
