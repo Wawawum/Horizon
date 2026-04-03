@@ -1,6 +1,7 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QDialog,
     QFrame,
     QHBoxLayout,
@@ -9,6 +10,7 @@ from PySide6.QtWidgets import (
     QListWidget,
     QListWidgetItem,
     QPushButton,
+    QScrollArea,
     QSizePolicy,
     QStackedWidget,
     QTableWidget,
@@ -21,7 +23,7 @@ from PySide6.QtWidgets import (
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.project import ProjectRepository
-from horizon.task import TaskRepository
+from horizon.task import TaskBucket, TaskRepository
 
 
 class ProjectListWidget(QWidget):
@@ -67,6 +69,65 @@ class ProjectListWidget(QWidget):
         if dialog.exec() == QDialog.DialogCode.Accepted:
             self._repo.create(name=dialog.name(), description=dialog.description())
             self._load_projects()
+
+
+class KanbanBoardWidget(QWidget):
+    task_edit_requested = Signal(int)  # emits task_id
+
+    COLUMNS = [
+        TaskBucket.Inbox,
+        TaskBucket.Today,
+        TaskBucket.On_Hold,
+        TaskBucket.Completed,
+    ]
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._columns: dict[TaskBucket, QListWidget] = {}
+
+        board = QWidget()
+        board_layout = QHBoxLayout(board)
+        board_layout.setSpacing(8)
+        board_layout.setContentsMargins(0, 0, 0, 0)
+
+        for bucket in self.COLUMNS:
+            col_widget = QWidget()
+            col_layout = QVBoxLayout(col_widget)
+            col_layout.setContentsMargins(0, 0, 0, 0)
+            col_layout.setSpacing(4)
+
+            header = QLabel(bucket.value)
+            font = header.font()
+            font.setBold(True)
+            header.setFont(font)
+            col_layout.addWidget(header)
+
+            list_widget = QListWidget()
+            list_widget.setDragDropMode(QAbstractItemView.DragDropMode.NoDragDrop)
+            list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
+            col_layout.addWidget(list_widget, stretch=1)
+
+            self._columns[bucket] = list_widget
+            board_layout.addWidget(col_widget, stretch=1)
+
+        scroll = QScrollArea()
+        scroll.setWidget(board)
+        scroll.setWidgetResizable(True)
+
+        root_layout = QVBoxLayout(self)
+        root_layout.setContentsMargins(0, 0, 0, 0)
+        root_layout.addWidget(scroll)
+
+    def populate(self, tasks: list) -> None:
+        for lw in self._columns.values():
+            lw.clear()
+        for task in tasks:
+            item = QListWidgetItem(task.title)
+            item.setData(Qt.ItemDataRole.UserRole, task.id)
+            self._columns[task.bucket].addItem(item)
+
+    def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
+        self.task_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
 
 
 class ProjectDetailWidget(QWidget):
@@ -127,10 +188,17 @@ class ProjectDetailWidget(QWidget):
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
         content_layout.addWidget(sep2)
 
-        # Tasks header row: label left, "+" button right
+        # Tasks header row: label left, view selector + "+" button right
         tasks_header = QHBoxLayout()
         tasks_header.addWidget(QLabel("Tasks"))
         tasks_header.addStretch()
+
+        self._view_selector = QComboBox()
+        self._view_selector.addItem("List")
+        self._view_selector.addItem("Board")
+        self._view_selector.currentIndexChanged.connect(self._on_view_changed)
+        tasks_header.addWidget(self._view_selector)
+
         new_task_btn = QPushButton("+")
         new_task_btn.setFixedWidth(28)
         new_task_btn.clicked.connect(self._on_new_task)
@@ -149,7 +217,16 @@ class ProjectDetailWidget(QWidget):
             0, QHeaderView.ResizeMode.Stretch
         )
         self._task_table.cellDoubleClicked.connect(self._on_task_double_clicked)
-        content_layout.addWidget(self._task_table, stretch=1)
+
+        # Kanban board (board view)
+        self._kanban_board = KanbanBoardWidget()
+        self._kanban_board.task_edit_requested.connect(self._on_kanban_task_edit_requested)
+
+        # Inner stack: index 0 = List, index 1 = Board
+        self._task_view_stack = QStackedWidget()
+        self._task_view_stack.addWidget(self._task_table)
+        self._task_view_stack.addWidget(self._kanban_board)
+        content_layout.addWidget(self._task_view_stack, stretch=1)
 
         # --- Stack ---
         self._stack = QStackedWidget()
@@ -166,8 +243,15 @@ class ProjectDetailWidget(QWidget):
             Qt.ArrowType.DownArrow if expanded else Qt.ArrowType.RightArrow
         )
 
+    def _on_view_changed(self, index: int) -> None:
+        self._task_view_stack.setCurrentIndex(index)
+
     def _load_tasks(self, project_id: int) -> None:
         tasks = self._task_repo.list_for_project(project_id)
+        self._populate_table(tasks)
+        self._kanban_board.populate(tasks)
+
+    def _populate_table(self, tasks: list) -> None:
         self._task_table.setRowCount(0)
         self._task_table.setRowCount(len(tasks))
         for i, task in enumerate(tasks):
@@ -180,6 +264,20 @@ class ProjectDetailWidget(QWidget):
 
     def _on_task_double_clicked(self, row: int, _col: int) -> None:
         task_id = self._task_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        dialog = TaskDetailDialog(task, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            task.title = dialog.title()
+            task.description = dialog.description()
+            task.state = dialog.state()
+            task.priority = dialog.priority()
+            task.bucket = dialog.bucket()
+            self._task_repo.update(task)
+            self._load_tasks(self._current_project_id)
+
+    def _on_kanban_task_edit_requested(self, task_id: int) -> None:
         task = self._task_repo.get(task_id)
         if task is None:
             return
