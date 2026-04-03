@@ -101,3 +101,21 @@ class TaskRepository:
             )
             for r in rows
         ]
+
+    def list_all(self) -> list[Task]:
+        rows = self._db.conn.execute(
+            "SELECT id, project_id, title, description, state, priority, bucket"
+            " FROM tasks ORDER BY project_id, id"
+        ).fetchall()
+        return [
+            Task(
+                id=r["id"],
+                project_id=r["project_id"],
+                title=r["title"],
+                description=r["description"],
+                state=TaskState(r["state"]),
+                priority=TaskPriority(r["priority"]),
+                bucket=TaskBucket(r["bucket"]),
+            )
+            for r in rows
+        ]

@@ -31,11 +31,15 @@ from horizon.task import TaskBucket, TaskPriority, TaskRepository
 
 class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
+    home_requested = Signal()
 
     def __init__(self, repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self._repo = repo
         self.setMinimumWidth(200)
+
+        self._home_btn = QPushButton("Home")
+        self._home_btn.clicked.connect(self.home_requested)
 
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_selection_changed)
@@ -46,8 +50,9 @@ class ProjectListWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._list, stretch=1)    # fills all available vertical space
-        layout.addWidget(self._new_btn, stretch=0)  # pinned to the bottom
+        layout.addWidget(self._home_btn, stretch=0)  # pinned to the top
+        layout.addWidget(self._list, stretch=1)      # fills all available vertical space
+        layout.addWidget(self._new_btn, stretch=0)   # pinned to the bottom
 
         self._load_projects()
 
@@ -213,6 +218,53 @@ class KanbanBoardWidget(QWidget):
 
     def _on_task_dropped(self, task_id: int, target_bucket) -> None:
         self.task_bucket_changed.emit(task_id, target_bucket)
+
+
+class HomeWidget(QWidget):
+    def __init__(self, task_repo: TaskRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._task_repo = task_repo
+
+        self._board = KanbanBoardWidget()
+        self._board.task_edit_requested.connect(self._on_task_edit_requested)
+        self._board.task_bucket_changed.connect(self._on_bucket_changed)
+
+        title = QLabel("All Tasks")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        title.setFont(font)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        layout.addWidget(title)
+        layout.addWidget(self._board, stretch=1)
+
+    def load(self) -> None:
+        self._board.populate(self._task_repo.list_all())
+
+    def _on_task_edit_requested(self, task_id: int) -> None:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        dialog = TaskDetailDialog(task, parent=self)
+        if dialog.exec() == QDialog.DialogCode.Accepted:
+            task.title = dialog.title()
+            task.description = dialog.description()
+            task.state = dialog.state()
+            task.priority = dialog.priority()
+            task.bucket = dialog.bucket()
+            self._task_repo.update(task)
+            self.load()
+
+    def _on_bucket_changed(self, task_id: int, new_bucket) -> None:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        task.bucket = new_bucket
+        self._task_repo.update(task)
+        self.load()
 
 
 class ProjectDetailWidget(QWidget):
