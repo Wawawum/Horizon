@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData
-from PySide6.QtGui import QDrag
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect
+from PySide6.QtGui import QColor, QDrag
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -14,6 +14,8 @@ from PySide6.QtWidgets import (
     QScrollArea,
     QSizePolicy,
     QStackedWidget,
+    QStyledItemDelegate,
+    QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
@@ -24,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.project import ProjectRepository
-from horizon.task import TaskBucket, TaskRepository
+from horizon.task import TaskBucket, TaskPriority, TaskRepository
 
 
 class ProjectListWidget(QWidget):
@@ -73,6 +75,30 @@ class ProjectListWidget(QWidget):
 
 
 _KANBAN_MIME = "application/x-horizon-task-id"
+_PRIORITY_ROLE = Qt.ItemDataRole.UserRole + 1
+_BAND_WIDTH = 5
+
+_PRIORITY_COLOR: dict[TaskPriority, QColor] = {
+    TaskPriority.Low:    QColor("#9e9e9e"),
+    TaskPriority.Medium: QColor("#2196f3"),
+    TaskPriority.High:   QColor("#f44336"),
+}
+
+
+class KanbanCardDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, 0)
+        super().paint(painter, opt, index)
+        priority = index.data(_PRIORITY_ROLE)
+        color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
+        band = QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height())
+        painter.fillRect(band, color)
+
+    def sizeHint(self, option, index):
+        opt = QStyleOptionViewItem(option)
+        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, 0)
+        return super().sizeHint(opt, index)
 
 
 class KanbanColumnWidget(QListWidget):
@@ -156,6 +182,8 @@ class KanbanBoardWidget(QWidget):
             col_layout.addWidget(header)
 
             list_widget = KanbanColumnWidget(bucket)
+            list_widget.setWordWrap(True)
+            list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
             list_widget.task_dropped.connect(self._on_task_dropped)
             col_layout.addWidget(list_widget, stretch=1)
@@ -177,6 +205,7 @@ class KanbanBoardWidget(QWidget):
         for task in tasks:
             item = QListWidgetItem(task.title)
             item.setData(Qt.ItemDataRole.UserRole, task.id)
+            item.setData(_PRIORITY_ROLE, task.priority)
             self._columns[task.bucket].addItem(item)
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
