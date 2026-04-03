@@ -92,6 +92,8 @@ _PRIORITY_COLOR: dict[TaskPriority, QColor] = {
 
 class KanbanCardDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
+        painter.save()
+        painter.setClipRect(option.rect)
         opt = QStyleOptionViewItem(option)
         opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, 0)
         super().paint(painter, opt, index)
@@ -99,10 +101,15 @@ class KanbanCardDelegate(QStyledItemDelegate):
         color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
         band = QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height())
         painter.fillRect(band, color)
+        painter.restore()
 
     def sizeHint(self, option, index):
         opt = QStyleOptionViewItem(option)
-        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, 0)
+        parent = self.parent()
+        if parent is not None:
+            vp_width = parent.viewport().width()
+            if vp_width > 0:
+                opt.rect.setWidth(vp_width - _BAND_WIDTH - 2)
         return super().sizeHint(opt, index)
 
 
