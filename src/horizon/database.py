@@ -22,6 +22,13 @@ CREATE TABLE IF NOT EXISTS tasks (
     bucket      TEXT    NOT NULL DEFAULT 'Inbox'
                 CHECK(bucket IN ('Inbox','Today','On hold','Completed'))
 );
+
+CREATE TABLE IF NOT EXISTS subtasks (
+    id        INTEGER PRIMARY KEY AUTOINCREMENT,
+    task_id   INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+    title     TEXT    NOT NULL CHECK(length(title) <= 255),
+    completed INTEGER NOT NULL DEFAULT 0
+);
 """
 
 _MIGRATIONS = [

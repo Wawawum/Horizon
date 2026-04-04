@@ -144,3 +144,45 @@ class TaskRepository:
             'UPDATE tasks SET "order" = ? WHERE id = ?', (row_a["order"], task_id_b)
         )
         self._db.conn.commit()
+
+
+@dataclass
+class Subtask:
+    id:        int | None
+    task_id:   int
+    title:     str
+    completed: bool
+
+
+class SubtaskRepository:
+    def __init__(self, db: Database) -> None:
+        self._db = db
+
+    def create(self, task_id: int, title: str) -> "Subtask":
+        cur = self._db.conn.execute(
+            "INSERT INTO subtasks (task_id, title, completed) VALUES (?, ?, 0)",
+            (task_id, title),
+        )
+        self._db.conn.commit()
+        return Subtask(id=cur.lastrowid, task_id=task_id, title=title, completed=False)
+
+    def list_for_task(self, task_id: int) -> "list[Subtask]":
+        rows = self._db.conn.execute(
+            "SELECT id, task_id, title, completed FROM subtasks WHERE task_id = ? ORDER BY id",
+            (task_id,),
+        ).fetchall()
+        return [
+            Subtask(id=r["id"], task_id=r["task_id"], title=r["title"], completed=bool(r["completed"]))
+            for r in rows
+        ]
+
+    def set_completed(self, subtask_id: int, completed: bool) -> None:
+        self._db.conn.execute(
+            "UPDATE subtasks SET completed = ? WHERE id = ?",
+            (1 if completed else 0, subtask_id),
+        )
+        self._db.conn.commit()
+
+    def delete(self, subtask_id: int) -> None:
+        self._db.conn.execute("DELETE FROM subtasks WHERE id = ?", (subtask_id,))
+        self._db.conn.commit()

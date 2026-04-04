@@ -3,7 +3,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
 from horizon.database import Database
 from horizon.project import ProjectRepository
-from horizon.task import TaskRepository
+from horizon.task import SubtaskRepository, TaskRepository
 from horizon.widgets import HomeWidget, ProjectDetailWidget, ProjectListWidget
 
 
@@ -16,6 +16,7 @@ class MainWindow(QMainWindow):
 
         repo = ProjectRepository(db)
         task_repo = TaskRepository(db)
+        subtask_repo = SubtaskRepository(db)
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -24,10 +25,10 @@ class MainWindow(QMainWindow):
 
         self._right_stack = QStackedWidget()
 
-        self._home_widget = HomeWidget(task_repo)
+        self._home_widget = HomeWidget(task_repo, subtask_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, repo)
+        self._project_detail = ProjectDetailWidget(task_repo, repo, subtask_repo)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         splitter.addWidget(self._right_stack)

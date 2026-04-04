@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.project import ProjectRepository
-from horizon.task import TaskBucket, TaskPriority, TaskRepository, TaskState
+from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 
 
 class ProjectListWidget(QWidget):
@@ -252,9 +252,10 @@ class KanbanBoardWidget(QWidget):
 
 
 class HomeWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
+        self._subtask_repo = subtask_repo
 
         self._board = KanbanBoardWidget()
         self._board.task_edit_requested.connect(self._on_task_edit_requested)
@@ -316,7 +317,7 @@ class HomeWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, parent=self)
+        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             task.title = dialog.title()
             task.description = dialog.description()
@@ -343,10 +344,11 @@ class HomeWidget(QWidget):
 
 
 class ProjectDetailWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
+        self._subtask_repo = subtask_repo
         self._current_project = None
         self._current_project_id: int | None = None
         self._desc_raw: str = ""
@@ -529,7 +531,7 @@ class ProjectDetailWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, parent=self)
+        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             task.title = dialog.title()
             task.description = dialog.description()
@@ -543,7 +545,7 @@ class ProjectDetailWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, parent=self)
+        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
             task.title = dialog.title()
             task.description = dialog.description()

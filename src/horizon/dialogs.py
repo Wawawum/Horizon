@@ -1,19 +1,23 @@
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QTimer, Qt
 from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
+    QCheckBox,
     QComboBox,
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QHBoxLayout,
     QLabel,
     QLineEdit,
     QMessageBox,
     QPlainTextEdit,
+    QPushButton,
     QTextEdit,
     QVBoxLayout,
+    QWidget,
 )
 
-from horizon.task import TaskBucket, TaskPriority, TaskState
+from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
 
 
 class NewProjectDialog(QDialog):
@@ -129,10 +133,13 @@ class NewTaskDialog(QDialog):
 
 
 class TaskDetailDialog(QDialog):
-    def __init__(self, task, parent=None) -> None:
+    def __init__(self, task, subtask_repo: SubtaskRepository, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Task Details")
         self.setMinimumWidth(400)
+
+        self._task_id: int = task.id
+        self._subtask_repo = subtask_repo
 
         self._title_edit = QLineEdit(task.title)
         self._title_edit.setMaxLength(255)
@@ -163,6 +170,20 @@ class TaskDetailDialog(QDialog):
             self._bucket_combo.addItem(member.value, userData=member)
         self._bucket_combo.setCurrentIndex(self._bucket_combo.findData(task.bucket))
 
+        # --- Sub-tasks section ---
+        subtasks_header = QHBoxLayout()
+        subtasks_header.addWidget(QLabel("Sub-tasks"))
+        subtasks_header.addStretch()
+        add_subtask_btn = QPushButton("+")
+        add_subtask_btn.setFixedWidth(28)
+        add_subtask_btn.clicked.connect(self._show_new_subtask_input)
+        subtasks_header.addWidget(add_subtask_btn)
+
+        self._subtasks_container = QWidget()
+        self._subtasks_layout = QVBoxLayout(self._subtasks_container)
+        self._subtasks_layout.setContentsMargins(0, 0, 0, 0)
+        self._subtasks_layout.setSpacing(2)
+
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -181,9 +202,81 @@ class TaskDetailDialog(QDialog):
         layout.addWidget(self._priority_combo)
         layout.addWidget(QLabel("Bucket"))
         layout.addWidget(self._bucket_combo)
+        layout.addLayout(subtasks_header)
+        layout.addWidget(self._subtasks_container)
         layout.addWidget(btn_box)
 
+        self._load_subtasks()
+
+    def _load_subtasks(self) -> None:
+        while self._subtasks_layout.count():
+            item = self._subtasks_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+        for subtask in self._subtask_repo.list_for_task(self._task_id):
+            subtask_id = subtask.id
+
+            row = QWidget()
+            row_layout = QHBoxLayout(row)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+
+            cb = QCheckBox(subtask.title)
+            cb.setChecked(subtask.completed)
+            cb.stateChanged.connect(
+                lambda state, sid=subtask_id: self._subtask_repo.set_completed(
+                    sid, state == Qt.CheckState.Checked.value
+                )
+            )
+            row_layout.addWidget(cb)
+            row_layout.addStretch()
+
+            del_btn = QPushButton("Delete")
+            del_btn.setVisible(False)
+            del_btn.clicked.connect(lambda checked, sid=subtask_id: self._delete_subtask(sid))
+            row_layout.addWidget(del_btn)
+
+            row._del_btn = del_btn  # type: ignore[attr-defined]
+            row.installEventFilter(self)
+
+            self._subtasks_layout.addWidget(row)
+
+    def _delete_subtask(self, subtask_id: int) -> None:
+        self._subtask_repo.delete(subtask_id)
+        self._load_subtasks()
+
+    def _show_new_subtask_input(self) -> None:
+        edit = QLineEdit()
+        edit.setMaxLength(255)
+        edit.setPlaceholderText("New sub-task…")
+        edit.installEventFilter(self)
+        self._subtasks_layout.addWidget(edit)
+        QTimer.singleShot(0, edit.setFocus)
+
+    def _commit_subtask_input(self, edit: QLineEdit, create_next: bool) -> None:
+        if edit.property("_committed"):
+            return
+        edit.setProperty("_committed", True)
+        title = edit.text().strip()
+        if title:
+            self._subtask_repo.create(self._task_id, title)
+        self._load_subtasks()
+        if create_next:
+            self._show_new_subtask_input()
+
     def eventFilter(self, obj, event) -> bool:
+        del_btn = getattr(obj, "_del_btn", None)
+        if del_btn is not None:
+            if event.type() == QEvent.Type.Enter:
+                del_btn.setVisible(True)
+            elif event.type() == QEvent.Type.Leave:
+                del_btn.setVisible(False)
+        if isinstance(obj, QLineEdit) and obj is not self._title_edit:
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._commit_subtask_input(obj, create_next=True)
+                    return True  # consume — prevents Enter from triggering OK
+            elif event.type() == QEvent.Type.FocusOut:
+                self._commit_subtask_input(obj, create_next=False)
         if obj is self._desc_edit.viewport():
             if event.type() == QEvent.Type.MouseButtonPress and self._desc_edit.isReadOnly():
                 self._enter_desc_edit()
