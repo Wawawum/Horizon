@@ -196,6 +196,7 @@ class KanbanBoardWidget(QWidget):
             col_layout.addWidget(header)
 
             list_widget = KanbanColumnWidget(bucket)
+            list_widget.setSpacing(3)
             list_widget.setWordWrap(True)
             list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
