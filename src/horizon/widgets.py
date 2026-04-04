@@ -164,6 +164,7 @@ class KanbanColumnWidget(QListWidget):
 class KanbanBoardWidget(QWidget):
     task_edit_requested = Signal(int)  # emits task_id
     task_bucket_changed = Signal(int, object)  # (task_id, new_bucket: TaskBucket)
+    task_selected = Signal(int)  # emits task_id
 
     COLUMNS = [
         TaskBucket.Inbox,
@@ -175,6 +176,7 @@ class KanbanBoardWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._columns: dict[TaskBucket, QListWidget] = {}
+        self._selected_task_id: int | None = None
 
         board = QWidget()
         board_layout = QHBoxLayout(board)
@@ -198,6 +200,7 @@ class KanbanBoardWidget(QWidget):
             list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
             list_widget.task_dropped.connect(self._on_task_dropped)
+            list_widget.currentItemChanged.connect(self._on_column_selection_changed)
             col_layout.addWidget(list_widget, stretch=1)
 
             self._columns[bucket] = list_widget
@@ -212,6 +215,7 @@ class KanbanBoardWidget(QWidget):
         root_layout.addWidget(scroll)
 
     def populate(self, tasks: list) -> None:
+        self._selected_task_id = None
         for lw in self._columns.values():
             lw.clear()
         for task in tasks:
@@ -219,6 +223,25 @@ class KanbanBoardWidget(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, task.id)
             item.setData(_PRIORITY_ROLE, task.priority)
             self._columns[task.bucket].addItem(item)
+
+    def _on_column_selection_changed(
+        self, current: QListWidgetItem | None, _previous
+    ) -> None:
+        sender_widget = self.sender()
+        for lw in self._columns.values():
+            if lw is not sender_widget:
+                lw.blockSignals(True)
+                lw.clearSelection()
+                lw.setCurrentItem(None)
+                lw.blockSignals(False)
+        if current is None:
+            self._selected_task_id = None
+            return
+        self._selected_task_id = current.data(Qt.ItemDataRole.UserRole)
+        self.task_selected.emit(self._selected_task_id)
+
+    def selected_task_id(self) -> int | None:
+        return self._selected_task_id
 
     def _on_item_double_clicked(self, item: QListWidgetItem) -> None:
         self.task_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
@@ -242,14 +265,51 @@ class HomeWidget(QWidget):
         font.setBold(True)
         title.setFont(font)
 
+        self._move_up_btn = QPushButton("↑")
+        self._move_up_btn.setFixedWidth(28)
+        self._move_up_btn.clicked.connect(self._on_move_up)
+
+        self._move_down_btn = QPushButton("↓")
+        self._move_down_btn.setFixedWidth(28)
+        self._move_down_btn.clicked.connect(self._on_move_down)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(self._move_up_btn)
+        header_layout.addWidget(self._move_down_btn)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
-        layout.addWidget(title)
+        layout.addLayout(header_layout)
         layout.addWidget(self._board, stretch=1)
 
     def load(self) -> None:
         self._board.populate(self._task_repo.list_all())
+
+    def _on_move_up(self) -> None:
+        self._on_move(-1)
+
+    def _on_move_down(self) -> None:
+        self._on_move(1)
+
+    def _on_move(self, direction: int) -> None:
+        task_id = self._board.selected_task_id()
+        if task_id is None:
+            return
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        bucket_tasks = [t for t in self._task_repo.list_all() if t.bucket == task.bucket]
+        idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
+        if idx is None:
+            return
+        neighbor_idx = idx + direction
+        if not (0 <= neighbor_idx < len(bucket_tasks)):
+            return
+        self._task_repo.swap_order(task_id, bucket_tasks[neighbor_idx].id)
+        self.load()
 
     def _on_task_edit_requested(self, task_id: int) -> None:
         task = self._task_repo.get(task_id)
@@ -349,9 +409,20 @@ class ProjectDetailWidget(QWidget):
         self._view_selector.currentIndexChanged.connect(self._on_view_changed)
         tasks_header.addWidget(self._view_selector)
 
+        self._move_up_btn = QPushButton("↑")
+        self._move_up_btn.setFixedWidth(28)
+        self._move_up_btn.clicked.connect(self._on_move_up)
+
+        self._move_down_btn = QPushButton("↓")
+        self._move_down_btn.setFixedWidth(28)
+        self._move_down_btn.clicked.connect(self._on_move_down)
+
         new_task_btn = QPushButton("+")
         new_task_btn.setFixedWidth(28)
         new_task_btn.clicked.connect(self._on_new_task)
+
+        tasks_header.addWidget(self._move_up_btn)
+        tasks_header.addWidget(self._move_down_btn)
         tasks_header.addWidget(new_task_btn)
         content_layout.addLayout(tasks_header)
 
@@ -480,6 +551,40 @@ class ProjectDetailWidget(QWidget):
             return
         task.bucket = new_bucket
         self._task_repo.update(task)
+        self._load_tasks(self._current_project_id)
+
+    def _on_move_up(self) -> None:
+        self._on_move(-1)
+
+    def _on_move_down(self) -> None:
+        self._on_move(1)
+
+    def _on_move(self, direction: int) -> None:
+        if self._current_project_id is None:
+            return
+        if self._task_view_stack.currentIndex() == 0:  # List view
+            row = self._task_table.currentRow()
+            if row < 0:
+                return
+            task_id = self._task_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        else:  # Board view
+            task_id = self._kanban_board.selected_task_id()
+            if task_id is None:
+                return
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        bucket_tasks = [
+            t for t in self._task_repo.list_for_project(self._current_project_id)
+            if t.bucket == task.bucket
+        ]
+        idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
+        if idx is None:
+            return
+        neighbor_idx = idx + direction
+        if not (0 <= neighbor_idx < len(bucket_tasks)):
+            return
+        self._task_repo.swap_order(task_id, bucket_tasks[neighbor_idx].id)
         self._load_tasks(self._current_project_id)
 
     def _on_new_task(self) -> None:

@@ -27,6 +27,8 @@ CREATE TABLE IF NOT EXISTS tasks (
 _MIGRATIONS = [
     "ALTER TABLE tasks ADD COLUMN bucket TEXT NOT NULL DEFAULT 'Inbox'"
     " CHECK(bucket IN ('Inbox','Today','On hold','Completed'))",
+    'ALTER TABLE tasks ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
+    'UPDATE tasks SET "order" = id * 1000 WHERE "order" = 0',
 ]
 
 
