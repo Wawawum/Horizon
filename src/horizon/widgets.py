@@ -26,7 +26,7 @@ from PySide6.QtWidgets import (
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.project import ProjectRepository
-from horizon.task import TaskBucket, TaskPriority, TaskRepository
+from horizon.task import TaskBucket, TaskPriority, TaskRepository, TaskState
 
 
 class ProjectListWidget(QWidget):
@@ -329,7 +329,14 @@ class HomeWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
+        prev_bucket = task.bucket
         task.bucket = new_bucket
+        if new_bucket == TaskBucket.Completed:
+            task.state = TaskState.Completed
+        elif new_bucket == TaskBucket.On_Hold:
+            task.state = TaskState.On_Hold
+        elif new_bucket in (TaskBucket.Inbox, TaskBucket.Today) and prev_bucket in (TaskBucket.Completed, TaskBucket.On_Hold):
+            task.state = TaskState.In_Progress
         self._task_repo.update(task)
         self.load()
 
@@ -549,7 +556,14 @@ class ProjectDetailWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
+        prev_bucket = task.bucket
         task.bucket = new_bucket
+        if new_bucket == TaskBucket.Completed:
+            task.state = TaskState.Completed
+        elif new_bucket == TaskBucket.On_Hold:
+            task.state = TaskState.On_Hold
+        elif new_bucket in (TaskBucket.Inbox, TaskBucket.Today) and prev_bucket in (TaskBucket.Completed, TaskBucket.On_Hold):
+            task.state = TaskState.In_Progress
         self._task_repo.update(task)
         self._load_tasks(self._current_project_id)
 
