@@ -64,8 +64,9 @@ class NoteRepository:
 
     def list_all(self, archived_only: bool = False) -> list["Note"]:
         rows = self._db.conn.execute(
-            "SELECT id, project_id, title, body, dt, archived FROM notes"
-            " WHERE archived = ? ORDER BY dt DESC",
+            "SELECT notes.id, notes.project_id, notes.title, notes.body, notes.dt, notes.archived"
+            " FROM notes JOIN projects ON notes.project_id = projects.id"
+            " WHERE notes.archived = ? AND projects.archived = 0 ORDER BY notes.dt DESC",
             (int(archived_only),),
         ).fetchall()
         return [

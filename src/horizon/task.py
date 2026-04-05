@@ -119,8 +119,10 @@ class TaskRepository:
 
     def list_all(self, archived_only: bool = False) -> list[Task]:
         rows = self._db.conn.execute(
-            'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
-            ' FROM tasks WHERE archived = ? ORDER BY "order"',
+            'SELECT tasks.id, tasks.project_id, tasks.title, tasks.description, tasks.state,'
+            ' tasks.priority, tasks.bucket, tasks."order", tasks.archived'
+            ' FROM tasks JOIN projects ON tasks.project_id = projects.id'
+            ' WHERE tasks.archived = ? AND projects.archived = 0 ORDER BY tasks."order"',
             (int(archived_only),),
         ).fetchall()
         return [
