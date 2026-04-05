@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QEvent, QTimer, QTime, QPointF, QThread
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -129,8 +129,9 @@ class ProjectListWidget(QWidget):
 
 
 _KANBAN_MIME = "application/x-horizon-task-id"
-_PRIORITY_ROLE = Qt.ItemDataRole.UserRole + 1
-_PROJECT_ROLE  = Qt.ItemDataRole.UserRole + 2
+_PRIORITY_ROLE  = Qt.ItemDataRole.UserRole + 1
+_PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
+_SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
 _TILE_BG     = QColor("#ffffff")
@@ -168,32 +169,10 @@ class KanbanCardDelegate(QStyledItemDelegate):
         # clip to tile so selection highlight respects rounded corners
         painter.setClipPath(path)
 
-        project_name = index.data(_PROJECT_ROLE)
-        proj_line_h = QFontMetrics(self._project_font(option.font)).height() if project_name else 0
-        opt = QStyleOptionViewItem(option)
-        opt.rect = tile_rect.adjusted(_BAND_WIDTH + 2, 0, 0, -proj_line_h)
-        palette = QPalette(opt.palette)
-        palette.setColor(QPalette.ColorRole.Text, QColor("#1a1a1a"))
-        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#1a1a1a"))
-        opt.palette = palette
-        super().paint(painter, opt, index)
-
         priority = index.data(_PRIORITY_ROLE)
         color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
         band = QRect(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height())
         painter.fillRect(band, color)
-
-        if project_name:
-            proj_font = self._project_font(option.font)
-            painter.setFont(proj_font)
-            painter.setPen(QColor("#555555"))
-            proj_rect = QRect(
-                tile_rect.x() + _BAND_WIDTH + 4,
-                tile_rect.bottom() - proj_line_h,
-                tile_rect.width() - _BAND_WIDTH - 6,
-                proj_line_h,
-            )
-            painter.drawText(proj_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, project_name)
 
         # border drawn outside clip so the stroke isn't cut off
         painter.restore()
@@ -205,18 +184,79 @@ class KanbanCardDelegate(QStyledItemDelegate):
         painter.restore()
 
     def sizeHint(self, option, index):
-        opt = QStyleOptionViewItem(option)
-        parent = self.parent()
-        if parent is not None:
-            vp_width = parent.viewport().width()
-            if vp_width > 0:
-                opt.rect.setWidth(vp_width - _BAND_WIDTH - 2)
-        size = super().sizeHint(opt, index)
-        project_name = index.data(_PROJECT_ROLE)
-        if project_name:
-            size.setHeight(size.height() + QFontMetrics(self._project_font(option.font)).height())
+        size = super().sizeHint(option, index)
         size.setHeight(size.height() + _TILE_MARGIN * 2)
         return size
+
+
+class KanbanCardWidget(QWidget):
+    def __init__(self, task, subtasks, project_name, subtask_repo, parent=None) -> None:
+        super().__init__(parent)
+        self._priority = task.priority
+        # Force dark text on all children regardless of the app theme
+        self.setStyleSheet("""
+            QLabel    { color: #1a1a1a; background: transparent; }
+            QCheckBox { color: #1a1a1a; }
+        """)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(_BAND_WIDTH + 6, 4, 6, 4)
+        layout.setSpacing(2)
+
+        title = QLabel(task.title)
+        title.setWordWrap(True)
+        layout.addWidget(title)
+
+        for subtask in subtasks:
+            cb = QCheckBox(subtask.title)
+            cb.setChecked(subtask.completed)
+            # Give the checkbox a light palette so the system style draws a
+            # visible indicator (border + checkmark) on our white card background.
+            cb.setStyleSheet(
+                "QCheckBox { color: #1a1a1a; }"
+                " QCheckBox::indicator { border: 1px solid #888888; border-radius: 2px; }"
+                " QCheckBox::indicator::checked { background-color: #2196f3; }"
+            )
+            cb.stateChanged.connect(
+                lambda state, sid=subtask.id: subtask_repo.set_completed(
+                    sid, state == Qt.CheckState.Checked.value
+                )
+            )
+            layout.addWidget(cb)
+
+        if project_name:
+            proj_label = QLabel(project_name)
+            proj_font = QFont(proj_label.font())
+            proj_font.setItalic(True)
+            proj_font.setPointSize(max(proj_font.pointSize() - 2, 7))
+            proj_label.setFont(proj_font)
+            proj_label.setStyleSheet("color: #555555; background: transparent;")
+            layout.addWidget(proj_label)
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        tile_rect  = self.rect().adjusted(_TILE_MARGIN, _TILE_MARGIN, -_TILE_MARGIN, -_TILE_MARGIN)
+        tile_rectf = QRectF(tile_rect)
+
+        # White rounded background
+        path = QPainterPath()
+        path.addRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(_TILE_BG))
+        painter.drawPath(path)
+
+        # Priority band clipped to rounded rect
+        painter.setClipPath(path)
+        color = _PRIORITY_COLOR.get(self._priority, QColor("#9e9e9e"))
+        painter.fillRect(QRectF(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height()), color)
+        painter.setClipping(False)
+
+        # Border
+        painter.setPen(QPen(_TILE_BORDER, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
 
 
 class KanbanColumnWidget(QListWidget):
@@ -325,7 +365,6 @@ class KanbanBoardWidget(QWidget):
             list_widget = KanbanColumnWidget(bucket)
             list_widget.setSpacing(5)
             list_widget.setWordWrap(True)
-            list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
             list_widget.task_dropped.connect(self._on_task_dropped)
             list_widget.tasks_reordered.connect(self._on_tasks_reordered)
@@ -343,17 +382,22 @@ class KanbanBoardWidget(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.addWidget(scroll)
 
-    def populate(self, tasks: list, project_names: dict | None = None) -> None:
+    def populate(self, tasks: list, project_names: dict | None = None, subtask_repo=None) -> None:
         self._selected_task_id = None
         for lw in self._columns.values():
             lw.clear()
         for task in tasks:
-            item = QListWidgetItem(task.title)
+            subtasks = subtask_repo.list_for_task(task.id) if subtask_repo else []
+            project_name = project_names.get(task.project_id, "") if project_names else ""
+            card = KanbanCardWidget(task, subtasks, project_name, subtask_repo)
+            item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, task.id)
             item.setData(_PRIORITY_ROLE, task.priority)
-            if project_names:
-                item.setData(_PROJECT_ROLE, project_names.get(task.project_id, ""))
-            self._columns[task.bucket].addItem(item)
+            item.setData(_PROJECT_ROLE, project_name)
+            item.setSizeHint(QSize(0, card.sizeHint().height() + _TILE_MARGIN * 2))
+            column = self._columns[task.bucket]
+            column.addItem(item)
+            column.setItemWidget(item, card)
 
     def _on_column_selection_changed(
         self, current: QListWidgetItem | None, _previous
@@ -428,7 +472,7 @@ class HomeWidget(QWidget):
 
     def load(self) -> None:
         project_names = {p.id: p.name for p in self._project_repo.list_all()}
-        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names)
+        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names, subtask_repo=self._subtask_repo)
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
@@ -734,7 +778,7 @@ class ProjectDetailWidget(QWidget):
     def _load_tasks(self, project_id: int) -> None:
         tasks = [t for t in self._task_repo.list_for_project(project_id) if not t.archived]
         self._populate_table(tasks)
-        self._kanban_board.populate(tasks)
+        self._kanban_board.populate(tasks, subtask_repo=self._subtask_repo)
 
     def _populate_table(self, tasks: list) -> None:
         self._task_table.setRowCount(0)
