@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QEvent, QTimer, QTime, QPointF
-from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QTextCursor, QPainter, QPen, QBrush
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QEvent, QTimer, QTime, QPointF
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -82,7 +82,11 @@ class ProjectListWidget(QWidget):
 _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE  = Qt.ItemDataRole.UserRole + 2
-_BAND_WIDTH = 5
+_BAND_WIDTH  = 5
+_TILE_RADIUS = 4
+_TILE_BG     = QColor("#ffffff")
+_TILE_BORDER = QColor("#cccccc")
+_TILE_MARGIN = 2
 
 _PRIORITY_COLOR: dict[TaskPriority, QColor] = {
     TaskPriority.Low:    QColor("#9e9e9e"),
@@ -100,26 +104,55 @@ class KanbanCardDelegate(QStyledItemDelegate):
 
     def paint(self, painter, option, index) -> None:
         painter.save()
-        painter.setClipRect(option.rect)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        tile_rect  = option.rect.adjusted(_TILE_MARGIN, _TILE_MARGIN, -_TILE_MARGIN, -_TILE_MARGIN)
+        tile_rectf = QRectF(tile_rect)
+
+        # background
+        path = QPainterPath()
+        path.addRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(_TILE_BG))
+        painter.drawPath(path)
+
+        # clip to tile so selection highlight respects rounded corners
+        painter.setClipPath(path)
+
         project_name = index.data(_PROJECT_ROLE)
         proj_line_h = QFontMetrics(self._project_font(option.font)).height() if project_name else 0
         opt = QStyleOptionViewItem(option)
-        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, -proj_line_h)
+        opt.rect = tile_rect.adjusted(_BAND_WIDTH + 2, 0, 0, -proj_line_h)
+        palette = QPalette(opt.palette)
+        palette.setColor(QPalette.ColorRole.Text, QColor("#1a1a1a"))
+        palette.setColor(QPalette.ColorRole.HighlightedText, QColor("#1a1a1a"))
+        opt.palette = palette
         super().paint(painter, opt, index)
+
         priority = index.data(_PRIORITY_ROLE)
         color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
-        band = QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height())
+        band = QRect(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height())
         painter.fillRect(band, color)
+
         if project_name:
             proj_font = self._project_font(option.font)
             painter.setFont(proj_font)
+            painter.setPen(QColor("#555555"))
             proj_rect = QRect(
-                option.rect.x() + _BAND_WIDTH + 4,
-                option.rect.bottom() - proj_line_h,
-                option.rect.width() - _BAND_WIDTH - 6,
+                tile_rect.x() + _BAND_WIDTH + 4,
+                tile_rect.bottom() - proj_line_h,
+                tile_rect.width() - _BAND_WIDTH - 6,
                 proj_line_h,
             )
             painter.drawText(proj_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, project_name)
+
+        # border drawn outside clip so the stroke isn't cut off
+        painter.restore()
+        painter.save()
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.setPen(QPen(_TILE_BORDER, 1))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
         painter.restore()
 
     def sizeHint(self, option, index):
@@ -133,6 +166,7 @@ class KanbanCardDelegate(QStyledItemDelegate):
         project_name = index.data(_PROJECT_ROLE)
         if project_name:
             size.setHeight(size.height() + QFontMetrics(self._project_font(option.font)).height())
+        size.setHeight(size.height() + _TILE_MARGIN * 2)
         return size
 
 
@@ -240,7 +274,7 @@ class KanbanBoardWidget(QWidget):
             col_layout.addWidget(header)
 
             list_widget = KanbanColumnWidget(bucket)
-            list_widget.setSpacing(3)
+            list_widget.setSpacing(5)
             list_widget.setWordWrap(True)
             list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
