@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QEvent, QTimer, QTime, QPointF
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QEvent, QTimer, QTime, QPointF, QThread
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -27,6 +27,23 @@ from PySide6.QtWidgets import (
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
+
+from dataclasses import dataclass
+from datetime import datetime as _datetime
+
+try:
+    import win32com.client as _win32com
+    import pythoncom as _pythoncom
+    _OUTLOOK_AVAILABLE = True
+except ImportError:
+    _OUTLOOK_AVAILABLE = False
+
+
+@dataclass
+class CalendarMeeting:
+    start: _datetime
+    end: _datetime
+    subject: str
 
 
 class ProjectListWidget(QWidget):
@@ -733,6 +750,140 @@ class ProjectDetailWidget(QWidget):
             self._stack.setCurrentIndex(1)
 
 
+class OutlookFetchWorker(QThread):
+    meetings_ready = Signal(list)   # list[CalendarMeeting]
+    fetch_failed = Signal(str)
+
+    def run(self) -> None:
+        if not _OUTLOOK_AVAILABLE:
+            self.fetch_failed.emit("pywin32 not installed")
+            return
+        try:
+            self._fetch()
+        except Exception as exc:
+            self.fetch_failed.emit(str(exc))
+
+    def _fetch(self) -> None:
+        from datetime import date
+        _pythoncom.CoInitialize()
+        try:
+            outlook = _win32com.Dispatch("Outlook.Application")
+            ns = outlook.GetNamespace("MAPI")
+            cal = ns.GetDefaultFolder(9)  # olFolderCalendar
+            today = date.today()
+            start_str = today.strftime("%m/%d/%Y 12:00 AM")
+            end_str = today.strftime("%m/%d/%Y 11:59 PM")
+            items = cal.Items
+            items.IncludeRecurrences = True
+            items.Sort("[Start]")
+            restricted = items.Restrict(
+                f"[Start] >= '{start_str}' AND [Start] <= '{end_str}'"
+            )
+            meetings: list[CalendarMeeting] = []
+            for appt in restricted:
+                try:
+                    meetings.append(CalendarMeeting(
+                        start=appt.Start,
+                        end=appt.End,
+                        subject=appt.Subject or "(No title)",
+                    ))
+                except Exception:
+                    continue
+            self.meetings_ready.emit(meetings)
+        finally:
+            _pythoncom.CoUninitialize()
+
+
+class MeetingsWidget(QWidget):
+    _REFRESH_MS = 5 * 60 * 1000
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._worker: OutlookFetchWorker | None = None
+
+        outer = QVBoxLayout(self)
+        outer.setContentsMargins(0, 8, 0, 0)
+        outer.setSpacing(4)
+
+        header = QLabel("Today")
+        font = header.font()
+        font.setBold(True)
+        header.setFont(font)
+        outer.addWidget(header)
+
+        self._list_container = QWidget()
+        self._list_layout = QVBoxLayout(self._list_container)
+        self._list_layout.setContentsMargins(0, 0, 0, 0)
+        self._list_layout.setSpacing(2)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.Shape.NoFrame)
+        scroll.setWidget(self._list_container)
+        outer.addWidget(scroll, stretch=1)
+
+        self._status_label = QLabel()
+        self._status_label.setWordWrap(True)
+        self._status_label.hide()
+        outer.addWidget(self._status_label)
+
+        self._timer = QTimer(self)
+        self._timer.setInterval(self._REFRESH_MS)
+        self._timer.timeout.connect(self.refresh)
+        self._timer.start()
+        self.refresh()
+
+    def refresh(self) -> None:
+        if self._worker is not None and self._worker.isRunning():
+            return
+        self._worker = OutlookFetchWorker(self)
+        self._worker.meetings_ready.connect(self._on_meetings_ready)
+        self._worker.fetch_failed.connect(self._on_fetch_failed)
+        self._worker.start()
+
+    def _on_meetings_ready(self, meetings: list) -> None:
+        self._clear_list()
+        if not meetings:
+            self._show_status("No meetings today")
+            return
+        self._status_label.hide()
+        for meeting in meetings:
+            self._list_layout.addWidget(self._make_row(meeting))
+        self._list_layout.addStretch(1)
+
+    def _on_fetch_failed(self, message: str) -> None:
+        self._clear_list()
+        self._show_status(f"Outlook unavailable\n{message}")
+
+    def _clear_list(self) -> None:
+        while self._list_layout.count():
+            item = self._list_layout.takeAt(0)
+            if item.widget():
+                item.widget().deleteLater()
+
+    def _show_status(self, text: str) -> None:
+        self._status_label.setText(text)
+        self._status_label.show()
+
+    @staticmethod
+    def _make_row(meeting: CalendarMeeting) -> QWidget:
+        row = QWidget()
+        layout = QVBoxLayout(row)
+        layout.setContentsMargins(4, 3, 4, 3)
+        layout.setSpacing(1)
+        time_lbl = QLabel(
+            f"{meeting.start.strftime('%H:%M')} – {meeting.end.strftime('%H:%M')}"
+        )
+        f = time_lbl.font()
+        f.setPointSize(max(f.pointSize() - 1, 7))
+        time_lbl.setFont(f)
+        subj_lbl = QLabel(meeting.subject)
+        subj_lbl.setWordWrap(True)
+        layout.addWidget(time_lbl)
+        layout.addWidget(subj_lbl)
+        return row
+
+
 class AnalogClockWidget(QWidget):
     _SIZE = 160
 
@@ -823,4 +974,5 @@ class RightPanelWidget(QWidget):
 
         clock = AnalogClockWidget()
         layout.addWidget(clock, 0, Qt.AlignmentFlag.AlignHCenter)
-        layout.addStretch(1)
+        self._meetings = MeetingsWidget()
+        layout.addWidget(self._meetings, stretch=1)
