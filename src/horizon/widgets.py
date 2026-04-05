@@ -75,21 +75,33 @@ class ProjectListWidget(QWidget):
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_selection_changed)
 
+        self._show_archived_cb = QCheckBox("Show archived")
+        self._show_archived_cb.stateChanged.connect(self._load_projects)
+
         self._new_btn = QPushButton("\uff0b New Project")
         self._new_btn.clicked.connect(self._on_new_project)
+
+        bottom_layout = QHBoxLayout()
+        bottom_layout.setContentsMargins(4, 2, 4, 2)
+        bottom_layout.addWidget(self._show_archived_cb)
+        bottom_layout.addStretch()
+        bottom_layout.addWidget(self._new_btn)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addLayout(nav_layout)                 # Board + Notes buttons at top
         layout.addWidget(self._list, stretch=1)      # fills all available vertical space
-        layout.addWidget(self._new_btn, stretch=0)   # pinned to the bottom
+        layout.addLayout(bottom_layout)              # archived checkbox + new project button
 
         self._load_projects()
 
     def _load_projects(self) -> None:
+        show_archived = self._show_archived_cb.isChecked()
         self._list.clear()
         for project in self._repo.list_all():
+            if project.archived != show_archived:
+                continue
             item = QListWidgetItem(project.name)
             item.setData(Qt.ItemDataRole.UserRole, project.id)
             self._list.addItem(item)
@@ -501,7 +513,14 @@ class ProjectDetailWidget(QWidget):
         font.setBold(True)
         self._name_label.setFont(font)
         self._name_label.editingFinished.connect(self._save_name)
-        content_layout.addWidget(self._name_label)
+
+        self._archive_cb = QCheckBox("Archive")
+        self._archive_cb.stateChanged.connect(self._on_archive_changed)
+
+        name_header = QHBoxLayout()
+        name_header.addWidget(self._name_label, stretch=1)
+        name_header.addWidget(self._archive_cb)
+        content_layout.addLayout(name_header)
 
         # Separator
         sep1 = QFrame()
@@ -674,6 +693,13 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
         self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def _on_archive_changed(self) -> None:
+        if self._current_project is None:
+            return
+        self._current_project.archived = self._archive_cb.isChecked()
+        self._project_repo.update(self._current_project)
+        self.project_renamed.emit()
+
     def _save_name(self) -> None:
         if self._current_project is None:
             return
@@ -841,6 +867,7 @@ class ProjectDetailWidget(QWidget):
             self._current_project = project
             self._current_project_id = project.id
             self._name_label.setText(project.name)
+            self._archive_cb.setChecked(project.archived)
             self._desc_raw = project.description
             if self._desc_raw:
                 self._desc_text.setMarkdown(self._desc_raw)

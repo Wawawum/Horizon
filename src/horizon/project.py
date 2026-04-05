@@ -8,37 +8,53 @@ class Project:
     id: int | None
     name: str
     description: str
+    archived: bool = False
 
 
 class ProjectRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def create(self, name: str, description: str = "") -> Project:
+    def create(self, name: str, description: str = "", archived: bool = False) -> Project:
         cur = self._db.conn.execute(
-            "INSERT INTO projects (name, description) VALUES (?, ?)",
-            (name, description),
+            "INSERT INTO projects (name, description, archived) VALUES (?, ?, ?)",
+            (name, description, int(archived)),
         )
         self._db.conn.commit()
-        return Project(id=cur.lastrowid, name=name, description=description)
+        return Project(id=cur.lastrowid, name=name, description=description, archived=archived)
 
     def get(self, project_id: int) -> Project | None:
         row = self._db.conn.execute(
-            "SELECT id, name, description FROM projects WHERE id = ?",
+            "SELECT id, name, description, archived FROM projects WHERE id = ?",
             (project_id,),
         ).fetchone()
-        return Project(**row) if row else None
+        if row is None:
+            return None
+        return Project(
+            id=row["id"],
+            name=row["name"],
+            description=row["description"],
+            archived=bool(row["archived"]),
+        )
 
     def list_all(self) -> list[Project]:
         rows = self._db.conn.execute(
-            "SELECT id, name, description FROM projects ORDER BY id"
+            "SELECT id, name, description, archived FROM projects ORDER BY id"
         ).fetchall()
-        return [Project(**row) for row in rows]
+        return [
+            Project(
+                id=row["id"],
+                name=row["name"],
+                description=row["description"],
+                archived=bool(row["archived"]),
+            )
+            for row in rows
+        ]
 
     def update(self, project: Project) -> None:
         self._db.conn.execute(
-            "UPDATE projects SET name = ?, description = ? WHERE id = ?",
-            (project.name, project.description, project.id),
+            "UPDATE projects SET name = ?, description = ?, archived = ? WHERE id = ?",
+            (project.name, project.description, int(project.archived), project.id),
         )
         self._db.conn.commit()
 
