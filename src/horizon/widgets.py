@@ -1,5 +1,5 @@
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QEvent
-from PySide6.QtGui import QColor, QDrag, QTextCursor
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QEvent, QTimer, QTime, QPointF
+from PySide6.QtGui import QColor, QDrag, QTextCursor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -670,3 +670,96 @@ class ProjectDetailWidget(QWidget):
             self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
             self._load_tasks(project.id)
             self._stack.setCurrentIndex(1)
+
+
+class AnalogClockWidget(QWidget):
+    _SIZE = 160
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedSize(self._SIZE, self._SIZE)
+        timer = QTimer(self)
+        timer.timeout.connect(self.update)
+        timer.start(1000)
+
+    def paintEvent(self, event) -> None:
+        side = min(self.width(), self.height())
+        time = QTime.currentTime()
+
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+        painter.translate(self.width() / 2, self.height() / 2)
+        painter.scale(side / 200.0, side / 200.0)
+
+        # Clock face
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.drawEllipse(-90, -90, 180, 180)
+
+        # Outer ring
+        painter.setPen(QPen(QColor(80, 80, 80), 4))
+        painter.setBrush(Qt.BrushStyle.NoBrush)
+        painter.drawEllipse(-90, -90, 180, 180)
+
+        # Hour tick marks
+        painter.setPen(QPen(QColor(60, 60, 60), 3))
+        for i in range(12):
+            painter.drawLine(QPointF(0, -76), QPointF(0, -90))
+            painter.rotate(30)
+
+        # Minute tick marks
+        painter.setPen(QPen(QColor(140, 140, 140), 1))
+        for i in range(60):
+            if i % 5 != 0:
+                painter.drawLine(QPointF(0, -82), QPointF(0, -90))
+            painter.rotate(6)
+
+        # Hour hand
+        hour_angle = 30.0 * time.hour() + 0.5 * time.minute()
+        painter.save()
+        painter.rotate(hour_angle)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.drawConvexPolygon([
+            QPointF(-5, 10), QPointF(5, 10),
+            QPointF(3, -50), QPointF(-3, -50),
+        ])
+        painter.restore()
+
+        # Minute hand
+        minute_angle = 6.0 * time.minute() + 0.1 * time.second()
+        painter.save()
+        painter.rotate(minute_angle)
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.drawConvexPolygon([
+            QPointF(-4, 10), QPointF(4, 10),
+            QPointF(2, -70), QPointF(-2, -70),
+        ])
+        painter.restore()
+
+        # Second hand
+        second_angle = 6.0 * time.second()
+        painter.save()
+        painter.rotate(second_angle)
+        painter.setPen(QPen(QColor(200, 40, 40), 2))
+        painter.drawLine(QPointF(0, 15), QPointF(0, -72))
+        painter.restore()
+
+        # Center dot
+        painter.setPen(Qt.PenStyle.NoPen)
+        painter.setBrush(QBrush(QColor(200, 40, 40)))
+        painter.drawEllipse(-4, -4, 8, 8)
+
+
+class RightPanelWidget(QWidget):
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setMinimumWidth(200)
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 12, 8, 8)
+        layout.setAlignment(Qt.AlignmentFlag.AlignTop)
+
+        clock = AnalogClockWidget()
+        layout.addWidget(clock, 0, Qt.AlignmentFlag.AlignHCenter)
+        layout.addStretch(1)
