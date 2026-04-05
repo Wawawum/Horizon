@@ -794,8 +794,100 @@ class OutlookFetchWorker(QThread):
             _pythoncom.CoUninitialize()
 
 
+class CalendarTimelineWidget(QWidget):
+    HOUR_HEIGHT = 60
+    LABEL_WIDTH = 44
+    START_HOUR = 7
+    END_HOUR = 21
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._meetings: list[CalendarMeeting] = []
+        self.setFixedHeight((self.END_HOUR - self.START_HOUR) * self.HOUR_HEIGHT)
+        self._repaint_timer = QTimer(self)
+        self._repaint_timer.setInterval(60 * 1000)
+        self._repaint_timer.timeout.connect(self.update)
+        self._repaint_timer.start()
+
+    def set_meetings(self, meetings: list[CalendarMeeting]) -> None:
+        self._meetings = meetings
+        self.update()
+
+    def paintEvent(self, event) -> None:
+        painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing)
+
+        w = self.width()
+        event_left = self.LABEL_WIDTH + 4
+        event_right = w - 2
+
+        painter.fillRect(self.rect(), QColor(18, 18, 18))
+
+        for hour in range(self.START_HOUR, self.END_HOUR + 1):
+            y = (hour - self.START_HOUR) * self.HOUR_HEIGHT
+            if hour == 0:
+                label = "12 AM"
+            elif hour < 12:
+                label = f"{hour} AM"
+            elif hour == 12:
+                label = "12 PM"
+            else:
+                label = f"{hour - 12} PM"
+
+            painter.setPen(QColor(130, 130, 130))
+            painter.drawText(
+                QRect(0, y - 7, self.LABEL_WIDTH - 4, 14),
+                Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
+                label,
+            )
+            painter.setPen(QPen(QColor(55, 55, 55), 1))
+            painter.drawLine(self.LABEL_WIDTH, y, w, y)
+
+            if hour < self.END_HOUR:
+                half_y = y + self.HOUR_HEIGHT // 2
+                painter.setPen(QPen(QColor(40, 40, 40), 1, Qt.PenStyle.DotLine))
+                painter.drawLine(self.LABEL_WIDTH, half_y, w, half_y)
+
+        for meeting in self._meetings:
+            start_frac = meeting.start.hour + meeting.start.minute / 60.0
+            end_frac = meeting.end.hour + meeting.end.minute / 60.0
+            y_top = max(0.0, (start_frac - self.START_HOUR) * self.HOUR_HEIGHT)
+            y_bot = min(
+                float((self.END_HOUR - self.START_HOUR) * self.HOUR_HEIGHT),
+                (end_frac - self.START_HOUR) * self.HOUR_HEIGHT,
+            )
+            if y_bot <= y_top + 2:
+                continue
+            rect = QRect(
+                int(event_left), int(y_top) + 1,
+                int(event_right - event_left), int(y_bot - y_top) - 2,
+            )
+            painter.fillRect(rect, QColor(150, 20, 20))
+            painter.setPen(QColor(255, 255, 255))
+            painter.drawText(
+                rect.adjusted(4, 3, -3, -3),
+                Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
+                meeting.subject,
+            )
+
+        now = QTime.currentTime()
+        current_frac = now.hour() + now.minute() / 60.0
+        if self.START_HOUR <= current_frac <= self.END_HOUR:
+            cy = int((current_frac - self.START_HOUR) * self.HOUR_HEIGHT)
+            painter.setPen(QPen(QColor(220, 220, 220), 1))
+            painter.drawLine(self.LABEL_WIDTH, cy, w, cy)
+            path = QPainterPath()
+            path.moveTo(self.LABEL_WIDTH - 1, cy - 5)
+            path.lineTo(self.LABEL_WIDTH + 5, cy)
+            path.lineTo(self.LABEL_WIDTH - 1, cy + 5)
+            path.closeSubpath()
+            painter.setPen(Qt.PenStyle.NoPen)
+            painter.setBrush(QBrush(QColor(220, 220, 220)))
+            painter.drawPath(path)
+
+
 class MeetingsWidget(QWidget):
-    _REFRESH_MS = 5 * 60 * 1000
+    _REFRESH_MS = 60 * 1000
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -811,16 +903,13 @@ class MeetingsWidget(QWidget):
         header.setFont(font)
         outer.addWidget(header)
 
-        self._list_container = QWidget()
-        self._list_layout = QVBoxLayout(self._list_container)
-        self._list_layout.setContentsMargins(0, 0, 0, 0)
-        self._list_layout.setSpacing(2)
-
-        scroll = QScrollArea()
-        scroll.setWidgetResizable(True)
-        scroll.setFrameShape(QFrame.Shape.NoFrame)
-        scroll.setWidget(self._list_container)
-        outer.addWidget(scroll, stretch=1)
+        self._timeline = CalendarTimelineWidget()
+        self._scroll = QScrollArea()
+        self._scroll.setWidgetResizable(True)
+        self._scroll.setFrameShape(QFrame.Shape.NoFrame)
+        self._scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        self._scroll.setWidget(self._timeline)
+        outer.addWidget(self._scroll, stretch=1)
 
         self._status_label = QLabel()
         self._status_label.setWordWrap(True)
@@ -842,46 +931,20 @@ class MeetingsWidget(QWidget):
         self._worker.start()
 
     def _on_meetings_ready(self, meetings: list) -> None:
-        self._clear_list()
-        if not meetings:
-            self._show_status("No meetings today")
-            return
         self._status_label.hide()
-        for meeting in meetings:
-            self._list_layout.addWidget(self._make_row(meeting))
-        self._list_layout.addStretch(1)
+        self._timeline.set_meetings(meetings)
+        QTimer.singleShot(0, self._scroll_to_now)
 
     def _on_fetch_failed(self, message: str) -> None:
-        self._clear_list()
-        self._show_status(f"Outlook unavailable\n{message}")
-
-    def _clear_list(self) -> None:
-        while self._list_layout.count():
-            item = self._list_layout.takeAt(0)
-            if item.widget():
-                item.widget().deleteLater()
-
-    def _show_status(self, text: str) -> None:
-        self._status_label.setText(text)
+        self._timeline.set_meetings([])
+        self._status_label.setText(f"Outlook unavailable\n{message}")
         self._status_label.show()
 
-    @staticmethod
-    def _make_row(meeting: CalendarMeeting) -> QWidget:
-        row = QWidget()
-        layout = QVBoxLayout(row)
-        layout.setContentsMargins(4, 3, 4, 3)
-        layout.setSpacing(1)
-        time_lbl = QLabel(
-            f"{meeting.start.strftime('%H:%M')} – {meeting.end.strftime('%H:%M')}"
-        )
-        f = time_lbl.font()
-        f.setPointSize(max(f.pointSize() - 1, 7))
-        time_lbl.setFont(f)
-        subj_lbl = QLabel(meeting.subject)
-        subj_lbl.setWordWrap(True)
-        layout.addWidget(time_lbl)
-        layout.addWidget(subj_lbl)
-        return row
+    def _scroll_to_now(self) -> None:
+        now = QTime.currentTime()
+        frac = now.hour() + now.minute() / 60.0
+        y = int((frac - CalendarTimelineWidget.START_HOUR) * CalendarTimelineWidget.HOUR_HEIGHT)
+        self._scroll.verticalScrollBar().setValue(max(0, y - 30))
 
 
 class AnalogClockWidget(QWidget):
