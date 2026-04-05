@@ -25,7 +25,7 @@ class MainWindow(QMainWindow):
 
         self._right_stack = QStackedWidget()
 
-        self._home_widget = HomeWidget(task_repo, subtask_repo)
+        self._home_widget = HomeWidget(task_repo, subtask_repo, repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
         self._project_detail = ProjectDetailWidget(task_repo, repo, subtask_repo)

@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QEvent, QTimer, QTime, QPointF
-from PySide6.QtGui import QColor, QDrag, QTextCursor, QPainter, QPen, QBrush
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QTextCursor, QPainter, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QComboBox,
@@ -81,6 +81,7 @@ class ProjectListWidget(QWidget):
 
 _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE = Qt.ItemDataRole.UserRole + 1
+_PROJECT_ROLE  = Qt.ItemDataRole.UserRole + 2
 _BAND_WIDTH = 5
 
 _PRIORITY_COLOR: dict[TaskPriority, QColor] = {
@@ -91,16 +92,34 @@ _PRIORITY_COLOR: dict[TaskPriority, QColor] = {
 
 
 class KanbanCardDelegate(QStyledItemDelegate):
+    def _project_font(self, base_font) -> QFont:
+        font = QFont(base_font)
+        font.setItalic(True)
+        font.setPointSize(max(base_font.pointSize() - 2, 7))
+        return font
+
     def paint(self, painter, option, index) -> None:
         painter.save()
         painter.setClipRect(option.rect)
+        project_name = index.data(_PROJECT_ROLE)
+        proj_line_h = QFontMetrics(self._project_font(option.font)).height() if project_name else 0
         opt = QStyleOptionViewItem(option)
-        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, 0)
+        opt.rect = option.rect.adjusted(_BAND_WIDTH + 2, 0, 0, -proj_line_h)
         super().paint(painter, opt, index)
         priority = index.data(_PRIORITY_ROLE)
         color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
         band = QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height())
         painter.fillRect(band, color)
+        if project_name:
+            proj_font = self._project_font(option.font)
+            painter.setFont(proj_font)
+            proj_rect = QRect(
+                option.rect.x() + _BAND_WIDTH + 4,
+                option.rect.bottom() - proj_line_h,
+                option.rect.width() - _BAND_WIDTH - 6,
+                proj_line_h,
+            )
+            painter.drawText(proj_rect, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, project_name)
         painter.restore()
 
     def sizeHint(self, option, index):
@@ -110,7 +129,11 @@ class KanbanCardDelegate(QStyledItemDelegate):
             vp_width = parent.viewport().width()
             if vp_width > 0:
                 opt.rect.setWidth(vp_width - _BAND_WIDTH - 2)
-        return super().sizeHint(opt, index)
+        size = super().sizeHint(opt, index)
+        project_name = index.data(_PROJECT_ROLE)
+        if project_name:
+            size.setHeight(size.height() + QFontMetrics(self._project_font(option.font)).height())
+        return size
 
 
 class KanbanColumnWidget(QListWidget):
@@ -237,7 +260,7 @@ class KanbanBoardWidget(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.addWidget(scroll)
 
-    def populate(self, tasks: list) -> None:
+    def populate(self, tasks: list, project_names: dict | None = None) -> None:
         self._selected_task_id = None
         for lw in self._columns.values():
             lw.clear()
@@ -245,6 +268,8 @@ class KanbanBoardWidget(QWidget):
             item = QListWidgetItem(task.title)
             item.setData(Qt.ItemDataRole.UserRole, task.id)
             item.setData(_PRIORITY_ROLE, task.priority)
+            if project_names:
+                item.setData(_PROJECT_ROLE, project_names.get(task.project_id, ""))
             self._columns[task.bucket].addItem(item)
 
     def _on_column_selection_changed(
@@ -277,10 +302,11 @@ class KanbanBoardWidget(QWidget):
 
 
 class HomeWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._subtask_repo = subtask_repo
+        self._project_repo = project_repo
 
         self._board = KanbanBoardWidget()
         self._board.task_edit_requested.connect(self._on_task_edit_requested)
@@ -314,7 +340,8 @@ class HomeWidget(QWidget):
         layout.addWidget(self._board, stretch=1)
 
     def load(self) -> None:
-        self._board.populate(self._task_repo.list_all())
+        project_names = {p.id: p.name for p in self._project_repo.list_all()}
+        self._board.populate(self._task_repo.list_all(), project_names=project_names)
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
