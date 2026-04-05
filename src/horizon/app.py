@@ -53,6 +53,7 @@ class MainWindow(QMainWindow):
         self._project_list.notes_requested.connect(self._show_notes)
         self._notes_list.note_edit_requested.connect(self._show_note_detail)
         self._project_detail.note_edit_requested.connect(self._show_note_detail)
+        self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._show_notes)
 
         self._show_home()  # default view on startup

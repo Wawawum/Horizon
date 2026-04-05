@@ -466,6 +466,7 @@ class HomeWidget(QWidget):
 
 class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
+    project_renamed = Signal()
 
     def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, parent=None) -> None:
         super().__init__(parent)
@@ -487,13 +488,14 @@ class ProjectDetailWidget(QWidget):
         content_layout.setContentsMargins(16, 16, 16, 16)
         content_layout.setSpacing(8)
 
-        # Name header
-        self._name_label = QLabel()
+        # Name header (inline-editable)
+        self._name_label = QLineEdit()
+        self._name_label.setFrame(False)
         font = self._name_label.font()
         font.setPointSize(font.pointSize() + 4)
         font.setBold(True)
         self._name_label.setFont(font)
-        self._name_label.setWordWrap(True)
+        self._name_label.editingFinished.connect(self._save_name)
         content_layout.addWidget(self._name_label)
 
         # Separator
@@ -666,6 +668,19 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.setReadOnly(True)
         self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
         self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+
+    def _save_name(self) -> None:
+        if self._current_project is None:
+            return
+        new_name = self._name_label.text().strip()
+        if not new_name:
+            self._name_label.setText(self._current_project.name)
+            return
+        if new_name == self._current_project.name:
+            return
+        self._current_project.name = new_name
+        self._project_repo.update(self._current_project)
+        self.project_renamed.emit()
 
     def _on_desc_toggled(self, expanded: bool) -> None:
         self._desc_text.setVisible(expanded)
