@@ -196,6 +196,13 @@ class TaskDetailDialog(QDialog):
 
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.setChecked(task.archived)
+        self._archive_cb.stateChanged.connect(self._on_archive_changed)
+
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setStyleSheet("color: white; background-color: red;")
+        self._delete_btn.setVisible(task.archived)
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+        self._deleted = False
 
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -218,7 +225,11 @@ class TaskDetailDialog(QDialog):
         layout.addLayout(subtasks_header)
         layout.addWidget(self._subtask_list)
         layout.addWidget(self._new_subtask_edit)
-        layout.addWidget(self._archive_cb)
+        archive_row = QHBoxLayout()
+        archive_row.addWidget(self._archive_cb)
+        archive_row.addWidget(self._delete_btn)
+        archive_row.addStretch()
+        layout.addLayout(archive_row)
         layout.addWidget(btn_box)
 
         self._load_subtasks()
@@ -348,3 +359,20 @@ class TaskDetailDialog(QDialog):
 
     def archived(self) -> bool:
         return self._archive_cb.isChecked()
+
+    def deleted(self) -> bool:
+        return self._deleted
+
+    def _on_archive_changed(self) -> None:
+        self._delete_btn.setVisible(self._archive_cb.isChecked())
+
+    def _on_delete_clicked(self) -> None:
+        answer = QMessageBox.question(
+            self,
+            "Delete Task",
+            f"Permanently delete \"{self._title_edit.text().strip()}\"?\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._deleted = True
+            self.accept()

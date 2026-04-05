@@ -454,13 +454,16 @@ class HomeWidget(QWidget):
             return
         dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            task.title = dialog.title()
-            task.description = dialog.description()
-            task.state = dialog.state()
-            task.priority = dialog.priority()
-            task.bucket = dialog.bucket()
-            task.archived = dialog.archived()
-            self._task_repo.update(task)
+            if dialog.deleted():
+                self._task_repo.delete(task.id)
+            else:
+                task.title = dialog.title()
+                task.description = dialog.description()
+                task.state = dialog.state()
+                task.priority = dialog.priority()
+                task.bucket = dialog.bucket()
+                task.archived = dialog.archived()
+                self._task_repo.update(task)
             self.load()
 
     def _on_bucket_changed(self, task_id: int, new_bucket) -> None:

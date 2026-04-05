@@ -92,6 +92,10 @@ class TaskRepository:
         )
         self._db.conn.commit()
 
+    def delete(self, task_id: int) -> None:
+        self._db.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self._db.conn.commit()
+
     def list_for_project(self, project_id: int) -> list[Task]:
         rows = self._db.conn.execute(
             'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
