@@ -42,6 +42,23 @@ class NoteRepository:
             dt=datetime.fromisoformat(row["dt"]),
         )
 
+    def list_all_for_project(self, project_id: int) -> list[Note]:
+        rows = self._db.conn.execute(
+            "SELECT id, project_id, title, body, dt FROM notes"
+            " WHERE project_id = ? ORDER BY dt DESC",
+            (project_id,),
+        ).fetchall()
+        return [
+            Note(
+                id=row["id"],
+                project_id=row["project_id"],
+                title=row["title"],
+                body=row["body"],
+                dt=datetime.fromisoformat(row["dt"]),
+            )
+            for row in rows
+        ]
+
     def list_all(self) -> list[Note]:
         rows = self._db.conn.execute(
             "SELECT id, project_id, title, body, dt FROM notes ORDER BY dt DESC"

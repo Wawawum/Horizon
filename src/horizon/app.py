@@ -30,7 +30,7 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
@@ -52,6 +52,7 @@ class MainWindow(QMainWindow):
         self._project_list.project_selected.connect(self._show_project)
         self._project_list.notes_requested.connect(self._show_notes)
         self._notes_list.note_edit_requested.connect(self._show_note_detail)
+        self._project_detail.note_edit_requested.connect(self._show_note_detail)
         self._note_detail.back_requested.connect(self._show_notes)
 
         self._show_home()  # default view on startup

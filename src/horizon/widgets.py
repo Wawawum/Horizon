@@ -14,6 +14,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QSplitter,
     QStackedWidget,
     QStyledItemDelegate,
     QStyleOptionViewItem,
@@ -463,11 +464,14 @@ class HomeWidget(QWidget):
 
 
 class ProjectDetailWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, parent=None) -> None:
+    note_edit_requested = Signal(int)  # emits note_id
+
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
         self._subtask_repo = subtask_repo
+        self._note_repo = note_repo
         self._current_project = None
         self._current_project_id: int | None = None
         self._desc_raw: str = ""
@@ -527,6 +531,12 @@ class ProjectDetailWidget(QWidget):
         sep2.setFrameShadow(QFrame.Shadow.Sunken)
         content_layout.addWidget(sep2)
 
+        # ── Tasks panel (left side of splitter) ──────────────────────────
+        tasks_panel = QWidget()
+        tasks_panel_layout = QVBoxLayout(tasks_panel)
+        tasks_panel_layout.setContentsMargins(0, 0, 0, 0)
+        tasks_panel_layout.setSpacing(4)
+
         # Tasks header row: label left, view selector + "+" button right
         tasks_header = QHBoxLayout()
         tasks_header.addWidget(QLabel("Tasks"))
@@ -553,7 +563,7 @@ class ProjectDetailWidget(QWidget):
         tasks_header.addWidget(self._move_up_btn)
         tasks_header.addWidget(self._move_down_btn)
         tasks_header.addWidget(new_task_btn)
-        content_layout.addLayout(tasks_header)
+        tasks_panel_layout.addLayout(tasks_header)
 
         # Task table
         self._task_table = QTableWidget()
@@ -578,7 +588,42 @@ class ProjectDetailWidget(QWidget):
         self._task_view_stack = QStackedWidget()
         self._task_view_stack.addWidget(self._task_table)
         self._task_view_stack.addWidget(self._kanban_board)
-        content_layout.addWidget(self._task_view_stack, stretch=1)
+        tasks_panel_layout.addWidget(self._task_view_stack, stretch=1)
+
+        # ── Notes panel (right side of splitter) ─────────────────────────
+        notes_panel = QWidget()
+        notes_panel_layout = QVBoxLayout(notes_panel)
+        notes_panel_layout.setContentsMargins(0, 0, 0, 0)
+        notes_panel_layout.setSpacing(4)
+
+        notes_header = QHBoxLayout()
+        notes_label = QLabel("Notes")
+        notes_header.addWidget(notes_label)
+        notes_header.addStretch()
+        new_note_btn = QPushButton("+")
+        new_note_btn.setFixedWidth(28)
+        new_note_btn.clicked.connect(self._on_new_note)
+        notes_header.addWidget(new_note_btn)
+        notes_panel_layout.addLayout(notes_header)
+
+        self._note_table = QTableWidget()
+        self._note_table.setColumnCount(2)
+        self._note_table.setHorizontalHeaderLabels(["Title", "Date"])
+        self._note_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._note_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._note_table.verticalHeader().setVisible(False)
+        self._note_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._note_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._note_table.cellDoubleClicked.connect(self._on_note_double_clicked)
+        notes_panel_layout.addWidget(self._note_table, stretch=1)
+
+        # ── Horizontal splitter holding both panels ───────────────────────
+        h_splitter = QSplitter(Qt.Orientation.Horizontal)
+        h_splitter.addWidget(tasks_panel)
+        h_splitter.addWidget(notes_panel)
+        h_splitter.setStretchFactor(0, 3)
+        h_splitter.setStretchFactor(1, 2)
+        content_layout.addWidget(h_splitter, stretch=1)
 
         # --- Stack ---
         self._stack = QStackedWidget()
@@ -742,6 +787,28 @@ class ProjectDetailWidget(QWidget):
             )
             self._load_tasks(self._current_project_id)
 
+    def _load_notes(self, project_id: int) -> None:
+        notes = self._note_repo.list_all_for_project(project_id)
+        self._note_table.setRowCount(len(notes))
+        for row, note in enumerate(notes):
+            title_item = QTableWidgetItem(note.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, note.id)
+            self._note_table.setItem(row, 0, title_item)
+            date_item = QTableWidgetItem(note.dt.strftime("%Y-%m-%d %H:%M"))
+            self._note_table.setItem(row, 1, date_item)
+
+    def _on_note_double_clicked(self, row: int, _col: int) -> None:
+        item = self._note_table.item(row, 0)
+        if item is not None:
+            self.note_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_new_note(self) -> None:
+        if self._current_project_id is None:
+            return
+        note = self._note_repo.create(project_id=self._current_project_id, title="New Note")
+        self._load_notes(self._current_project_id)
+        self.note_edit_requested.emit(note.id)
+
     def load_project(self, project) -> None:
         if project is None:
             self._current_project = None
@@ -759,6 +826,7 @@ class ProjectDetailWidget(QWidget):
             self._desc_text.setReadOnly(True)
             self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
             self._load_tasks(project.id)
+            self._load_notes(project.id)
             self._stack.setCurrentIndex(1)
 
 
