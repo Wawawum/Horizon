@@ -46,6 +46,7 @@ _MIGRATIONS = [
     'UPDATE tasks SET "order" = id * 1000 WHERE "order" = 0',
     'ALTER TABLE subtasks ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
     'UPDATE subtasks SET "order" = id * 10 WHERE "order" = 0',
+    "ALTER TABLE notes ADD COLUMN archived INTEGER NOT NULL DEFAULT 0",
 ]
 
 

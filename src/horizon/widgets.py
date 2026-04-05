@@ -2,6 +2,7 @@ from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QEv
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QCheckBox,
     QComboBox,
     QDialog,
     QFrame,
@@ -788,7 +789,7 @@ class ProjectDetailWidget(QWidget):
             self._load_tasks(self._current_project_id)
 
     def _load_notes(self, project_id: int) -> None:
-        notes = self._note_repo.list_all_for_project(project_id)
+        notes = [n for n in self._note_repo.list_all_for_project(project_id) if not n.archived]
         self._note_table.setRowCount(len(notes))
         for row, note in enumerate(notes):
             title_item = QTableWidgetItem(note.title)
@@ -1179,9 +1180,13 @@ class NotesListWidget(QWidget):
         new_btn = QPushButton("+ New Note")
         new_btn.clicked.connect(self._on_new_note)
 
+        self._show_archived_cb = QCheckBox("Show archived")
+        self._show_archived_cb.stateChanged.connect(self.load)
+
         header_layout = QHBoxLayout()
         header_layout.addWidget(title)
         header_layout.addStretch()
+        header_layout.addWidget(self._show_archived_cb)
         header_layout.addWidget(new_btn)
 
         self._table = QTableWidget()
@@ -1204,7 +1209,7 @@ class NotesListWidget(QWidget):
 
     def load(self) -> None:
         project_names = {p.id: p.name for p in self._project_repo.list_all()}
-        notes = self._note_repo.list_all()
+        notes = self._note_repo.list_all(archived_only=self._show_archived_cb.isChecked())
         self._table.setRowCount(len(notes))
         for row, note in enumerate(notes):
             title_item = QTableWidgetItem(note.title)
@@ -1243,6 +1248,9 @@ class NoteDetailWidget(QWidget):
         back_btn = QPushButton("← Back")
         back_btn.clicked.connect(self.back_requested)
 
+        self._archive_cb = QCheckBox("Archive")
+        self._archive_cb.stateChanged.connect(self._on_archive_changed)
+
         self._title_edit = QLineEdit()
         self._title_edit.setMaxLength(255)
         font = self._title_edit.font()
@@ -1257,6 +1265,7 @@ class NoteDetailWidget(QWidget):
 
         header_layout = QHBoxLayout()
         header_layout.addWidget(self._title_edit, stretch=1)
+        header_layout.addWidget(self._archive_cb)
         header_layout.addWidget(back_btn)
 
         project_row = QHBoxLayout()
@@ -1288,6 +1297,7 @@ class NoteDetailWidget(QWidget):
         self._body_raw = note.body
 
         self._title_edit.setText(note.title)
+        self._archive_cb.setChecked(note.archived)
 
         self._updating_combo = True
         self._project_combo.clear()
@@ -1340,6 +1350,12 @@ class NoteDetailWidget(QWidget):
             return
         self._current_note.title = self._title_edit.text().strip() or self._current_note.title
         self._title_edit.setText(self._current_note.title)
+        self._note_repo.update(self._current_note)
+
+    def _on_archive_changed(self) -> None:
+        if self._current_note is None:
+            return
+        self._current_note.archived = self._archive_cb.isChecked()
         self._note_repo.update(self._current_note)
 
     def _on_project_changed(self, _index: int) -> None:
