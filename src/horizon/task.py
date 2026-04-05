@@ -128,6 +128,14 @@ class TaskRepository:
             for r in rows
         ]
 
+    def set_order_for_bucket(self, bucket: TaskBucket, task_ids: list[int]) -> None:
+        for i, tid in enumerate(task_ids):
+            self._db.conn.execute(
+                'UPDATE tasks SET "order" = ? WHERE id = ?',
+                (i * 1000, tid),
+            )
+        self._db.conn.commit()
+
     def swap_order(self, task_id_a: int, task_id_b: int) -> None:
         row_a = self._db.conn.execute(
             'SELECT "order" FROM tasks WHERE id = ?', (task_id_a,)

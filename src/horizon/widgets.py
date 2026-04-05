@@ -114,7 +114,8 @@ class KanbanCardDelegate(QStyledItemDelegate):
 
 
 class KanbanColumnWidget(QListWidget):
-    task_dropped = Signal(int, object)  # (task_id, target_bucket: TaskBucket)
+    task_dropped    = Signal(int, object)   # (task_id, target_bucket: TaskBucket)
+    tasks_reordered = Signal(object, list)  # (bucket: TaskBucket, task_ids: list[int])
 
     def __init__(self, bucket: TaskBucket, parent=None) -> None:
         super().__init__(parent)
@@ -122,15 +123,15 @@ class KanbanColumnWidget(QListWidget):
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
         self.setDropIndicatorShown(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
-        self.setDefaultDropAction(Qt.DropAction.IgnoreAction)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
 
     def startDrag(self, supported_actions) -> None:
         item = self.currentItem()
         if item is None:
             return
         task_id: int = item.data(Qt.ItemDataRole.UserRole)
-        mime = QMimeData()
+        mime = self.model().mimeData([self.currentIndex()])
         mime.setData(_KANBAN_MIME, QByteArray(str(task_id).encode()))
         drag = QDrag(self)
         drag.setMimeData(mime)
@@ -144,6 +145,7 @@ class KanbanColumnWidget(QListWidget):
 
     def dragMoveEvent(self, event) -> None:
         if event.mimeData().hasFormat(_KANBAN_MIME):
+            super().dragMoveEvent(event)
             event.acceptProposedAction()
         else:
             event.ignore()
@@ -152,19 +154,38 @@ class KanbanColumnWidget(QListWidget):
         if not event.mimeData().hasFormat(_KANBAN_MIME):
             event.ignore()
             return
+        task_id = int(event.mimeData().data(_KANBAN_MIME).data().decode())
         source = event.source()
         if isinstance(source, KanbanColumnWidget) and source._bucket == self._bucket:
-            event.ignore()
+            event.acceptProposedAction()
+            pos = event.pos()
+            drop_row = self.count()
+            for i in range(self.count()):
+                if pos.y() < self.visualItemRect(self.item(i)).center().y():
+                    drop_row = i
+                    break
+            for i in range(self.count()):
+                if self.item(i).data(Qt.ItemDataRole.UserRole) == task_id:
+                    dragged_item = self.takeItem(i)
+                    if i < drop_row:
+                        drop_row -= 1
+                    break
+            else:
+                return
+            self.insertItem(drop_row, dragged_item)
+            self.setCurrentItem(dragged_item)
+            task_ids = [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
+            self.tasks_reordered.emit(self._bucket, task_ids)
             return
-        task_id = int(event.mimeData().data(_KANBAN_MIME).data().decode())
         event.acceptProposedAction()
         self.task_dropped.emit(task_id, self._bucket)
 
 
 class KanbanBoardWidget(QWidget):
-    task_edit_requested = Signal(int)  # emits task_id
-    task_bucket_changed = Signal(int, object)  # (task_id, new_bucket: TaskBucket)
-    task_selected = Signal(int)  # emits task_id
+    task_edit_requested = Signal(int)           # emits task_id
+    task_bucket_changed = Signal(int, object)   # (task_id, new_bucket: TaskBucket)
+    task_selected       = Signal(int)           # emits task_id
+    tasks_reordered     = Signal(object, list)  # (bucket: TaskBucket, task_ids: list[int])
 
     COLUMNS = [
         TaskBucket.Inbox,
@@ -201,6 +222,7 @@ class KanbanBoardWidget(QWidget):
             list_widget.setItemDelegate(KanbanCardDelegate(list_widget))
             list_widget.itemDoubleClicked.connect(self._on_item_double_clicked)
             list_widget.task_dropped.connect(self._on_task_dropped)
+            list_widget.tasks_reordered.connect(self._on_tasks_reordered)
             list_widget.currentItemChanged.connect(self._on_column_selection_changed)
             col_layout.addWidget(list_widget, stretch=1)
 
@@ -250,6 +272,9 @@ class KanbanBoardWidget(QWidget):
     def _on_task_dropped(self, task_id: int, target_bucket) -> None:
         self.task_bucket_changed.emit(task_id, target_bucket)
 
+    def _on_tasks_reordered(self, bucket, task_ids: list[int]) -> None:
+        self.tasks_reordered.emit(bucket, task_ids)
+
 
 class HomeWidget(QWidget):
     def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, parent=None) -> None:
@@ -260,6 +285,7 @@ class HomeWidget(QWidget):
         self._board = KanbanBoardWidget()
         self._board.task_edit_requested.connect(self._on_task_edit_requested)
         self._board.task_bucket_changed.connect(self._on_bucket_changed)
+        self._board.tasks_reordered.connect(self._on_tasks_reordered)
 
         title = QLabel("All Tasks")
         font = title.font()
@@ -341,6 +367,9 @@ class HomeWidget(QWidget):
             task.state = TaskState.In_Progress
         self._task_repo.update(task)
         self.load()
+
+    def _on_tasks_reordered(self, bucket, task_ids: list[int]) -> None:
+        self._task_repo.set_order_for_bucket(bucket, task_ids)
 
 
 class ProjectDetailWidget(QWidget):
@@ -453,6 +482,7 @@ class ProjectDetailWidget(QWidget):
         self._kanban_board = KanbanBoardWidget()
         self._kanban_board.task_edit_requested.connect(self._on_kanban_task_edit_requested)
         self._kanban_board.task_bucket_changed.connect(self._on_kanban_bucket_changed)
+        self._kanban_board.tasks_reordered.connect(self._on_kanban_tasks_reordered)
 
         # Inner stack: index 0 = List, index 1 = Board
         self._task_view_stack = QStackedWidget()
@@ -554,6 +584,9 @@ class ProjectDetailWidget(QWidget):
             task.bucket = dialog.bucket()
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
+
+    def _on_kanban_tasks_reordered(self, bucket, task_ids: list[int]) -> None:
+        self._task_repo.set_order_for_bucket(bucket, task_ids)
 
     def _on_kanban_bucket_changed(self, task_id: int, new_bucket) -> None:
         task = self._task_repo.get(task_id)
