@@ -61,6 +61,7 @@ class MainWindow(QMainWindow):
         self.setCentralWidget(splitter)
 
     def _show_home(self) -> None:
+        self._project_list.clear_selection()
         self._home_widget.load()
         self._right_stack.setCurrentIndex(0)
 
@@ -72,6 +73,7 @@ class MainWindow(QMainWindow):
         self._right_stack.setCurrentIndex(1)
 
     def _show_notes(self) -> None:
+        self._project_list.clear_selection()
         self._notes_list.load()
         self._right_stack.setCurrentIndex(2)
 

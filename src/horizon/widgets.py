@@ -122,6 +122,11 @@ class ProjectListWidget(QWidget):
             self._repo.create(name=dialog.name(), description=dialog.description())
             self._load_projects()
 
+    def clear_selection(self) -> None:
+        self._list.blockSignals(True)
+        self._list.setCurrentRow(-1)
+        self._list.blockSignals(False)
+
 
 _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE = Qt.ItemDataRole.UserRole + 1
