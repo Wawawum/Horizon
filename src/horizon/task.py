@@ -159,22 +159,35 @@ class SubtaskRepository:
         self._db = db
 
     def create(self, task_id: int, title: str) -> "Subtask":
+        row = self._db.conn.execute(
+            'SELECT COALESCE(MAX("order"), 0) + 10 AS next_order FROM subtasks WHERE task_id = ?',
+            (task_id,),
+        ).fetchone()
+        next_order: int = row["next_order"]
         cur = self._db.conn.execute(
-            "INSERT INTO subtasks (task_id, title, completed) VALUES (?, ?, 0)",
-            (task_id, title),
+            'INSERT INTO subtasks (task_id, title, completed, "order") VALUES (?, ?, 0, ?)',
+            (task_id, title, next_order),
         )
         self._db.conn.commit()
         return Subtask(id=cur.lastrowid, task_id=task_id, title=title, completed=False)
 
     def list_for_task(self, task_id: int) -> "list[Subtask]":
         rows = self._db.conn.execute(
-            "SELECT id, task_id, title, completed FROM subtasks WHERE task_id = ? ORDER BY id",
+            'SELECT id, task_id, title, completed FROM subtasks WHERE task_id = ? ORDER BY "order"',
             (task_id,),
         ).fetchall()
         return [
             Subtask(id=r["id"], task_id=r["task_id"], title=r["title"], completed=bool(r["completed"]))
             for r in rows
         ]
+
+    def set_order_for_task(self, task_id: int, subtask_ids: list) -> None:
+        for i, sid in enumerate(subtask_ids):
+            self._db.conn.execute(
+                'UPDATE subtasks SET "order" = ? WHERE id = ? AND task_id = ?',
+                (i * 10, sid, task_id),
+            )
+        self._db.conn.commit()
 
     def set_completed(self, subtask_id: int, completed: bool) -> None:
         self._db.conn.execute(

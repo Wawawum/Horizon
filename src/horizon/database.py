@@ -36,6 +36,8 @@ _MIGRATIONS = [
     " CHECK(bucket IN ('Inbox','Today','On hold','Completed'))",
     'ALTER TABLE tasks ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
     'UPDATE tasks SET "order" = id * 1000 WHERE "order" = 0',
+    'ALTER TABLE subtasks ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
+    'UPDATE subtasks SET "order" = id * 10 WHERE "order" = 0',
 ]
 
 
