@@ -22,6 +22,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QMessageBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -1300,6 +1301,11 @@ class NoteDetailWidget(QWidget):
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setStyleSheet("color: white; background-color: red;")
+        self._delete_btn.setVisible(False)
+        self._delete_btn.clicked.connect(self._on_delete_clicked)
+
         self._title_edit = QLineEdit()
         self._title_edit.setMaxLength(255)
         font = self._title_edit.font()
@@ -1315,6 +1321,7 @@ class NoteDetailWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._archive_cb)
+        header_layout.addWidget(self._delete_btn)
         header_layout.addWidget(back_btn)
 
         project_row = QHBoxLayout()
@@ -1347,6 +1354,7 @@ class NoteDetailWidget(QWidget):
 
         self._title_edit.setText(note.title)
         self._archive_cb.setChecked(note.archived)
+        self._delete_btn.setVisible(note.archived)
 
         self._updating_combo = True
         self._project_combo.clear()
@@ -1406,6 +1414,21 @@ class NoteDetailWidget(QWidget):
             return
         self._current_note.archived = self._archive_cb.isChecked()
         self._note_repo.update(self._current_note)
+        self._delete_btn.setVisible(self._current_note.archived)
+
+    def _on_delete_clicked(self) -> None:
+        if self._current_note is None or not self._current_note.archived:
+            return
+        answer = QMessageBox.question(
+            self,
+            "Delete Note",
+            f"Permanently delete \"{self._current_note.title}\"?\nThis cannot be undone.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if answer == QMessageBox.StandardButton.Yes:
+            self._note_repo.delete(self._current_note.id)
+            self._current_note = None
+            self.back_requested.emit()
 
     def _on_project_changed(self, _index: int) -> None:
         if self._updating_combo or self._current_note is None:
