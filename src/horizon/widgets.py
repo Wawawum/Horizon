@@ -813,6 +813,45 @@ class CalendarTimelineWidget(QWidget):
         self._meetings = meetings
         self.update()
 
+    @staticmethod
+    def _compute_columns(meetings: list) -> list:
+        """Returns [(meeting, col_index, total_cols), ...] for side-by-side layout."""
+        if not meetings:
+            return []
+        sorted_m = sorted(meetings, key=lambda m: m.start)
+        # Greedily assign each meeting to the first column whose last event ended
+        col_ends: list = []
+        assignments: list[int] = []
+        for m in sorted_m:
+            assigned = next(
+                (i for i, end in enumerate(col_ends) if m.start >= end), None
+            )
+            if assigned is None:
+                assigned = len(col_ends)
+                col_ends.append(m.end)
+            else:
+                col_ends[assigned] = m.end
+            assignments.append(assigned)
+        # Group into overlap clusters so each cluster shares the same total_cols
+        clusters: list[list[int]] = []
+        current: list[int] = [0]
+        cluster_end = sorted_m[0].end
+        for i in range(1, len(sorted_m)):
+            if sorted_m[i].start < cluster_end:
+                current.append(i)
+                cluster_end = max(cluster_end, sorted_m[i].end)
+            else:
+                clusters.append(current)
+                current = [i]
+                cluster_end = sorted_m[i].end
+        clusters.append(current)
+        result = []
+        for cluster in clusters:
+            total_cols = max(assignments[i] for i in cluster) + 1
+            for i in cluster:
+                result.append((sorted_m[i], assignments[i], total_cols))
+        return result
+
     def paintEvent(self, event) -> None:
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
@@ -848,7 +887,8 @@ class CalendarTimelineWidget(QWidget):
                 painter.setPen(QPen(QColor(40, 40, 40), 1, Qt.PenStyle.DotLine))
                 painter.drawLine(self.LABEL_WIDTH, half_y, w, half_y)
 
-        for meeting in self._meetings:
+        available_w = event_right - event_left
+        for meeting, col, total_cols in self._compute_columns(self._meetings):
             start_frac = meeting.start.hour + meeting.start.minute / 60.0
             end_frac = meeting.end.hour + meeting.end.minute / 60.0
             y_top = max(0.0, (start_frac - self.START_HOUR) * self.HOUR_HEIGHT)
@@ -858,9 +898,10 @@ class CalendarTimelineWidget(QWidget):
             )
             if y_bot <= y_top + 2:
                 continue
+            col_w = available_w / total_cols
             rect = QRect(
-                int(event_left), int(y_top) + 1,
-                int(event_right - event_left), int(y_bot - y_top) - 2,
+                int(event_left + col * col_w) + 1, int(y_top) + 1,
+                int(col_w) - 2, int(y_bot - y_top) - 2,
             )
             painter.fillRect(rect, QColor(150, 20, 20))
             painter.setPen(QColor(255, 255, 255))
