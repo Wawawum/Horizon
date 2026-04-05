@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout,
     QHeaderView,
     QLabel,
+    QLineEdit,
     QListWidget,
     QListWidgetItem,
     QPushButton,
@@ -25,6 +26,7 @@ from PySide6.QtWidgets import (
 )
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 
@@ -49,14 +51,24 @@ class CalendarMeeting:
 class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
     home_requested = Signal()
+    notes_requested = Signal()
 
     def __init__(self, repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self._repo = repo
         self.setMinimumWidth(200)
 
-        self._home_btn = QPushButton("Home")
-        self._home_btn.clicked.connect(self.home_requested)
+        self._board_btn = QPushButton("Board")
+        self._board_btn.clicked.connect(self.home_requested)
+
+        self._notes_btn = QPushButton("Notes")
+        self._notes_btn.clicked.connect(self.notes_requested)
+
+        nav_layout = QHBoxLayout()
+        nav_layout.setContentsMargins(0, 0, 0, 0)
+        nav_layout.setSpacing(0)
+        nav_layout.addWidget(self._board_btn)
+        nav_layout.addWidget(self._notes_btn)
 
         self._list = QListWidget()
         self._list.currentItemChanged.connect(self._on_selection_changed)
@@ -67,7 +79,7 @@ class ProjectListWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addWidget(self._home_btn, stretch=0)  # pinned to the top
+        layout.addLayout(nav_layout)                 # Board + Notes buttons at top
         layout.addWidget(self._list, stretch=1)      # fills all available vertical space
         layout.addWidget(self._new_btn, stretch=0)   # pinned to the bottom
 
@@ -1080,3 +1092,192 @@ class RightPanelWidget(QWidget):
         layout.addWidget(clock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._meetings = MeetingsWidget()
         layout.addWidget(self._meetings, stretch=1)
+
+
+class NotesListWidget(QWidget):
+    note_edit_requested = Signal(int)  # emits note_id
+
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._note_repo = note_repo
+        self._project_repo = project_repo
+
+        title = QLabel("Notes")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        title.setFont(font)
+
+        new_btn = QPushButton("+ New Note")
+        new_btn.clicked.connect(self._on_new_note)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(title)
+        header_layout.addStretch()
+        header_layout.addWidget(new_btn)
+
+        self._table = QTableWidget()
+        self._table.setColumnCount(3)
+        self._table.setHorizontalHeaderLabels(["Title", "Date", "Project"])
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.verticalHeader().setVisible(False)
+        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.cellDoubleClicked.connect(self._on_double_clicked)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        layout.addLayout(header_layout)
+        layout.addWidget(self._table, stretch=1)
+
+    def load(self) -> None:
+        project_names = {p.id: p.name for p in self._project_repo.list_all()}
+        notes = self._note_repo.list_all()
+        self._table.setRowCount(len(notes))
+        for row, note in enumerate(notes):
+            title_item = QTableWidgetItem(note.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, note.id)
+            self._table.setItem(row, 0, title_item)
+            date_item = QTableWidgetItem(note.dt.strftime("%Y-%m-%d %H:%M"))
+            self._table.setItem(row, 1, date_item)
+            project_item = QTableWidgetItem(project_names.get(note.project_id, ""))
+            self._table.setItem(row, 2, project_item)
+
+    def _on_double_clicked(self, row: int, _col: int) -> None:
+        item = self._table.item(row, 0)
+        if item is not None:
+            self.note_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+
+    def _on_new_note(self) -> None:
+        projects = self._project_repo.list_all()
+        if not projects:
+            return
+        note = self._note_repo.create(project_id=projects[0].id, title="New Note")
+        self.load()
+        self.note_edit_requested.emit(note.id)
+
+
+class NoteDetailWidget(QWidget):
+    back_requested = Signal()
+
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._note_repo = note_repo
+        self._project_repo = project_repo
+        self._current_note: Note | None = None
+        self._body_raw: str = ""
+        self._updating_combo = False
+
+        back_btn = QPushButton("← Back")
+        back_btn.clicked.connect(self.back_requested)
+
+        self._title_edit = QLineEdit()
+        self._title_edit.setMaxLength(255)
+        font = self._title_edit.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        self._title_edit.setFont(font)
+        self._title_edit.setFrame(False)
+        self._title_edit.editingFinished.connect(self._save_title)
+
+        self._project_combo = QComboBox()
+        self._project_combo.currentIndexChanged.connect(self._on_project_changed)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(self._title_edit, stretch=1)
+        header_layout.addWidget(back_btn)
+
+        project_row = QHBoxLayout()
+        project_row.addWidget(QLabel("Project:"))
+        project_row.addWidget(self._project_combo)
+        project_row.addStretch()
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+
+        self._body_edit = QTextEdit()
+        self._body_edit.setReadOnly(True)
+        self._body_edit.setFrameShape(QFrame.Shape.NoFrame)
+        self._body_edit.installEventFilter(self)
+        self._body_edit.viewport().installEventFilter(self)
+        self._body_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        layout.addLayout(header_layout)
+        layout.addLayout(project_row)
+        layout.addWidget(sep)
+        layout.addWidget(self._body_edit, stretch=1)
+
+    def load_note(self, note: Note, projects: list) -> None:
+        self._current_note = note
+        self._body_raw = note.body
+
+        self._title_edit.setText(note.title)
+
+        self._updating_combo = True
+        self._project_combo.clear()
+        for project in projects:
+            self._project_combo.addItem(project.name, userData=project.id)
+        idx = self._project_combo.findData(note.project_id)
+        if idx >= 0:
+            self._project_combo.setCurrentIndex(idx)
+        self._updating_combo = False
+
+        self._render_body()
+
+    def eventFilter(self, obj, event) -> bool:
+        if obj is self._body_edit.viewport():
+            if event.type() == QEvent.Type.MouseButtonPress and self._body_edit.isReadOnly():
+                self._enter_body_edit()
+                return True
+        if obj is self._body_edit:
+            if event.type() == QEvent.Type.FocusOut and not self._body_edit.isReadOnly():
+                self._save_body()
+        return super().eventFilter(obj, event)
+
+    def _enter_body_edit(self) -> None:
+        self._body_edit.setFrameShape(QFrame.Shape.StyledPanel)
+        self._body_edit.setReadOnly(False)
+        self._body_edit.setPlainText(self._body_raw)
+        self._body_edit.viewport().unsetCursor()
+        self._body_edit.moveCursor(QTextCursor.MoveOperation.End)
+        self._body_edit.setFocus()
+
+    def _save_body(self) -> None:
+        if self._current_note is None:
+            return
+        self._body_raw = self._body_edit.toPlainText()
+        self._current_note.body = self._body_raw
+        self._note_repo.update(self._current_note)
+        self._render_body()
+
+    def _render_body(self) -> None:
+        self._body_edit.setReadOnly(True)
+        self._body_edit.setFrameShape(QFrame.Shape.NoFrame)
+        self._body_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        if self._body_raw:
+            self._body_edit.setMarkdown(self._body_raw)
+        else:
+            self._body_edit.setPlainText("")
+
+    def _save_title(self) -> None:
+        if self._current_note is None:
+            return
+        self._current_note.title = self._title_edit.text().strip() or self._current_note.title
+        self._title_edit.setText(self._current_note.title)
+        self._note_repo.update(self._current_note)
+
+    def _on_project_changed(self, _index: int) -> None:
+        if self._updating_combo or self._current_note is None:
+            return
+        project_id = self._project_combo.currentData()
+        if project_id is not None:
+            self._current_note.project_id = project_id
+            self._note_repo.update(self._current_note)

@@ -29,6 +29,14 @@ CREATE TABLE IF NOT EXISTS subtasks (
     title     TEXT    NOT NULL CHECK(length(title) <= 255),
     completed INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS notes (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    title      TEXT    NOT NULL CHECK(length(title) <= 255),
+    body       TEXT    NOT NULL DEFAULT '',
+    dt         TEXT    NOT NULL
+);
 """
 
 _MIGRATIONS = [
