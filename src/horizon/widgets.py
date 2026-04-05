@@ -392,9 +392,13 @@ class HomeWidget(QWidget):
         self._move_down_btn.setFixedWidth(28)
         self._move_down_btn.clicked.connect(self._on_move_down)
 
+        self._show_archived_cb = QCheckBox("Show archived")
+        self._show_archived_cb.stateChanged.connect(self.load)
+
         header_layout = QHBoxLayout()
         header_layout.addWidget(title)
         header_layout.addStretch()
+        header_layout.addWidget(self._show_archived_cb)
         header_layout.addWidget(self._move_up_btn)
         header_layout.addWidget(self._move_down_btn)
 
@@ -406,7 +410,7 @@ class HomeWidget(QWidget):
 
     def load(self) -> None:
         project_names = {p.id: p.name for p in self._project_repo.list_all()}
-        self._board.populate(self._task_repo.list_all(), project_names=project_names)
+        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names)
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
@@ -421,7 +425,7 @@ class HomeWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        bucket_tasks = [t for t in self._task_repo.list_all() if t.bucket == task.bucket]
+        bucket_tasks = [t for t in self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()) if t.bucket == task.bucket]
         idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
         if idx is None:
             return
@@ -442,6 +446,7 @@ class HomeWidget(QWidget):
             task.state = dialog.state()
             task.priority = dialog.priority()
             task.bucket = dialog.bucket()
+            task.archived = dialog.archived()
             self._task_repo.update(task)
             self.load()
 
@@ -692,7 +697,7 @@ class ProjectDetailWidget(QWidget):
         self._task_view_stack.setCurrentIndex(index)
 
     def _load_tasks(self, project_id: int) -> None:
-        tasks = self._task_repo.list_for_project(project_id)
+        tasks = [t for t in self._task_repo.list_for_project(project_id) if not t.archived]
         self._populate_table(tasks)
         self._kanban_board.populate(tasks)
 
@@ -719,6 +724,7 @@ class ProjectDetailWidget(QWidget):
             task.state = dialog.state()
             task.priority = dialog.priority()
             task.bucket = dialog.bucket()
+            task.archived = dialog.archived()
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
 
@@ -733,6 +739,7 @@ class ProjectDetailWidget(QWidget):
             task.state = dialog.state()
             task.priority = dialog.priority()
             task.bucket = dialog.bucket()
+            task.archived = dialog.archived()
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
 

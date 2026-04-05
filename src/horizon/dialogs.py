@@ -194,6 +194,9 @@ class TaskDetailDialog(QDialog):
         self._new_subtask_edit.setVisible(False)
         self._new_subtask_edit.installEventFilter(self)
 
+        self._archive_cb = QCheckBox("Archive")
+        self._archive_cb.setChecked(task.archived)
+
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -215,6 +218,7 @@ class TaskDetailDialog(QDialog):
         layout.addLayout(subtasks_header)
         layout.addWidget(self._subtask_list)
         layout.addWidget(self._new_subtask_edit)
+        layout.addWidget(self._archive_cb)
         layout.addWidget(btn_box)
 
         self._load_subtasks()
@@ -341,3 +345,6 @@ class TaskDetailDialog(QDialog):
 
     def bucket(self) -> TaskBucket:
         return self._bucket_combo.currentData()
+
+    def archived(self) -> bool:
+        return self._archive_cb.isChecked()

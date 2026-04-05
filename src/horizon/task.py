@@ -35,6 +35,7 @@ class Task:
     priority:    TaskPriority
     bucket:      TaskBucket = field(default=TaskBucket.Inbox)
     order:       int = 0
+    archived:    bool = False
 
 
 class TaskRepository:
@@ -49,22 +50,23 @@ class TaskRepository:
         state: TaskState = TaskState.New,
         priority: TaskPriority = TaskPriority.Medium,
         bucket: TaskBucket = TaskBucket.Inbox,
+        archived: bool = False,
     ) -> Task:
         row = self._db.conn.execute(
             'SELECT COALESCE(MAX("order"), 0) + 1000 AS next_order FROM tasks'
         ).fetchone()
         next_order: int = row["next_order"]
         cur = self._db.conn.execute(
-            'INSERT INTO tasks (project_id, title, description, state, priority, bucket, "order")'
-            " VALUES (?, ?, ?, ?, ?, ?, ?)",
-            (project_id, title, description, state.value, priority.value, bucket.value, next_order),
+            'INSERT INTO tasks (project_id, title, description, state, priority, bucket, "order", archived)'
+            " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (project_id, title, description, state.value, priority.value, bucket.value, next_order, int(archived)),
         )
         self._db.conn.commit()
-        return Task(cur.lastrowid, project_id, title, description, state, priority, bucket, next_order)
+        return Task(cur.lastrowid, project_id, title, description, state, priority, bucket, next_order, archived)
 
     def get(self, task_id: int) -> "Task | None":
         row = self._db.conn.execute(
-            'SELECT id, project_id, title, description, state, priority, bucket, "order"'
+            'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
             " FROM tasks WHERE id = ?",
             (task_id,),
         ).fetchone()
@@ -79,19 +81,20 @@ class TaskRepository:
             priority=TaskPriority(row["priority"]),
             bucket=TaskBucket(row["bucket"]),
             order=row["order"],
+            archived=bool(row["archived"]),
         )
 
     def update(self, task: Task) -> None:
         self._db.conn.execute(
-            "UPDATE tasks SET title=?, description=?, state=?, priority=?, bucket=?"
+            "UPDATE tasks SET title=?, description=?, state=?, priority=?, bucket=?, archived=?"
             " WHERE id=?",
-            (task.title, task.description, task.state.value, task.priority.value, task.bucket.value, task.id),
+            (task.title, task.description, task.state.value, task.priority.value, task.bucket.value, int(task.archived), task.id),
         )
         self._db.conn.commit()
 
     def list_for_project(self, project_id: int) -> list[Task]:
         rows = self._db.conn.execute(
-            'SELECT id, project_id, title, description, state, priority, bucket, "order"'
+            'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
             ' FROM tasks WHERE project_id = ? ORDER BY "order"',
             (project_id,),
         ).fetchall()
@@ -105,14 +108,16 @@ class TaskRepository:
                 priority=TaskPriority(r["priority"]),
                 bucket=TaskBucket(r["bucket"]),
                 order=r["order"],
+                archived=bool(r["archived"]),
             )
             for r in rows
         ]
 
-    def list_all(self) -> list[Task]:
+    def list_all(self, archived_only: bool = False) -> list[Task]:
         rows = self._db.conn.execute(
-            'SELECT id, project_id, title, description, state, priority, bucket, "order"'
-            ' FROM tasks ORDER BY "order"'
+            'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
+            ' FROM tasks WHERE archived = ? ORDER BY "order"',
+            (int(archived_only),),
         ).fetchall()
         return [
             Task(
@@ -124,6 +129,7 @@ class TaskRepository:
                 priority=TaskPriority(r["priority"]),
                 bucket=TaskBucket(r["bucket"]),
                 order=r["order"],
+                archived=bool(r["archived"]),
             )
             for r in rows
         ]
