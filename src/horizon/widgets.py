@@ -608,12 +608,13 @@ class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
         self._subtask_repo = subtask_repo
         self._note_repo = note_repo
+        self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
         self._desc_raw: str = ""
@@ -886,6 +887,9 @@ class ProjectDetailWidget(QWidget):
 
     def _on_view_changed(self, index: int) -> None:
         self._task_view_stack.setCurrentIndex(index)
+        if self._prefs is not None and self._current_project_id is not None:
+            self._prefs.set_project_view(self._current_project_id, index)
+            self._prefs.save()
 
     def _load_tasks(self, project_id: int) -> None:
         tasks = [t for t in self._task_repo.list_for_project(project_id) if not t.archived]
@@ -1049,6 +1053,12 @@ class ProjectDetailWidget(QWidget):
             self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
             self._load_tasks(project.id)
             self._load_notes(project.id)
+            if self._prefs is not None:
+                view_index = self._prefs.get_project_view(project.id)
+                self._view_selector.blockSignals(True)
+                self._view_selector.setCurrentIndex(view_index)
+                self._view_selector.blockSignals(False)
+                self._task_view_stack.setCurrentIndex(view_index)
             self._stack.setCurrentIndex(1)
 
 

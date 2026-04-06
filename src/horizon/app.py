@@ -6,6 +6,7 @@ from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
 from horizon.database import Database
 from horizon.note import NoteRepository
+from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
 from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
@@ -27,10 +28,14 @@ def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
 class MainWindow(QMainWindow):
     def __init__(self, db: Database) -> None:
         self._db = db
+        self._prefs = Preferences()
         super().__init__()
         self.setWindowTitle("Horizon")
         self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))
-        self.resize(800, 600)
+        w, h = self._prefs.window_size
+        self.resize(w, h)
+        if self._prefs.window_maximized:
+            self.showMaximized()
 
         self._proj_repo = ProjectRepository(db)
         task_repo = TaskRepository(db)
@@ -49,7 +54,7 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._prefs)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
@@ -129,3 +134,10 @@ class MainWindow(QMainWindow):
         projects = self._proj_repo.list_all()
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
+
+    def closeEvent(self, event) -> None:
+        self._prefs.window_maximized = self.isMaximized()
+        if not self.isMaximized():
+            self._prefs.window_size = (self.width(), self.height())
+        self._prefs.save()
+        super().closeEvent(event)
