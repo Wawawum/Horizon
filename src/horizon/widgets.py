@@ -705,6 +705,10 @@ class ProjectDetailWidget(QWidget):
         self._view_selector.currentIndexChanged.connect(self._on_view_changed)
         tasks_header.addWidget(self._view_selector)
 
+        self._purge_btn = QPushButton("Purge")
+        self._purge_btn.clicked.connect(self._on_purge)
+        tasks_header.addWidget(self._purge_btn)
+
         self._move_up_btn = QPushButton("↑")
         self._move_up_btn.setFixedWidth(28)
         self._move_up_btn.clicked.connect(self._on_move_up)
@@ -835,6 +839,24 @@ class ProjectDetailWidget(QWidget):
                 f"background-color: {self._current_project.color}; border: 1px solid #888; border-radius: 3px;"
             )
             self.project_renamed.emit()
+
+    def _on_purge(self) -> None:
+        if self._current_project_id is None:
+            return
+        reply = QMessageBox.question(
+            self,
+            "Purge completed tasks",
+            "Archive all completed tasks in this project?",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+        tasks = self._task_repo.list_for_project(self._current_project_id)
+        for task in tasks:
+            if task.state == TaskState.Completed and not task.archived:
+                task.archived = True
+                self._task_repo.update(task)
+        self._load_tasks(self._current_project_id)
 
     def _on_archive_changed(self) -> None:
         if self._current_project is None:
