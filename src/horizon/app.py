@@ -16,7 +16,7 @@ class MainWindow(QMainWindow):
         self._db = db
         super().__init__()
         self.setWindowTitle("Horizon")
-        self.setWindowIcon(QIcon(str(Path(__file__).parent / "Horizon_Icon.png")))
+        self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))
         self.resize(800, 600)
 
         self._proj_repo = ProjectRepository(db)

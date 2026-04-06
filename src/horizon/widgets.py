@@ -1,3 +1,5 @@
+from pathlib import Path
+
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
@@ -132,6 +134,7 @@ _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE  = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
+_CHECK_SVG   = (Path(__file__).parent / "resources" / "check_black.svg").as_posix()
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
 _TILE_BG     = QColor("#ffffff")
@@ -215,7 +218,7 @@ class KanbanCardWidget(QWidget):
             cb.setStyleSheet(
                 "QCheckBox { color: #1a1a1a; }"
                 " QCheckBox::indicator { border: 1px solid #888888; border-radius: 2px; }"
-                " QCheckBox::indicator::checked { background-color: #2196f3; }"
+                f" QCheckBox::indicator:checked {{ background-color: #ffffff; border-color: #333333; image: url({_CHECK_SVG}); }}"
             )
             cb.stateChanged.connect(
                 lambda state, sid=subtask.id: subtask_repo.set_completed(
