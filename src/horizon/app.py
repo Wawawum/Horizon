@@ -8,7 +8,7 @@ from horizon.database import Database
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
-from horizon.widgets import HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
+from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
 
 
 class MainWindow(QMainWindow):
@@ -52,6 +52,8 @@ class MainWindow(QMainWindow):
         splitter.setStretchFactor(1, 1)  # center panel absorbs extra space
         splitter.setStretchFactor(2, 0)  # right panel keeps its natural width
 
+        self._right_panel.create_note_requested.connect(self._on_create_note_from_meeting)
+
         self._project_list.home_requested.connect(self._show_home)
         self._project_list.project_selected.connect(self._show_project)
         self._project_list.notes_requested.connect(self._show_notes)
@@ -63,6 +65,14 @@ class MainWindow(QMainWindow):
         self._show_home()  # default view on startup
 
         self.setCentralWidget(splitter)
+
+    def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
+        subject = meeting.subject[:220]
+        title = f"Meeting note - {subject} - {meeting.start.strftime('%Y-%m-%d %H:%M')}"
+        note = self._note_repo.create(project_id=None, title=title, dt=meeting.start)
+        projects = self._proj_repo.list_all()
+        self._note_detail.load_note(note, projects)
+        self._right_stack.setCurrentIndex(3)
 
     def _show_home(self) -> None:
         self._project_list.clear_selection()

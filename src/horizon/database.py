@@ -32,7 +32,7 @@ CREATE TABLE IF NOT EXISTS subtasks (
 
 CREATE TABLE IF NOT EXISTS notes (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     title      TEXT    NOT NULL CHECK(length(title) <= 255),
     body       TEXT    NOT NULL DEFAULT '',
     dt         TEXT    NOT NULL
@@ -61,6 +61,7 @@ class Database:
         self._conn.execute("PRAGMA foreign_keys = ON;")
         self._conn.executescript(_DDL)
         self._run_migrations()
+        self._run_structural_migrations()
 
     def _run_migrations(self) -> None:
         for sql in _MIGRATIONS:
@@ -69,6 +70,29 @@ class Database:
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+    def _run_structural_migrations(self) -> None:
+        rows = self._conn.execute("PRAGMA table_info(notes)").fetchall()
+        for row in rows:
+            if row[1] == "project_id" and row[3] == 1:  # notnull == 1
+                self._conn.execute("BEGIN IMMEDIATE")
+                self._conn.execute("""
+                    CREATE TABLE notes_new (
+                        id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                        project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+                        title      TEXT    NOT NULL CHECK(length(title) <= 255),
+                        body       TEXT    NOT NULL DEFAULT '',
+                        dt         TEXT    NOT NULL,
+                        archived   INTEGER NOT NULL DEFAULT 0
+                    )
+                """)
+                self._conn.execute(
+                    "INSERT INTO notes_new SELECT id, project_id, title, body, dt, archived FROM notes"
+                )
+                self._conn.execute("DROP TABLE notes")
+                self._conn.execute("ALTER TABLE notes_new RENAME TO notes")
+                self._conn.commit()
+                break
 
     @property
     def conn(self) -> sqlite3.Connection:

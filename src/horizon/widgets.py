@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
     QTableWidget,
     QTableWidgetItem,
     QTextEdit,
+    QMenu,
     QMessageBox,
     QToolButton,
     QVBoxLayout,
@@ -986,9 +987,12 @@ class CalendarTimelineWidget(QWidget):
     START_HOUR = 7
     END_HOUR = 21
 
+    create_note_requested = Signal(object)  # emits CalendarMeeting
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._meetings: list[CalendarMeeting] = []
+        self._layout_cache: list[tuple] = []  # list of (CalendarMeeting, QRect)
         self.setFixedHeight((self.END_HOUR - self.START_HOUR) * self.HOUR_HEIGHT)
         self._repaint_timer = QTimer(self)
         self._repaint_timer.setInterval(60 * 1000)
@@ -997,6 +1001,7 @@ class CalendarTimelineWidget(QWidget):
 
     def set_meetings(self, meetings: list[CalendarMeeting]) -> None:
         self._meetings = meetings
+        self._layout_cache = []
         self.update()
 
     @staticmethod
@@ -1074,6 +1079,7 @@ class CalendarTimelineWidget(QWidget):
                 painter.drawLine(self.LABEL_WIDTH, half_y, w, half_y)
 
         available_w = event_right - event_left
+        self._layout_cache = []
         for meeting, col, total_cols in self._compute_columns(self._meetings):
             start_frac = meeting.start.hour + meeting.start.minute / 60.0
             end_frac = meeting.end.hour + meeting.end.minute / 60.0
@@ -1089,6 +1095,7 @@ class CalendarTimelineWidget(QWidget):
                 int(event_left + col * col_w) + 1, int(y_top) + 1,
                 int(col_w) - 2, int(y_bot - y_top) - 2,
             )
+            self._layout_cache.append((meeting, rect))
             painter.fillRect(rect, QColor(150, 20, 20))
             painter.setPen(QColor(255, 255, 255))
             painter.drawText(
@@ -1112,9 +1119,25 @@ class CalendarTimelineWidget(QWidget):
             painter.setBrush(QBrush(QColor(220, 220, 220)))
             painter.drawPath(path)
 
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.RightButton and self._layout_cache:
+            pos = event.position().toPoint()
+            for meeting, rect in self._layout_cache:
+                if rect.contains(pos):
+                    menu = QMenu(self)
+                    action = menu.addAction("Create note")
+                    action.triggered.connect(
+                        lambda checked=False, m=meeting: self.create_note_requested.emit(m)
+                    )
+                    menu.exec(event.globalPosition().toPoint())
+                    return
+        super().mousePressEvent(event)
+
 
 class MeetingsWidget(QWidget):
     _REFRESH_MS = 60 * 1000
+
+    create_note_requested = Signal(object)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -1131,6 +1154,7 @@ class MeetingsWidget(QWidget):
         outer.addWidget(header)
 
         self._timeline = CalendarTimelineWidget()
+        self._timeline.create_note_requested.connect(self.create_note_requested)
         self._scroll = QScrollArea()
         self._scroll.setWidgetResizable(True)
         self._scroll.setFrameShape(QFrame.Shape.NoFrame)
@@ -1255,6 +1279,8 @@ class AnalogClockWidget(QWidget):
 
 
 class RightPanelWidget(QWidget):
+    create_note_requested = Signal(object)
+
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setMinimumWidth(200)
@@ -1265,6 +1291,7 @@ class RightPanelWidget(QWidget):
         clock = AnalogClockWidget()
         layout.addWidget(clock, 0, Qt.AlignmentFlag.AlignHCenter)
         self._meetings = MeetingsWidget()
+        self._meetings.create_note_requested.connect(self.create_note_requested)
         layout.addWidget(self._meetings, stretch=1)
 
 
@@ -1322,7 +1349,7 @@ class NotesListWidget(QWidget):
             self._table.setItem(row, 0, title_item)
             date_item = QTableWidgetItem(note.dt.strftime("%Y-%m-%d %H:%M"))
             self._table.setItem(row, 1, date_item)
-            project_item = QTableWidgetItem(project_names.get(note.project_id, ""))
+            project_item = QTableWidgetItem(project_names.get(note.project_id, "Uncategorized"))
             self._table.setItem(row, 2, project_item)
 
     def _on_double_clicked(self, row: int, _col: int) -> None:
@@ -1413,11 +1440,11 @@ class NoteDetailWidget(QWidget):
 
         self._updating_combo = True
         self._project_combo.clear()
+        self._project_combo.addItem("Uncategorized", userData=None)
         for project in projects:
             self._project_combo.addItem(project.name, userData=project.id)
         idx = self._project_combo.findData(note.project_id)
-        if idx >= 0:
-            self._project_combo.setCurrentIndex(idx)
+        self._project_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._updating_combo = False
 
         self._render_body()
@@ -1488,7 +1515,5 @@ class NoteDetailWidget(QWidget):
     def _on_project_changed(self, _index: int) -> None:
         if self._updating_combo or self._current_note is None:
             return
-        project_id = self._project_combo.currentData()
-        if project_id is not None:
-            self._current_note.project_id = project_id
-            self._note_repo.update(self._current_note)
+        self._current_note.project_id = self._project_combo.currentData()
+        self._note_repo.update(self._current_note)

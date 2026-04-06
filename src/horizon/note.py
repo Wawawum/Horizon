@@ -7,7 +7,7 @@ from horizon.database import Database
 @dataclass
 class Note:
     id: int | None
-    project_id: int
+    project_id: int | None
     title: str
     body: str
     dt: datetime  # stored as ISO-8601 TEXT in SQLite
@@ -18,7 +18,7 @@ class NoteRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def create(self, project_id: int, title: str, body: str = "", dt: datetime | None = None, archived: bool = False) -> "Note":
+    def create(self, project_id: int | None, title: str, body: str = "", dt: datetime | None = None, archived: bool = False) -> "Note":
         if dt is None:
             dt = datetime.now()
         cur = self._db.conn.execute(
@@ -65,8 +65,9 @@ class NoteRepository:
     def list_all(self, archived_only: bool = False) -> list["Note"]:
         rows = self._db.conn.execute(
             "SELECT notes.id, notes.project_id, notes.title, notes.body, notes.dt, notes.archived"
-            " FROM notes JOIN projects ON notes.project_id = projects.id"
-            " WHERE notes.archived = ? AND projects.archived = 0 ORDER BY notes.dt DESC",
+            " FROM notes LEFT JOIN projects ON notes.project_id = projects.id"
+            " WHERE notes.archived = ? AND (notes.project_id IS NULL OR projects.archived = 0)"
+            " ORDER BY notes.dt DESC",
             (int(archived_only),),
         ).fetchall()
         return [
