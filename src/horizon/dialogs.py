@@ -3,6 +3,7 @@ from PySide6.QtGui import QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QDialogButtonBox,
@@ -28,6 +29,7 @@ class NewProjectDialog(QDialog):
         super().__init__(parent)
         self.setWindowTitle("New Project")
         self.setMinimumWidth(400)
+        self._color: str = ""
 
         self._name_edit = QLineEdit()
         self._name_edit.setMaxLength(255)
@@ -36,6 +38,16 @@ class NewProjectDialog(QDialog):
         self._desc_edit = QPlainTextEdit()
         self._desc_edit.setPlaceholderText("Description (optional)")
         self._desc_edit.setFixedHeight(80)
+
+        self._color_btn = QPushButton()
+        self._color_btn.setFixedSize(24, 24)
+        self._color_btn.setToolTip("Choose a color")
+        self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
+        self._color_btn.clicked.connect(self._pick_color)
+
+        color_layout = QHBoxLayout()
+        color_layout.addWidget(self._color_btn)
+        color_layout.addStretch()
 
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
@@ -49,7 +61,19 @@ class NewProjectDialog(QDialog):
         layout.addWidget(self._name_edit)
         layout.addWidget(QLabel("Description"))
         layout.addWidget(self._desc_edit)
+        layout.addWidget(QLabel("Color"))
+        layout.addLayout(color_layout)
         layout.addWidget(btn_box)
+
+    def _pick_color(self) -> None:
+        from PySide6.QtGui import QColor
+        initial = QColor(self._color) if self._color else QColor()
+        chosen = QColorDialog.getColor(initial=initial, parent=self)
+        if chosen.isValid():
+            self._color = chosen.name()
+            self._color_btn.setStyleSheet(
+                f"background-color: {self._color}; border: 1px solid #888; border-radius: 3px;"
+            )
 
     def _on_accepted(self) -> None:
         if not self._name_edit.text().strip():
@@ -62,6 +86,9 @@ class NewProjectDialog(QDialog):
 
     def description(self) -> str:
         return self._desc_edit.toPlainText()
+
+    def color(self) -> str:
+        return self._color
 
 
 class NewTaskDialog(QDialog):

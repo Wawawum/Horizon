@@ -1,10 +1,12 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread
-from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QPalette, QTextCursor, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QIcon, QPalette, QPixmap, QTextCursor, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
+    QColorDialog,
     QComboBox,
     QDialog,
     QFrame,
@@ -19,6 +21,7 @@ from PySide6.QtWidgets import (
     QSizePolicy,
     QSplitter,
     QStackedWidget,
+    QStyle,
     QStyledItemDelegate,
     QStyleOptionViewItem,
     QTableWidget,
@@ -63,6 +66,43 @@ class CalendarMeeting:
     optional_attendees: list[str] = field(default_factory=list)
 
 
+_PROJECT_COLOR_ROLE = Qt.ItemDataRole.UserRole + 1
+
+
+class ProjectListDelegate(QStyledItemDelegate):
+    def paint(self, painter, option, index) -> None:
+        opt = QStyleOptionViewItem(option)
+        self.initStyleOption(opt, index)
+
+        painter.save()
+
+        # Draw full-width background (selection, hover) without text/icon
+        bg_opt = QStyleOptionViewItem(opt)
+        bg_opt.text = ""
+        style = opt.widget.style() if opt.widget else QApplication.style()
+        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
+
+        # Draw color band on the left edge
+        color_str = index.data(_PROJECT_COLOR_ROLE)
+        if color_str:
+            painter.fillRect(
+                QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height()),
+                QColor(color_str),
+            )
+
+        # Draw text indented past the band
+        text_x = option.rect.x() + _BAND_WIDTH + 4
+        text_rect = QRect(text_x, option.rect.y(), option.rect.right() - text_x, option.rect.height())
+        if opt.state & QStyle.StateFlag.State_Selected:
+            text_color = opt.palette.highlightedText().color()
+        else:
+            text_color = opt.palette.text().color()
+        painter.setPen(text_color)
+        painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, opt.text)
+
+        painter.restore()
+
+
 class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
     home_requested = Signal()
@@ -86,6 +126,7 @@ class ProjectListWidget(QWidget):
         nav_layout.addWidget(self._notes_btn)
 
         self._list = QListWidget()
+        self._list.setItemDelegate(ProjectListDelegate(self._list))
         self._list.currentItemChanged.connect(self._on_selection_changed)
 
         self._show_archived_cb = QCheckBox("Show archived")
@@ -117,6 +158,7 @@ class ProjectListWidget(QWidget):
                 continue
             item = QListWidgetItem(project.name)
             item.setData(Qt.ItemDataRole.UserRole, project.id)
+            item.setData(_PROJECT_COLOR_ROLE, project.color)
             self._list.addItem(item)
 
     def _on_selection_changed(
@@ -131,7 +173,7 @@ class ProjectListWidget(QWidget):
     def _on_new_project(self) -> None:
         dialog = NewProjectDialog(parent=self)
         if dialog.exec() == QDialog.DialogCode.Accepted:
-            self._repo.create(name=dialog.name(), description=dialog.description())
+            self._repo.create(name=dialog.name(), description=dialog.description(), color=dialog.color())
             self._load_projects()
 
     def clear_selection(self) -> None:
@@ -202,10 +244,14 @@ class KanbanCardDelegate(QStyledItemDelegate):
         return size
 
 
+_PROJECT_COLOR_SQUARE = 10
+
+
 class KanbanCardWidget(QWidget):
-    def __init__(self, task, subtasks, project_name, subtask_repo, parent=None) -> None:
+    def __init__(self, task, subtasks, project_name, subtask_repo, project_color: str = "", parent=None) -> None:
         super().__init__(parent)
         self._priority = task.priority
+        self._project_color = project_color
         # Force dark text on all children regardless of the app theme
         self.setStyleSheet("""
             QLabel    { color: #1a1a1a; background: transparent; }
@@ -264,6 +310,14 @@ class KanbanCardWidget(QWidget):
         painter.setClipPath(path)
         color = _PRIORITY_COLOR.get(self._priority, QColor("#9e9e9e"))
         painter.fillRect(QRectF(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height()), color)
+
+        # Project color square — bottom-right corner
+        if self._project_color:
+            sq = _PROJECT_COLOR_SQUARE
+            sq_x = tile_rect.right() - sq - 4
+            sq_y = tile_rect.bottom() - sq - 4
+            painter.fillRect(QRectF(sq_x, sq_y, sq, sq), QColor(self._project_color))
+
         painter.setClipping(False)
 
         # Border
@@ -395,14 +449,15 @@ class KanbanBoardWidget(QWidget):
         root_layout.setContentsMargins(0, 0, 0, 0)
         root_layout.addWidget(scroll)
 
-    def populate(self, tasks: list, project_names: dict | None = None, subtask_repo=None) -> None:
+    def populate(self, tasks: list, project_names: dict | None = None, project_colors: dict | None = None, subtask_repo=None) -> None:
         self._selected_task_id = None
         for lw in self._columns.values():
             lw.clear()
         for task in tasks:
             subtasks = subtask_repo.list_for_task(task.id) if subtask_repo else []
             project_name = project_names.get(task.project_id, "") if project_names else ""
-            card = KanbanCardWidget(task, subtasks, project_name, subtask_repo)
+            project_color = project_colors.get(task.project_id, "") if project_colors else ""
+            card = KanbanCardWidget(task, subtasks, project_name, subtask_repo, project_color=project_color)
             item = QListWidgetItem()
             item.setData(Qt.ItemDataRole.UserRole, task.id)
             item.setData(_PRIORITY_ROLE, task.priority)
@@ -484,8 +539,10 @@ class HomeWidget(QWidget):
         layout.addWidget(self._board, stretch=1)
 
     def load(self) -> None:
-        project_names = {p.id: p.name for p in self._project_repo.list_all()}
-        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names, subtask_repo=self._subtask_repo)
+        projects = self._project_repo.list_all()
+        project_names = {p.id: p.name for p in projects}
+        project_colors = {p.id: p.color for p in projects}
+        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names, project_colors=project_colors, subtask_repo=self._subtask_repo)
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
@@ -583,8 +640,15 @@ class ProjectDetailWidget(QWidget):
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
+        self._color_btn = QPushButton()
+        self._color_btn.setFixedSize(24, 24)
+        self._color_btn.setToolTip("Choose a color")
+        self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
+        self._color_btn.clicked.connect(self._pick_color)
+
         name_header = QHBoxLayout()
         name_header.addWidget(self._name_label, stretch=1)
+        name_header.addWidget(self._color_btn)
         name_header.addWidget(self._archive_cb)
         content_layout.addLayout(name_header)
 
@@ -759,6 +823,19 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
         self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
 
+    def _pick_color(self) -> None:
+        if self._current_project is None:
+            return
+        initial = QColor(self._current_project.color) if self._current_project.color else QColor()
+        chosen = QColorDialog.getColor(initial=initial, parent=self)
+        if chosen.isValid():
+            self._current_project.color = chosen.name()
+            self._project_repo.update(self._current_project)
+            self._color_btn.setStyleSheet(
+                f"background-color: {self._current_project.color}; border: 1px solid #888; border-radius: 3px;"
+            )
+            self.project_renamed.emit()
+
     def _on_archive_changed(self) -> None:
         if self._current_project is None:
             return
@@ -791,7 +868,8 @@ class ProjectDetailWidget(QWidget):
     def _load_tasks(self, project_id: int) -> None:
         tasks = [t for t in self._task_repo.list_for_project(project_id) if not t.archived]
         self._populate_table(tasks)
-        self._kanban_board.populate(tasks, subtask_repo=self._subtask_repo)
+        project_colors = {project_id: self._current_project.color} if self._current_project else None
+        self._kanban_board.populate(tasks, project_colors=project_colors, subtask_repo=self._subtask_repo)
 
     def _populate_table(self, tasks: list) -> None:
         self._task_table.setRowCount(0)
@@ -934,6 +1012,12 @@ class ProjectDetailWidget(QWidget):
             self._current_project_id = project.id
             self._name_label.setText(project.name)
             self._archive_cb.setChecked(project.archived)
+            if project.color:
+                self._color_btn.setStyleSheet(
+                    f"background-color: {project.color}; border: 1px solid #888; border-radius: 3px;"
+                )
+            else:
+                self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
             self._desc_raw = project.description
             if self._desc_raw:
                 self._desc_text.setMarkdown(self._desc_raw)
