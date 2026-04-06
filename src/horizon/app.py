@@ -1,4 +1,7 @@
+from pathlib import Path
+
 from PySide6.QtCore import Qt
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
 from horizon.database import Database
@@ -13,6 +16,7 @@ class MainWindow(QMainWindow):
         self._db = db
         super().__init__()
         self.setWindowTitle("Horizon")
+        self.setWindowIcon(QIcon(str(Path(__file__).parent / "Horizon_Icon.png")))
         self.resize(800, 600)
 
         self._proj_repo = ProjectRepository(db)
