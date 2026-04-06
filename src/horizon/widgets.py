@@ -36,7 +36,7 @@ from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime as _datetime
 
 try:
@@ -47,11 +47,20 @@ except ImportError:
     _OUTLOOK_AVAILABLE = False
 
 
+def _parse_attendees(raw: str) -> list[str]:
+    """Split a semicolon-separated Outlook attendees string into a clean list of names."""
+    if not raw:
+        return []
+    return [name.strip() for name in raw.split(";") if name.strip()]
+
+
 @dataclass
 class CalendarMeeting:
     start: _datetime
     end: _datetime
     subject: str
+    required_attendees: list[str] = field(default_factory=list)
+    optional_attendees: list[str] = field(default_factory=list)
 
 
 class ProjectListWidget(QWidget):
@@ -973,6 +982,8 @@ class OutlookFetchWorker(QThread):
                         start=appt.Start,
                         end=appt.End,
                         subject=appt.Subject or "(No title)",
+                        required_attendees=_parse_attendees(appt.RequiredAttendees),
+                        optional_attendees=_parse_attendees(appt.OptionalAttendees),
                     ))
                 except Exception:
                     continue

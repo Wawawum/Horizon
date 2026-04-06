@@ -11,6 +11,19 @@ from horizon.task import SubtaskRepository, TaskRepository
 from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
 
 
+def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
+    sections: list[str] = []
+    if meeting.required_attendees:
+        lines = ["**Required**"] + [f"- {name}" for name in meeting.required_attendees]
+        sections.append("\n".join(lines))
+    if meeting.optional_attendees:
+        lines = ["**Optional**"] + [f"- {name}" for name in meeting.optional_attendees]
+        sections.append("\n".join(lines))
+    if not sections:
+        return ""
+    return "## Participants\n\n" + "\n\n".join(sections)
+
+
 class MainWindow(QMainWindow):
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -69,7 +82,8 @@ class MainWindow(QMainWindow):
     def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
         subject = meeting.subject[:220]
         title = f"Meeting note - {subject} - {meeting.start.strftime('%Y-%m-%d %H:%M')}"
-        note = self._note_repo.create(project_id=None, title=title, dt=meeting.start)
+        body = _build_meeting_note_body(meeting)
+        note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start)
         projects = self._proj_repo.list_all()
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
