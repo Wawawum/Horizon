@@ -36,6 +36,8 @@ class MainWindow(QMainWindow):
         task_repo = TaskRepository(db)
         subtask_repo = SubtaskRepository(db)
         self._note_repo = NoteRepository(db)
+        self._note_source: str = "notes"
+        self._current_project = None
 
         splitter = QSplitter(Qt.Orientation.Horizontal)
 
@@ -70,10 +72,10 @@ class MainWindow(QMainWindow):
         self._project_list.home_requested.connect(self._show_home)
         self._project_list.project_selected.connect(self._show_project)
         self._project_list.notes_requested.connect(self._show_notes)
-        self._notes_list.note_edit_requested.connect(self._show_note_detail)
-        self._project_detail.note_edit_requested.connect(self._show_note_detail)
+        self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
+        self._project_detail.note_edit_requested.connect(self._open_note_from_project)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
-        self._note_detail.back_requested.connect(self._show_notes)
+        self._note_detail.back_requested.connect(self._go_back_from_note)
 
         self._show_home()  # default view on startup
 
@@ -97,6 +99,7 @@ class MainWindow(QMainWindow):
         if project is None:
             self._show_home()
             return
+        self._current_project = project
         self._project_detail.load_project(project)
         self._right_stack.setCurrentIndex(1)
 
@@ -104,6 +107,20 @@ class MainWindow(QMainWindow):
         self._project_list.clear_selection()
         self._notes_list.load()
         self._right_stack.setCurrentIndex(2)
+
+    def _open_note_from_notes(self, note_id: int) -> None:
+        self._note_source = "notes"
+        self._show_note_detail(note_id)
+
+    def _open_note_from_project(self, note_id: int) -> None:
+        self._note_source = "project"
+        self._show_note_detail(note_id)
+
+    def _go_back_from_note(self) -> None:
+        if self._note_source == "project" and self._current_project is not None:
+            self._show_project(self._current_project)
+        else:
+            self._show_notes()
 
     def _show_note_detail(self, note_id: int) -> None:
         note = self._note_repo.get(note_id)
