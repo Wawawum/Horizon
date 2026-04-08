@@ -44,3 +44,11 @@ class Preferences:
     def set_project_view(self, project_id: int, index: int) -> None:
         self._data.setdefault("project_views", {})
         self._data["project_views"][str(project_id)] = index
+
+    @property
+    def splitter_sizes(self) -> list[int] | None:
+        return self._data.get("splitter_sizes")
+
+    @splitter_sizes.setter
+    def splitter_sizes(self, value: list[int]) -> None:
+        self._data["splitter_sizes"] = value

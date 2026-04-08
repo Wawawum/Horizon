@@ -44,10 +44,10 @@ class MainWindow(QMainWindow):
         self._note_source: str = "notes"
         self._current_project = None
 
-        splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
 
         self._project_list = ProjectListWidget(self._proj_repo)
-        splitter.addWidget(self._project_list)
+        self._splitter.addWidget(self._project_list)
 
         self._right_stack = QStackedWidget()
 
@@ -63,14 +63,14 @@ class MainWindow(QMainWindow):
         self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._note_detail)     # index 3
 
-        splitter.addWidget(self._right_stack)
+        self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
-        splitter.addWidget(self._right_panel)
+        self._splitter.addWidget(self._right_panel)
 
-        splitter.setStretchFactor(0, 0)  # left panel keeps its natural width
-        splitter.setStretchFactor(1, 1)  # center panel absorbs extra space
-        splitter.setStretchFactor(2, 0)  # right panel keeps its natural width
+        self._splitter.setStretchFactor(0, 0)  # left panel keeps its natural width
+        self._splitter.setStretchFactor(1, 1)  # center panel absorbs extra space
+        self._splitter.setStretchFactor(2, 0)  # right panel keeps its natural width
 
         self._right_panel.create_note_requested.connect(self._on_create_note_from_meeting)
 
@@ -84,7 +84,10 @@ class MainWindow(QMainWindow):
 
         self._show_home()  # default view on startup
 
-        self.setCentralWidget(splitter)
+        self.setCentralWidget(self._splitter)
+        saved = self._prefs.splitter_sizes
+        if saved:
+            self._splitter.setSizes(saved)
 
     def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
         subject = meeting.subject[:220]
@@ -139,5 +142,6 @@ class MainWindow(QMainWindow):
         self._prefs.window_maximized = self.isMaximized()
         if not self.isMaximized():
             self._prefs.window_size = (self.width(), self.height())
+        self._prefs.splitter_sizes = self._splitter.sizes()
         self._prefs.save()
         super().closeEvent(event)
