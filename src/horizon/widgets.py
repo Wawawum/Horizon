@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread
-from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QIcon, QPalette, QPixmap, QTextCursor, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QObject, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread, Slot
+from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QIcon, QPalette, QPixmap, QTextCursor, QTextDocument, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
     QStyleOptionViewItem,
     QTableWidget,
     QTableWidgetItem,
+    QPlainTextEdit,
     QTextEdit,
     QMenu,
     QMessageBox,
@@ -33,6 +34,9 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QWidget,
 )
+
+from PySide6.QtWebEngineWidgets import QWebEngineView
+from PySide6.QtWebChannel import QWebChannel
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.note import Note, NoteRepository
@@ -1493,13 +1497,81 @@ class NotesListWidget(QWidget):
         self.note_edit_requested.emit(note.id)
 
 
+class MarkdownBridge(QObject):
+    html_changed = Signal(str)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._current_html: str = ""
+
+    def push_html(self, html: str) -> None:
+        self._current_html = html
+        self.html_changed.emit(html)
+
+    @Slot(result=str)
+    def get_current_html(self) -> str:
+        return self._current_html
+
+
+_PREVIEW_HTML = """<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    font-size: 14px; line-height: 1.6; color: #1a1a1a;
+    background: #ffffff; padding: 16px 24px; max-width: 860px;
+  }
+  h1, h2, h3, h4, h5, h6 { margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }
+  h1 { font-size: 1.75em; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.2em; }
+  h2 { font-size: 1.4em; border-bottom: 1px solid #ebebeb; padding-bottom: 0.15em; }
+  p { margin-bottom: 0.8em; }
+  ul, ol { margin-left: 1.5em; margin-bottom: 0.8em; }
+  code { font-family: 'Cascadia Code', monospace; background: #f3f3f3; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }
+  pre { background: #f3f3f3; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }
+  pre code { background: none; padding: 0; }
+  blockquote { border-left: 3px solid #c0c0c0; margin-left: 0; padding-left: 1em; color: #555; margin-bottom: 0.8em; }
+  hr { border: none; border-top: 1px solid #e0e0e0; margin: 1em 0; }
+  a { color: #0969da; }
+  table { border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }
+  th, td { border: 1px solid #d0d0d0; padding: 6px 12px; }
+  th { background: #f5f5f5; font-weight: 600; }
+</style>
+</head>
+<body>
+<div id="content"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script>
+  function applyHtml(html) {
+    var doc = new DOMParser().parseFromString(html, 'text/html');
+    document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
+  }
+  new QWebChannel(qt.webChannelTransport, function(channel) {
+    var bridge = channel.objects.bridge;
+    bridge.html_changed.connect(function(html) { applyHtml(html); });
+    bridge.get_current_html(function(html) { if (html) applyHtml(html); });
+  });
+</script>
+</body>
+</html>"""
+
+
+def _markdown_to_html(markdown: str) -> str:
+    doc = QTextDocument()
+    doc.setMarkdown(markdown)
+    return doc.toHtml()
+
+
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
+        self._prefs = prefs
         self._current_note: Note | None = None
         self._body_raw: str = ""
         self._updating_combo = False
@@ -1542,12 +1614,26 @@ class NoteDetailWidget(QWidget):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self._body_edit = QTextEdit()
-        self._body_edit.setReadOnly(True)
-        self._body_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self._body_edit.installEventFilter(self)
-        self._body_edit.viewport().installEventFilter(self)
-        self._body_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+        self._editor = QPlainTextEdit()
+        self._editor.setPlaceholderText("Write markdown here…")
+        self._editor.installEventFilter(self)
+
+        self._bridge = MarkdownBridge(self)
+        self._channel = QWebChannel(self)
+
+        self._preview = QWebEngineView()
+        self._preview.page().setWebChannel(self._channel)
+        self._channel.registerObject("bridge", self._bridge)
+        self._preview.setHtml(_PREVIEW_HTML)
+
+        self._editor.textChanged.connect(self._on_editor_text_changed)
+
+        self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._body_splitter.addWidget(self._editor)
+        self._body_splitter.addWidget(self._preview)
+        self._body_splitter.setStretchFactor(0, 1)
+        self._body_splitter.setStretchFactor(1, 1)
+        self._body_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -1555,7 +1641,9 @@ class NoteDetailWidget(QWidget):
         layout.addLayout(header_layout)
         layout.addLayout(project_row)
         layout.addWidget(sep)
-        layout.addWidget(self._body_edit, stretch=1)
+        layout.addWidget(self._body_splitter, stretch=1)
+
+        self._restore_splitter_sizes()
 
     def load_note(self, note: Note, projects: list) -> None:
         self._current_note = note
@@ -1574,42 +1662,38 @@ class NoteDetailWidget(QWidget):
         self._project_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._updating_combo = False
 
-        self._render_body()
+        self._editor.blockSignals(True)
+        self._editor.setPlainText(self._body_raw)
+        self._editor.blockSignals(False)
+        self._bridge.push_html(_markdown_to_html(self._body_raw))
 
     def eventFilter(self, obj, event) -> bool:
-        if obj is self._body_edit.viewport():
-            if event.type() == QEvent.Type.MouseButtonPress and self._body_edit.isReadOnly():
-                self._enter_body_edit()
-                return True
-        if obj is self._body_edit:
-            if event.type() == QEvent.Type.FocusOut and not self._body_edit.isReadOnly():
-                self._save_body()
+        if obj is self._editor and event.type() == QEvent.Type.FocusOut:
+            self._save_body()
         return super().eventFilter(obj, event)
-
-    def _enter_body_edit(self) -> None:
-        self._body_edit.setFrameShape(QFrame.Shape.StyledPanel)
-        self._body_edit.setReadOnly(False)
-        self._body_edit.setPlainText(self._body_raw)
-        self._body_edit.viewport().unsetCursor()
-        self._body_edit.moveCursor(QTextCursor.MoveOperation.End)
-        self._body_edit.setFocus()
 
     def _save_body(self) -> None:
         if self._current_note is None:
             return
-        self._body_raw = self._body_edit.toPlainText()
+        new_body = self._editor.toPlainText()
+        if new_body == self._body_raw:
+            return
+        self._body_raw = new_body
         self._current_note.body = self._body_raw
         self._note_repo.update(self._current_note)
-        self._render_body()
 
-    def _render_body(self) -> None:
-        self._body_edit.setReadOnly(True)
-        self._body_edit.setFrameShape(QFrame.Shape.NoFrame)
-        self._body_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
-        if self._body_raw:
-            self._body_edit.setMarkdown(self._body_raw)
-        else:
-            self._body_edit.setPlainText("")
+    def _on_editor_text_changed(self) -> None:
+        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText()))
+
+    def _on_splitter_moved(self, _pos: int, _index: int) -> None:
+        if self._prefs is not None:
+            self._prefs.note_splitter_sizes = self._body_splitter.sizes()
+
+    def _restore_splitter_sizes(self) -> None:
+        if self._prefs is not None:
+            saved = self._prefs.note_splitter_sizes
+            if saved:
+                self._body_splitter.setSizes(saved)
 
     def _save_title(self) -> None:
         if self._current_note is None:

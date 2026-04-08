@@ -52,3 +52,11 @@ class Preferences:
     @splitter_sizes.setter
     def splitter_sizes(self, value: list[int]) -> None:
         self._data["splitter_sizes"] = value
+
+    @property
+    def note_splitter_sizes(self) -> list[int] | None:
+        return self._data.get("note_splitter_sizes")
+
+    @note_splitter_sizes.setter
+    def note_splitter_sizes(self, value: list[int]) -> None:
+        self._data["note_splitter_sizes"] = value

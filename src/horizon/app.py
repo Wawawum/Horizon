@@ -60,7 +60,7 @@ class MainWindow(QMainWindow):
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._notes_list)      # index 2
 
-        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo)
+        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, prefs=self._prefs)
         self._right_stack.addWidget(self._note_detail)     # index 3
 
         self._splitter.addWidget(self._right_stack)
