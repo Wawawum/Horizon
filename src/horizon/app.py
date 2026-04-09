@@ -5,6 +5,7 @@ from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
 from horizon.database import Database
+from horizon.image import ImageRepository
 from horizon.note import NoteRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
@@ -41,6 +42,7 @@ class MainWindow(QMainWindow):
         task_repo = TaskRepository(db)
         subtask_repo = SubtaskRepository(db)
         self._note_repo = NoteRepository(db)
+        image_repo = ImageRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -60,7 +62,7 @@ class MainWindow(QMainWindow):
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._notes_list)      # index 2
 
-        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, prefs=self._prefs)
+        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, prefs=self._prefs, image_repo=image_repo)
         self._right_stack.addWidget(self._note_detail)     # index 3
 
         self._splitter.addWidget(self._right_stack)

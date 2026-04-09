@@ -1,6 +1,8 @@
+import base64
+import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QObject, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread, Slot
+from PySide6.QtCore import Qt, Signal, QBuffer, QByteArray, QIODevice, QMimeData, QObject, QRect, QRectF, QSize, QEvent, QTimer, QTime, QPointF, QThread, Slot
 from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QIcon, QPalette, QPixmap, QTextCursor, QTextDocument, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -39,6 +41,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
@@ -1558,20 +1561,74 @@ _PREVIEW_HTML = """<!DOCTYPE html>
 </html>"""
 
 
-def _markdown_to_html(markdown: str) -> str:
+_MD_IMG_RE   = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
+_HTML_PH_RE  = re.compile(r'HORIZONIMG(\d+)END')
+
+
+def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) -> str:
+    """Convert markdown to HTML, resolving horizon-image:// references to inline data URIs.
+
+    Qt's QTextDocument.toHtml() does not reliably preserve unknown URL schemes
+    (it may encode or drop them).  We therefore substitute image references with
+    plain-text placeholders *before* the Qt markdown pass, then replace those
+    placeholders with proper <img> tags in the resulting HTML.
+    """
+    images: dict[int, bytes | None] = {}
+
+    if image_repo is not None:
+        def _extract(m: re.Match) -> str:
+            img_id = int(m.group(2))
+            if img_id not in images:
+                images[img_id] = image_repo.get(img_id)
+            return f"HORIZONIMG{img_id}END"
+
+        markdown = _MD_IMG_RE.sub(_extract, markdown)
+
     doc = QTextDocument()
     doc.setMarkdown(markdown)
-    return doc.toHtml()
+    html = doc.toHtml()
+
+    if images:
+        def _inject(m: re.Match) -> str:
+            data = images.get(int(m.group(1)))
+            if not data:
+                return ""
+            b64 = base64.b64encode(data).decode()
+            return f'<img src="data:image/png;base64,{b64}" style="max-width:100%;">'
+
+        html = _HTML_PH_RE.sub(_inject, html)
+
+    return html
+
+
+class MarkdownEditor(QPlainTextEdit):
+    def __init__(self, image_repo: ImageRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._image_repo = image_repo
+
+    def insertFromMimeData(self, source) -> None:
+        if source.hasImage():
+            image = source.imageData()
+            ba = QByteArray()
+            buf = QBuffer(ba)
+            buf.open(QIODevice.OpenModeFlag.WriteOnly)
+            image.save(buf, "PNG")
+            buf.close()
+            image_id = self._image_repo.create(bytes(ba))
+            self.insertPlainText(f"![](horizon-image://{image_id})")
+        else:
+            super().insertFromMimeData(source)
 
 
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, prefs=None, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, prefs=None, image_repo: ImageRepository | None = None, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
         self._prefs = prefs
+        self._image_repo = image_repo
         self._current_note: Note | None = None
         self._body_raw: str = ""
         self._updating_combo = False
@@ -1614,7 +1671,7 @@ class NoteDetailWidget(QWidget):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self._editor = QPlainTextEdit()
+        self._editor = MarkdownEditor(image_repo) if image_repo is not None else QPlainTextEdit()
         self._editor.setPlaceholderText("Write markdown here…")
         self._editor.installEventFilter(self)
 
@@ -1665,7 +1722,7 @@ class NoteDetailWidget(QWidget):
         self._editor.blockSignals(True)
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
-        self._bridge.push_html(_markdown_to_html(self._body_raw))
+        self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._editor and event.type() == QEvent.Type.FocusOut:
@@ -1683,7 +1740,7 @@ class NoteDetailWidget(QWidget):
         self._note_repo.update(self._current_note)
 
     def _on_editor_text_changed(self) -> None:
-        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText()))
+        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self._prefs is not None:

@@ -37,6 +37,11 @@ CREATE TABLE IF NOT EXISTS notes (
     body       TEXT    NOT NULL DEFAULT '',
     dt         TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS images (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    data BLOB    NOT NULL
+);
 """
 
 _MIGRATIONS = [
