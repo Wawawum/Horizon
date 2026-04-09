@@ -1524,23 +1524,23 @@ _PREVIEW_HTML = """<!DOCTYPE html>
   * { box-sizing: border-box; margin: 0; padding: 0; }
   body {
     font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 14px; line-height: 1.6; color: #1a1a1a;
-    background: #ffffff; padding: 16px 24px; max-width: 860px;
+    font-size: 14px; line-height: 1.6; color: #d4d4d4;
+    background: #1e1e1e; padding: 16px 24px; max-width: 860px;
   }
   h1, h2, h3, h4, h5, h6 { margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }
-  h1 { font-size: 1.75em; border-bottom: 1px solid #e0e0e0; padding-bottom: 0.2em; }
-  h2 { font-size: 1.4em; border-bottom: 1px solid #ebebeb; padding-bottom: 0.15em; }
+  h1 { font-size: 1.75em; border-bottom: 1px solid #3a3a3a; padding-bottom: 0.2em; }
+  h2 { font-size: 1.4em; border-bottom: 1px solid #3a3a3a; padding-bottom: 0.15em; }
   p { margin-bottom: 0.8em; }
   ul, ol { margin-left: 1.5em; margin-bottom: 0.8em; }
-  code { font-family: 'Cascadia Code', monospace; background: #f3f3f3; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }
-  pre { background: #f3f3f3; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }
+  code { font-family: 'Cascadia Code', monospace; background: #2d2d2d; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }
+  pre { background: #2d2d2d; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }
   pre code { background: none; padding: 0; }
-  blockquote { border-left: 3px solid #c0c0c0; margin-left: 0; padding-left: 1em; color: #555; margin-bottom: 0.8em; }
-  hr { border: none; border-top: 1px solid #e0e0e0; margin: 1em 0; }
-  a { color: #0969da; }
+  blockquote { border-left: 3px solid #555555; margin-left: 0; padding-left: 1em; color: #888888; margin-bottom: 0.8em; }
+  hr { border: none; border-top: 1px solid #3a3a3a; margin: 1em 0; }
+  a { color: #4ea1f3; }
   table { border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }
-  th, td { border: 1px solid #d0d0d0; padding: 6px 12px; }
-  th { background: #f5f5f5; font-weight: 600; }
+  th, td { border: 1px solid #3a3a3a; padding: 6px 12px; }
+  th { background: #2a2a2a; font-weight: 600; }
 </style>
 </head>
 <body>
