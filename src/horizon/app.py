@@ -2,7 +2,7 @@ from pathlib import Path
 
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget
 
 from horizon import theme as _theme
 from horizon.database import Database
@@ -32,6 +32,7 @@ class MainWindow(QMainWindow):
         self._db = db
         self._prefs = Preferences()
         _theme.init(self._prefs.theme)
+        QApplication.instance().setStyleSheet(_theme.make_stylesheet(_theme.current()))
         super().__init__()
         self.setWindowTitle("Horizon")
         self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))

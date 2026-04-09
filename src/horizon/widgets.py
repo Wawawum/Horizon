@@ -79,16 +79,24 @@ _PROJECT_COLOR_ROLE = Qt.ItemDataRole.UserRole + 1
 
 class ProjectListDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
+        t = _theme.current()
         opt = QStyleOptionViewItem(option)
         self.initStyleOption(opt, index)
 
+        is_selected = bool(opt.state & QStyle.StateFlag.State_Selected)
+
         painter.save()
 
-        # Draw full-width background (selection, hover) without text/icon
-        bg_opt = QStyleOptionViewItem(opt)
-        bg_opt.text = ""
-        style = opt.widget.style() if opt.widget else QApplication.style()
-        style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
+        # Background: own rendering for selection (avoids relying on the system
+        # palette which can produce white-on-white when Qt picks up an OS theme);
+        # let the system style handle hover/normal states.
+        if is_selected:
+            painter.fillRect(option.rect, QColor(t.list_selected_bg))
+        else:
+            bg_opt = QStyleOptionViewItem(opt)
+            bg_opt.text = ""
+            style = opt.widget.style() if opt.widget else QApplication.style()
+            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
 
         # Draw color band on the left edge
         color_str = index.data(_PROJECT_COLOR_ROLE)
@@ -101,10 +109,7 @@ class ProjectListDelegate(QStyledItemDelegate):
         # Draw text indented past the band
         text_x = option.rect.x() + _BAND_WIDTH + 4
         text_rect = QRect(text_x, option.rect.y(), option.rect.right() - text_x, option.rect.height())
-        if opt.state & QStyle.StateFlag.State_Selected:
-            text_color = opt.palette.highlightedText().color()
-        else:
-            text_color = opt.palette.text().color()
+        text_color = QColor(t.list_selected_text) if is_selected else opt.palette.text().color()
         painter.setPen(text_color)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, opt.text)
 

@@ -6,6 +6,26 @@ from pathlib import Path
 @dataclass
 class Theme:
     name: str
+    # ── App-level surfaces ────────────────────────────────────────────────
+    app_bg: str           # fenêtre principale, dialogs
+    surface_bg: str       # panneaux, listes, tables, champs
+    surface_alt_bg: str   # en-têtes de colonnes, lignes alternées
+    text: str             # texte principal
+    border: str           # bordures, séparateurs
+    # ── Champs de saisie ──────────────────────────────────────────────────
+    input_bg: str
+    # ── Boutons ───────────────────────────────────────────────────────────
+    button_bg: str
+    button_hover: str
+    button_pressed: str
+    # ── Scrollbars ────────────────────────────────────────────────────────
+    scrollbar_bg: str
+    scrollbar_handle: str
+    scrollbar_handle_hover: str
+    # ── Sélection dans les listes ─────────────────────────────────────────
+    list_selected_bg: str
+    list_selected_text: str
+    # ── Tuiles Kanban ─────────────────────────────────────────────────────
     tile_bg: str
     tile_border: str
     tile_text: str
@@ -13,9 +33,11 @@ class Theme:
     tile_checkbox_checked_bg: str
     tile_checkbox_checked_border: str
     tile_project_label: str
+    # ── Priorités ─────────────────────────────────────────────────────────
     priority_low: str
     priority_medium: str
     priority_high: str
+    # ── Calendrier ────────────────────────────────────────────────────────
     calendar_bg: str
     calendar_label: str
     calendar_hour_line: str
@@ -23,15 +45,19 @@ class Theme:
     calendar_event_bg: str
     calendar_event_text: str
     calendar_now_line: str
+    # ── Horloge analogique ────────────────────────────────────────────────
     clock_face: str
     clock_ring: str
     clock_tick_hour: str
     clock_tick_minute: str
     clock_hand: str
     clock_second: str
+    # ── Bouton couleur ────────────────────────────────────────────────────
     color_btn_border: str
+    # ── Bouton supprimer ──────────────────────────────────────────────────
     delete_btn_text: str
     delete_btn_bg: str
+    # ── Aperçu Markdown ───────────────────────────────────────────────────
     preview_text: str
     preview_bg: str
     preview_border: str
@@ -64,3 +90,263 @@ def current() -> Theme:
     if _current is None:
         raise RuntimeError("theme.init() has not been called")
     return _current
+
+
+def make_stylesheet(t: Theme) -> str:
+    """Génère le QSS global à appliquer sur QApplication."""
+    return f"""
+/* ── Base ──────────────────────────────────────────────────────────── */
+QWidget {{
+    background-color: {t.app_bg};
+    color: {t.text};
+}}
+QMainWindow, QDialog {{
+    background-color: {t.app_bg};
+}}
+
+/* ── Widgets transparents / pass-through ──────────────────────────── */
+QLabel {{
+    background-color: transparent;
+}}
+QCheckBox {{
+    background-color: transparent;
+    spacing: 6px;
+}}
+QScrollArea {{
+    background-color: transparent;
+    border: none;
+}}
+QScrollArea > QWidget > QWidget {{
+    background-color: transparent;
+}}
+QStackedWidget {{
+    background-color: transparent;
+}}
+
+/* ── Boutons ────────────────────────────────────────────────────────── */
+QPushButton {{
+    background-color: {t.button_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    border-radius: 4px;
+    padding: 4px 12px;
+    min-height: 22px;
+}}
+QPushButton:hover {{
+    background-color: {t.button_hover};
+}}
+QPushButton:pressed {{
+    background-color: {t.button_pressed};
+}}
+QPushButton:disabled {{
+    color: {t.scrollbar_handle};
+}}
+QToolButton {{
+    background-color: {t.button_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    border-radius: 3px;
+    padding: 2px 6px;
+}}
+QToolButton:hover {{
+    background-color: {t.button_hover};
+}}
+QToolButton:pressed, QToolButton:checked {{
+    background-color: {t.button_pressed};
+}}
+
+/* ── Champs de saisie ───────────────────────────────────────────────── */
+QLineEdit, QPlainTextEdit, QTextEdit {{
+    background-color: {t.input_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    border-radius: 3px;
+    padding: 2px 4px;
+    selection-background-color: {t.list_selected_bg};
+    selection-color: {t.list_selected_text};
+}}
+
+/* ── Liste déroulante ───────────────────────────────────────────────── */
+QComboBox {{
+    background-color: {t.input_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    border-radius: 3px;
+    padding: 2px 8px 2px 4px;
+    min-height: 22px;
+}}
+QComboBox::drop-down {{
+    subcontrol-origin: padding;
+    subcontrol-position: top right;
+    width: 20px;
+    border-left: 1px solid {t.border};
+    border-radius: 0 3px 3px 0;
+}}
+QComboBox QAbstractItemView {{
+    background-color: {t.surface_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    selection-background-color: {t.list_selected_bg};
+    selection-color: {t.list_selected_text};
+    outline: none;
+}}
+
+/* ── Listes ─────────────────────────────────────────────────────────── */
+QListWidget, QListView {{
+    background-color: {t.surface_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    outline: none;
+}}
+QListWidget::item {{
+    padding: 2px 0;
+}}
+QListWidget::item:selected, QListView::item:selected {{
+    background-color: {t.list_selected_bg};
+    color: {t.list_selected_text};
+}}
+QListWidget::item:hover:!selected, QListView::item:hover:!selected {{
+    background-color: {t.button_hover};
+}}
+
+/* ── Tables ─────────────────────────────────────────────────────────── */
+QTableWidget, QTableView {{
+    background-color: {t.surface_bg};
+    color: {t.text};
+    gridline-color: {t.border};
+    border: 1px solid {t.border};
+    outline: none;
+}}
+QTableWidget::item:selected, QTableView::item:selected {{
+    background-color: {t.list_selected_bg};
+    color: {t.list_selected_text};
+}}
+QHeaderView {{
+    background-color: {t.surface_alt_bg};
+    border: none;
+}}
+QHeaderView::section {{
+    background-color: {t.surface_alt_bg};
+    color: {t.text};
+    border: none;
+    border-right: 1px solid {t.border};
+    border-bottom: 1px solid {t.border};
+    padding: 4px 8px;
+}}
+QHeaderView::section:last {{
+    border-right: none;
+}}
+QTableCornerButton::section {{
+    background-color: {t.surface_alt_bg};
+    border: 1px solid {t.border};
+}}
+
+/* ── Séparateurs QFrame ─────────────────────────────────────────────── */
+QFrame[frameShape="4"] {{
+    background-color: {t.border};
+    border: none;
+    max-height: 1px;
+    min-height: 1px;
+}}
+QFrame[frameShape="5"] {{
+    background-color: {t.border};
+    border: none;
+    max-width: 1px;
+    min-width: 1px;
+}}
+
+/* ── Splitter ────────────────────────────────────────────────────────── */
+QSplitter::handle {{
+    background-color: {t.border};
+}}
+QSplitter::handle:horizontal {{
+    width: 1px;
+}}
+QSplitter::handle:vertical {{
+    height: 1px;
+}}
+
+/* ── Scrollbars ─────────────────────────────────────────────────────── */
+QScrollBar:vertical {{
+    background-color: {t.scrollbar_bg};
+    width: 10px;
+    margin: 0;
+    border: none;
+}}
+QScrollBar::handle:vertical {{
+    background-color: {t.scrollbar_handle};
+    min-height: 24px;
+    border-radius: 5px;
+    margin: 2px 2px;
+}}
+QScrollBar::handle:vertical:hover {{
+    background-color: {t.scrollbar_handle_hover};
+}}
+QScrollBar::add-line:vertical, QScrollBar::sub-line:vertical {{
+    height: 0;
+    background: none;
+}}
+QScrollBar::add-page:vertical, QScrollBar::sub-page:vertical {{
+    background: none;
+}}
+QScrollBar:horizontal {{
+    background-color: {t.scrollbar_bg};
+    height: 10px;
+    margin: 0;
+    border: none;
+}}
+QScrollBar::handle:horizontal {{
+    background-color: {t.scrollbar_handle};
+    min-width: 24px;
+    border-radius: 5px;
+    margin: 2px 2px;
+}}
+QScrollBar::handle:horizontal:hover {{
+    background-color: {t.scrollbar_handle_hover};
+}}
+QScrollBar::add-line:horizontal, QScrollBar::sub-line:horizontal {{
+    width: 0;
+    background: none;
+}}
+QScrollBar::add-page:horizontal, QScrollBar::sub-page:horizontal {{
+    background: none;
+}}
+
+/* ── Menu contextuel ────────────────────────────────────────────────── */
+QMenu {{
+    background-color: {t.surface_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    padding: 2px 0;
+}}
+QMenu::item {{
+    padding: 4px 24px 4px 12px;
+    background-color: transparent;
+}}
+QMenu::item:selected {{
+    background-color: {t.list_selected_bg};
+    color: {t.list_selected_text};
+}}
+QMenu::separator {{
+    height: 1px;
+    background-color: {t.border};
+    margin: 2px 6px;
+}}
+
+/* ── Tooltip ────────────────────────────────────────────────────────── */
+QToolTip {{
+    background-color: {t.surface_alt_bg};
+    color: {t.text};
+    border: 1px solid {t.border};
+    padding: 2px 6px;
+}}
+
+/* ── Boîte de message ───────────────────────────────────────────────── */
+QMessageBox {{
+    background-color: {t.app_bg};
+}}
+QMessageBox QLabel {{
+    color: {t.text};
+    background-color: transparent;
+}}
+"""
