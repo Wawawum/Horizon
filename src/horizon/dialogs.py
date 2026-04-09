@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QWidget,
 )
 
+from horizon import theme as _theme
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
 
 
@@ -42,7 +43,7 @@ class NewProjectDialog(QDialog):
         self._color_btn = QPushButton()
         self._color_btn.setFixedSize(24, 24)
         self._color_btn.setToolTip("Choose a color")
-        self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
+        self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;")
         self._color_btn.clicked.connect(self._pick_color)
 
         color_layout = QHBoxLayout()
@@ -72,7 +73,7 @@ class NewProjectDialog(QDialog):
         if chosen.isValid():
             self._color = chosen.name()
             self._color_btn.setStyleSheet(
-                f"background-color: {self._color}; border: 1px solid #888; border-radius: 3px;"
+                f"background-color: {self._color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;"
             )
 
     def _on_accepted(self) -> None:
@@ -226,7 +227,7 @@ class TaskDetailDialog(QDialog):
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
         self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setStyleSheet("color: white; background-color: red;")
+        self._delete_btn.setStyleSheet(f"color: {_theme.current().delete_btn_text}; background-color: {_theme.current().delete_btn_bg};")
         self._delete_btn.setVisible(task.archived)
         self._delete_btn.clicked.connect(self._on_delete_clicked)
         self._deleted = False

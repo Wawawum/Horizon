@@ -40,6 +40,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
+from horizon import theme as _theme
 from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository
@@ -196,15 +197,7 @@ _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG   = (Path(__file__).parent / "resources" / "check_black.svg").as_posix()
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
-_TILE_BG     = QColor("#ffffff")
-_TILE_BORDER = QColor("#cccccc")
 _TILE_MARGIN = 2
-
-_PRIORITY_COLOR: dict[TaskPriority, QColor] = {
-    TaskPriority.Low:    QColor("#9e9e9e"),
-    TaskPriority.Medium: QColor("#2196f3"),
-    TaskPriority.High:   QColor("#f44336"),
-}
 
 
 class KanbanCardDelegate(QStyledItemDelegate):
@@ -215,6 +208,15 @@ class KanbanCardDelegate(QStyledItemDelegate):
         return font
 
     def paint(self, painter, option, index) -> None:
+        t = _theme.current()
+        tile_bg = QColor(t.tile_bg)
+        tile_border = QColor(t.tile_border)
+        priority_colors = {
+            TaskPriority.Low:    QColor(t.priority_low),
+            TaskPriority.Medium: QColor(t.priority_medium),
+            TaskPriority.High:   QColor(t.priority_high),
+        }
+
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
@@ -225,14 +227,14 @@ class KanbanCardDelegate(QStyledItemDelegate):
         path = QPainterPath()
         path.addRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(_TILE_BG))
+        painter.setBrush(QBrush(tile_bg))
         painter.drawPath(path)
 
         # clip to tile so selection highlight respects rounded corners
         painter.setClipPath(path)
 
         priority = index.data(_PRIORITY_ROLE)
-        color = _PRIORITY_COLOR.get(priority, QColor("#9e9e9e"))
+        color = priority_colors.get(priority, QColor(t.priority_low))
         band = QRect(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height())
         painter.fillRect(band, color)
 
@@ -240,7 +242,7 @@ class KanbanCardDelegate(QStyledItemDelegate):
         painter.restore()
         painter.save()
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
-        painter.setPen(QPen(_TILE_BORDER, 1))
+        painter.setPen(QPen(tile_border, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
         painter.restore()
@@ -259,10 +261,10 @@ class KanbanCardWidget(QWidget):
         super().__init__(parent)
         self._priority = task.priority
         self._project_color = project_color
-        # Force dark text on all children regardless of the app theme
-        self.setStyleSheet("""
-            QLabel    { color: #1a1a1a; background: transparent; }
-            QCheckBox { color: #1a1a1a; }
+        t = _theme.current()
+        self.setStyleSheet(f"""
+            QLabel    {{ color: {t.tile_text}; background: transparent; }}
+            QCheckBox {{ color: {t.tile_text}; }}
         """)
 
         layout = QVBoxLayout(self)
@@ -279,9 +281,9 @@ class KanbanCardWidget(QWidget):
             # Give the checkbox a light palette so the system style draws a
             # visible indicator (border + checkmark) on our white card background.
             cb.setStyleSheet(
-                "QCheckBox { color: #1a1a1a; }"
-                " QCheckBox::indicator { border: 1px solid #888888; border-radius: 2px; }"
-                f" QCheckBox::indicator:checked {{ background-color: #ffffff; border-color: #333333; image: url({_CHECK_SVG}); }}"
+                f"QCheckBox {{ color: {t.tile_text}; }}"
+                f" QCheckBox::indicator {{ border: 1px solid {t.tile_checkbox_border}; border-radius: 2px; }}"
+                f" QCheckBox::indicator:checked {{ background-color: {t.tile_checkbox_checked_bg}; border-color: {t.tile_checkbox_checked_border}; image: url({_CHECK_SVG}); }}"
             )
             cb.stateChanged.connect(
                 lambda state, sid=subtask.id: subtask_repo.set_completed(
@@ -296,26 +298,35 @@ class KanbanCardWidget(QWidget):
             proj_font.setItalic(True)
             proj_font.setPointSize(max(proj_font.pointSize() - 2, 7))
             proj_label.setFont(proj_font)
-            proj_label.setStyleSheet("color: #555555; background: transparent;")
+            proj_label.setStyleSheet(f"color: {t.tile_project_label}; background: transparent;")
             layout.addWidget(proj_label)
 
     def paintEvent(self, event) -> None:
+        t = _theme.current()
+        tile_bg = QColor(t.tile_bg)
+        tile_border = QColor(t.tile_border)
+        priority_colors = {
+            TaskPriority.Low:    QColor(t.priority_low),
+            TaskPriority.Medium: QColor(t.priority_medium),
+            TaskPriority.High:   QColor(t.priority_high),
+        }
+
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
         tile_rect  = self.rect().adjusted(_TILE_MARGIN, _TILE_MARGIN, -_TILE_MARGIN, -_TILE_MARGIN)
         tile_rectf = QRectF(tile_rect)
 
-        # White rounded background
+        # Rounded background
         path = QPainterPath()
         path.addRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(_TILE_BG))
+        painter.setBrush(QBrush(tile_bg))
         painter.drawPath(path)
 
         # Priority band clipped to rounded rect
         painter.setClipPath(path)
-        color = _PRIORITY_COLOR.get(self._priority, QColor("#9e9e9e"))
+        color = priority_colors.get(self._priority, QColor(t.priority_low))
         painter.fillRect(QRectF(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height()), color)
 
         # Project color square — bottom-right corner
@@ -328,7 +339,7 @@ class KanbanCardWidget(QWidget):
         painter.setClipping(False)
 
         # Border
-        painter.setPen(QPen(_TILE_BORDER, 1))
+        painter.setPen(QPen(tile_border, 1))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawRoundedRect(tile_rectf, _TILE_RADIUS, _TILE_RADIUS)
 
@@ -651,7 +662,7 @@ class ProjectDetailWidget(QWidget):
         self._color_btn = QPushButton()
         self._color_btn.setFixedSize(24, 24)
         self._color_btn.setToolTip("Choose a color")
-        self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
+        self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;")
         self._color_btn.clicked.connect(self._pick_color)
 
         name_header = QHBoxLayout()
@@ -844,7 +855,7 @@ class ProjectDetailWidget(QWidget):
             self._current_project.color = chosen.name()
             self._project_repo.update(self._current_project)
             self._color_btn.setStyleSheet(
-                f"background-color: {self._current_project.color}; border: 1px solid #888; border-radius: 3px;"
+                f"background-color: {self._current_project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;"
             )
             self.project_renamed.emit()
 
@@ -1047,10 +1058,10 @@ class ProjectDetailWidget(QWidget):
             self._archive_cb.setChecked(project.archived)
             if project.color:
                 self._color_btn.setStyleSheet(
-                    f"background-color: {project.color}; border: 1px solid #888; border-radius: 3px;"
+                    f"background-color: {project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;"
                 )
             else:
-                self._color_btn.setStyleSheet("border: 1px solid #888; border-radius: 3px;")
+                self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;")
             self._desc_raw = project.description
             if self._desc_raw:
                 self._desc_text.setMarkdown(self._desc_raw)
@@ -1185,7 +1196,8 @@ class CalendarTimelineWidget(QWidget):
         event_left = self.LABEL_WIDTH + 4
         event_right = w - 2
 
-        painter.fillRect(self.rect(), QColor(18, 18, 18))
+        t = _theme.current()
+        painter.fillRect(self.rect(), QColor(t.calendar_bg))
 
         for hour in range(self.START_HOUR, self.END_HOUR + 1):
             y = (hour - self.START_HOUR) * self.HOUR_HEIGHT
@@ -1198,18 +1210,18 @@ class CalendarTimelineWidget(QWidget):
             else:
                 label = f"{hour - 12} PM"
 
-            painter.setPen(QColor(130, 130, 130))
+            painter.setPen(QColor(t.calendar_label))
             painter.drawText(
                 QRect(0, y - 7, self.LABEL_WIDTH - 4, 14),
                 Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter,
                 label,
             )
-            painter.setPen(QPen(QColor(55, 55, 55), 1))
+            painter.setPen(QPen(QColor(t.calendar_hour_line), 1))
             painter.drawLine(self.LABEL_WIDTH, y, w, y)
 
             if hour < self.END_HOUR:
                 half_y = y + self.HOUR_HEIGHT // 2
-                painter.setPen(QPen(QColor(40, 40, 40), 1, Qt.PenStyle.DotLine))
+                painter.setPen(QPen(QColor(t.calendar_half_hour_line), 1, Qt.PenStyle.DotLine))
                 painter.drawLine(self.LABEL_WIDTH, half_y, w, half_y)
 
         available_w = event_right - event_left
@@ -1230,8 +1242,8 @@ class CalendarTimelineWidget(QWidget):
                 int(col_w) - 2, int(y_bot - y_top) - 2,
             )
             self._layout_cache.append((meeting, rect))
-            painter.fillRect(rect, QColor(150, 20, 20))
-            painter.setPen(QColor(255, 255, 255))
+            painter.fillRect(rect, QColor(t.calendar_event_bg))
+            painter.setPen(QColor(t.calendar_event_text))
             painter.drawText(
                 rect.adjusted(4, 3, -3, -3),
                 Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignTop | Qt.TextFlag.TextWordWrap,
@@ -1242,7 +1254,7 @@ class CalendarTimelineWidget(QWidget):
         current_frac = now.hour() + now.minute() / 60.0
         if self.START_HOUR <= current_frac <= self.END_HOUR:
             cy = int((current_frac - self.START_HOUR) * self.HOUR_HEIGHT)
-            painter.setPen(QPen(QColor(220, 220, 220), 1))
+            painter.setPen(QPen(QColor(t.calendar_now_line), 1))
             painter.drawLine(self.LABEL_WIDTH, cy, w, cy)
             path = QPainterPath()
             path.moveTo(self.LABEL_WIDTH - 1, cy - 5)
@@ -1250,7 +1262,7 @@ class CalendarTimelineWidget(QWidget):
             path.lineTo(self.LABEL_WIDTH - 1, cy + 5)
             path.closeSubpath()
             painter.setPen(Qt.PenStyle.NoPen)
-            painter.setBrush(QBrush(QColor(220, 220, 220)))
+            painter.setBrush(QBrush(QColor(t.calendar_now_line)))
             painter.drawPath(path)
 
     def mousePressEvent(self, event) -> None:
@@ -1351,24 +1363,26 @@ class AnalogClockWidget(QWidget):
         painter.translate(self.width() / 2, self.height() / 2)
         painter.scale(side / 200.0, side / 200.0)
 
+        t = _theme.current()
+
         # Clock face
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(255, 255, 255)))
+        painter.setBrush(QBrush(QColor(t.clock_face)))
         painter.drawEllipse(-90, -90, 180, 180)
 
         # Outer ring
-        painter.setPen(QPen(QColor(80, 80, 80), 4))
+        painter.setPen(QPen(QColor(t.clock_ring), 4))
         painter.setBrush(Qt.BrushStyle.NoBrush)
         painter.drawEllipse(-90, -90, 180, 180)
 
         # Hour tick marks
-        painter.setPen(QPen(QColor(60, 60, 60), 3))
+        painter.setPen(QPen(QColor(t.clock_tick_hour), 3))
         for i in range(12):
             painter.drawLine(QPointF(0, -76), QPointF(0, -90))
             painter.rotate(30)
 
         # Minute tick marks
-        painter.setPen(QPen(QColor(140, 140, 140), 1))
+        painter.setPen(QPen(QColor(t.clock_tick_minute), 1))
         for i in range(60):
             if i % 5 != 0:
                 painter.drawLine(QPointF(0, -82), QPointF(0, -90))
@@ -1379,7 +1393,7 @@ class AnalogClockWidget(QWidget):
         painter.save()
         painter.rotate(hour_angle)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.setBrush(QBrush(QColor(t.clock_hand)))
         painter.drawConvexPolygon([
             QPointF(-5, 10), QPointF(5, 10),
             QPointF(3, -50), QPointF(-3, -50),
@@ -1391,7 +1405,7 @@ class AnalogClockWidget(QWidget):
         painter.save()
         painter.rotate(minute_angle)
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(40, 40, 40)))
+        painter.setBrush(QBrush(QColor(t.clock_hand)))
         painter.drawConvexPolygon([
             QPointF(-4, 10), QPointF(4, 10),
             QPointF(2, -70), QPointF(-2, -70),
@@ -1402,13 +1416,13 @@ class AnalogClockWidget(QWidget):
         second_angle = 6.0 * time.second()
         painter.save()
         painter.rotate(second_angle)
-        painter.setPen(QPen(QColor(200, 40, 40), 2))
+        painter.setPen(QPen(QColor(t.clock_second), 2))
         painter.drawLine(QPointF(0, 15), QPointF(0, -72))
         painter.restore()
 
         # Center dot
         painter.setPen(Qt.PenStyle.NoPen)
-        painter.setBrush(QBrush(QColor(200, 40, 40)))
+        painter.setBrush(QBrush(QColor(t.clock_second)))
         painter.drawEllipse(-4, -4, 8, 8)
 
 
@@ -1516,46 +1530,48 @@ class MarkdownBridge(QObject):
         return self._current_html
 
 
-_PREVIEW_HTML = """<!DOCTYPE html>
+def _make_preview_html() -> str:
+    t = _theme.current()
+    return f"""<!DOCTYPE html>
 <html>
 <head>
 <meta charset="utf-8">
 <style>
-  * { box-sizing: border-box; margin: 0; padding: 0; }
-  body {
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{
     font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 14px; line-height: 1.6; color: #d4d4d4;
-    background: #1e1e1e; padding: 16px 24px; max-width: 860px;
-  }
-  h1, h2, h3, h4, h5, h6 { margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }
-  h1 { font-size: 1.75em; border-bottom: 1px solid #3a3a3a; padding-bottom: 0.2em; }
-  h2 { font-size: 1.4em; border-bottom: 1px solid #3a3a3a; padding-bottom: 0.15em; }
-  p { margin-bottom: 0.8em; }
-  ul, ol { margin-left: 1.5em; margin-bottom: 0.8em; }
-  code { font-family: 'Cascadia Code', monospace; background: #2d2d2d; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }
-  pre { background: #2d2d2d; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }
-  pre code { background: none; padding: 0; }
-  blockquote { border-left: 3px solid #555555; margin-left: 0; padding-left: 1em; color: #888888; margin-bottom: 0.8em; }
-  hr { border: none; border-top: 1px solid #3a3a3a; margin: 1em 0; }
-  a { color: #4ea1f3; }
-  table { border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }
-  th, td { border: 1px solid #3a3a3a; padding: 6px 12px; }
-  th { background: #2a2a2a; font-weight: 600; }
+    font-size: 14px; line-height: 1.6; color: {t.preview_text};
+    background: {t.preview_bg}; padding: 16px 24px; max-width: 860px;
+  }}
+  h1, h2, h3, h4, h5, h6 {{ margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }}
+  h1 {{ font-size: 1.75em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.2em; }}
+  h2 {{ font-size: 1.4em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.15em; }}
+  p {{ margin-bottom: 0.8em; }}
+  ul, ol {{ margin-left: 1.5em; margin-bottom: 0.8em; }}
+  code {{ font-family: 'Cascadia Code', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }}
+  pre {{ background: {t.preview_code_bg}; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }}
+  pre code {{ background: none; padding: 0; }}
+  blockquote {{ border-left: 3px solid {t.preview_blockquote_border}; margin-left: 0; padding-left: 1em; color: {t.preview_blockquote_text}; margin-bottom: 0.8em; }}
+  hr {{ border: none; border-top: 1px solid {t.preview_border}; margin: 1em 0; }}
+  a {{ color: {t.preview_link}; }}
+  table {{ border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }}
+  th, td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
+  th {{ background: {t.preview_table_header_bg}; font-weight: 600; }}
 </style>
 </head>
 <body>
 <div id="content"></div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
-  function applyHtml(html) {
+  function applyHtml(html) {{
     var doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
-  }
-  new QWebChannel(qt.webChannelTransport, function(channel) {
+  }}
+  new QWebChannel(qt.webChannelTransport, function(channel) {{
     var bridge = channel.objects.bridge;
-    bridge.html_changed.connect(function(html) { applyHtml(html); });
-    bridge.get_current_html(function(html) { if (html) applyHtml(html); });
-  });
+    bridge.html_changed.connect(function(html) {{ applyHtml(html); }});
+    bridge.get_current_html(function(html) {{ if (html) applyHtml(html); }});
+  }});
 </script>
 </body>
 </html>"""
@@ -1640,7 +1656,8 @@ class NoteDetailWidget(QWidget):
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
         self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setStyleSheet("color: white; background-color: red;")
+        _t = _theme.current()
+        self._delete_btn.setStyleSheet(f"color: {_t.delete_btn_text}; background-color: {_t.delete_btn_bg};")
         self._delete_btn.setVisible(False)
         self._delete_btn.clicked.connect(self._on_delete_clicked)
 
@@ -1681,7 +1698,7 @@ class NoteDetailWidget(QWidget):
         self._preview = QWebEngineView()
         self._preview.page().setWebChannel(self._channel)
         self._channel.registerObject("bridge", self._bridge)
-        self._preview.setHtml(_PREVIEW_HTML)
+        self._preview.setHtml(_make_preview_html())
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
 

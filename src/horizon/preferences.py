@@ -60,3 +60,11 @@ class Preferences:
     @note_splitter_sizes.setter
     def note_splitter_sizes(self, value: list[int]) -> None:
         self._data["note_splitter_sizes"] = value
+
+    @property
+    def theme(self) -> str:
+        return self._data.get("theme", "dark")
+
+    @theme.setter
+    def theme(self, value: str) -> None:
+        self._data["theme"] = value

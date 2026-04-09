@@ -4,6 +4,7 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QSplitter, QStackedWidget
 
+from horizon import theme as _theme
 from horizon.database import Database
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository
@@ -30,6 +31,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database) -> None:
         self._db = db
         self._prefs = Preferences()
+        _theme.init(self._prefs.theme)
         super().__init__()
         self.setWindowTitle("Horizon")
         self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))
