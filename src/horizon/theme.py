@@ -371,4 +371,41 @@ QMessageBox QLabel {{
     color: {t.text};
     background-color: transparent;
 }}
+
+/* ── Barre de titre personnalisée ───────────────────────────────────── */
+QWidget[titlebar="true"] {{
+    background-color: {t.surface_bg};
+    border-bottom: 1px solid {t.border};
+}}
+
+QPushButton[title_btn="min"],
+QPushButton[title_btn="max"],
+QPushButton[title_btn="close"] {{
+    background-color: transparent;
+    border: none;
+    border-radius: 0;
+    color: {t.scrollbar_handle};
+    font-size: 14px;
+    min-width: 46px;
+    max-width: 46px;
+    min-height: 36px;
+    max-height: 36px;
+    padding: 0;
+}}
+QPushButton[title_btn="min"]:hover,
+QPushButton[title_btn="max"]:hover {{
+    background-color: rgba(94, 242, 255, 25);
+    color: #5ef2ff;
+}}
+QPushButton[title_btn="close"]:hover {{
+    background-color: rgba(255, 79, 216, 30);
+    color: #ff4fd8;
+}}
+QPushButton[title_btn="min"]:pressed,
+QPushButton[title_btn="max"]:pressed {{
+    background-color: rgba(94, 242, 255, 50);
+}}
+QPushButton[title_btn="close"]:pressed {{
+    background-color: rgba(255, 79, 216, 60);
+}}
 """

@@ -1,8 +1,10 @@
+import ctypes
+import ctypes.wintypes
 from pathlib import Path
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import QEvent, Qt
 from PySide6.QtGui import QIcon
-from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget
+from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
 from horizon import theme as _theme
 from horizon.database import Database
@@ -11,7 +13,7 @@ from horizon.note import NoteRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
-from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
+from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, TitleBar
 
 
 def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
@@ -34,7 +36,7 @@ class MainWindow(QMainWindow):
         _theme.init(self._prefs.theme)
         QApplication.instance().setStyleSheet(_theme.make_stylesheet(_theme.current()))
         super().__init__()
-        self.setWindowTitle("Horizon")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))
         w, h = self._prefs.window_size
         self.resize(w, h)
@@ -89,7 +91,16 @@ class MainWindow(QMainWindow):
 
         self._show_home()  # default view on startup
 
-        self.setCentralWidget(self._splitter)
+        container = QWidget()
+        container_layout = QVBoxLayout(container)
+        container_layout.setContentsMargins(0, 0, 0, 0)
+        container_layout.setSpacing(0)
+
+        self._title_bar = TitleBar(self)
+        container_layout.addWidget(self._title_bar)
+        container_layout.addWidget(self._splitter)
+
+        self.setCentralWidget(container)
         saved = self._prefs.splitter_sizes
         if saved:
             self._splitter.setSizes(saved)
@@ -142,6 +153,35 @@ class MainWindow(QMainWindow):
         projects = self._proj_repo.list_all()
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
+
+    def changeEvent(self, event) -> None:
+        if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_title_bar"):
+            maximized = bool(self.windowState() & Qt.WindowState.WindowMaximized)
+            self._title_bar.update_max_button(maximized)
+        super().changeEvent(event)
+
+    def nativeEvent(self, event_type, message):
+        if event_type == b"windows_generic_MSG":
+            msg = ctypes.wintypes.MSG.from_address(int(message))
+            if msg.message == 0x0084 and not self.isMaximized():  # WM_NCHITTEST
+                lp = msg.lParam
+                x = ctypes.c_int16(lp & 0xFFFF).value
+                y = ctypes.c_int16((lp >> 16) & 0xFFFF).value
+                r = self.frameGeometry()
+                b = 6  # resize border width in pixels
+                left   = x < r.left()   + b
+                right  = x > r.right()  - b
+                top    = y < r.top()    + b
+                bottom = y > r.bottom() - b
+                if top    and left:  return True, 13  # HTTOPLEFT
+                if top    and right: return True, 14  # HTTOPRIGHT
+                if bottom and left:  return True, 16  # HTBOTTOMLEFT
+                if bottom and right: return True, 17  # HTBOTTOMRIGHT
+                if left:             return True, 10  # HTLEFT
+                if right:            return True, 11  # HTRIGHT
+                if top:              return True, 12  # HTTOP
+                if bottom:           return True, 15  # HTBOTTOM
+        return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:
         self._prefs.window_maximized = self.isMaximized()
