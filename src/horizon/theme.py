@@ -57,6 +57,9 @@ class Theme:
     # ── Bouton supprimer ──────────────────────────────────────────────────
     delete_btn_text: str
     delete_btn_bg: str
+    # ── Nav buttons gradient ──────────────────────────────────────────────
+    nav_btn_gradient_from: str   # start color (left) for hover/active bg
+    nav_btn_gradient_to: str     # end color (right) for hover/active bg
     # ── Aperçu Markdown ───────────────────────────────────────────────────
     preview_text: str
     preview_bg: str
@@ -121,6 +124,25 @@ QScrollArea > QWidget > QWidget {{
 }}
 QStackedWidget {{
     background-color: transparent;
+}}
+
+/* ── Nav buttons (Board / Notes) ───────────────────────────────────── */
+QPushButton[nav_btn="true"] {{
+    background-color: {t.button_bg};
+    border: 1px solid {t.border};
+    border-radius: 6px;
+    min-height: 38px;
+    color: transparent;
+}}
+QPushButton[nav_btn="true"]:hover {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {t.nav_btn_gradient_from}, stop:1 {t.nav_btn_gradient_to});
+    border-color: {t.scrollbar_handle_hover};
+}}
+QPushButton[nav_btn="true"]:checked {{
+    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
+        stop:0 {t.nav_btn_gradient_from}, stop:1 {t.nav_btn_gradient_to});
+    border-color: {t.priority_medium};
 }}
 
 /* ── Boutons ────────────────────────────────────────────────────────── */

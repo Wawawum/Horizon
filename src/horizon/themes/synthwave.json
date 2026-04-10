@@ -1,0 +1,64 @@
+{
+  "name": "synthwave",
+
+  "app_bg":              "#0a0614",
+  "surface_bg":          "#0f0a1c",
+  "surface_alt_bg":      "#160e27",
+  "text":                "#f7eefe",
+  "border":              "#3a1840",
+
+  "input_bg":            "#120820",
+  "button_bg":           "#1a0d2e",
+  "button_hover":        "#2d1050",
+  "button_pressed":      "#0d0619",
+
+  "scrollbar_bg":        "transparent",
+  "scrollbar_handle":    "#3d1a4a",
+  "scrollbar_handle_hover": "#5e2266",
+
+  "list_selected_bg":    "#5c1a52",
+  "list_selected_text":  "#f7eefe",
+
+  "tile_bg":                      "#160e27",
+  "tile_border":                  "#3a1840",
+  "tile_text":                    "#f7eefe",
+  "tile_checkbox_border":         "#7c6a9d",
+  "tile_checkbox_checked_bg":     "#2d1050",
+  "tile_checkbox_checked_border": "#ff4fd8",
+  "tile_project_label":           "#bca9da",
+
+  "priority_low":    "#7c6a9d",
+  "priority_medium": "#5ef2ff",
+  "priority_high":   "#ff4fd8",
+
+  "calendar_bg":             "#060310",
+  "calendar_label":          "#7c6a9d",
+  "calendar_hour_line":      "#1e0e30",
+  "calendar_half_hour_line": "#130a1f",
+  "calendar_event_bg":       "#5c0a5c",
+  "calendar_event_text":     "#f7eefe",
+  "calendar_now_line":       "#5ef2ff",
+
+  "clock_face":        "#0f0a1c",
+  "clock_ring":        "#3a1840",
+  "clock_tick_hour":   "#ff4fd8",
+  "clock_tick_minute": "#3a1840",
+  "clock_hand":        "#f7eefe",
+  "clock_second":      "#5ef2ff",
+
+  "nav_btn_gradient_from": "rgba(255,79,216,31)",
+  "nav_btn_gradient_to":   "rgba(94,242,255,31)",
+
+  "color_btn_border":  "#7c6a9d",
+  "delete_btn_text":   "#ffffff",
+  "delete_btn_bg":     "#c82828",
+
+  "preview_text":               "#f7eefe",
+  "preview_bg":                 "#0a0614",
+  "preview_border":             "#3a1840",
+  "preview_code_bg":            "#160e27",
+  "preview_blockquote_border":  "#ff4fd8",
+  "preview_blockquote_text":    "#bca9da",
+  "preview_link":               "#5ef2ff",
+  "preview_table_header_bg":    "#160e27"
+}

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QDrag, QFont, QFontMetrics, QIcon, QPalette, Q
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
+    QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -116,6 +117,31 @@ class ProjectListDelegate(QStyledItemDelegate):
         painter.restore()
 
 
+class _NavButton(QPushButton):
+    """Sidebar nav button: label on the left, dim ordinal on the right."""
+
+    def __init__(self, label: str, number: str, parent=None) -> None:
+        super().__init__(parent)
+        self._label = label
+        self._number = number
+        self.setCheckable(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("nav_btn", True)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        t = _theme.current()
+        painter = QPainter(self)
+        text_color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
+        r = self.rect().adjusted(12, 0, -12, 0)
+        painter.setPen(text_color)
+        painter.drawText(r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
+        painter.setPen(QColor(t.color_btn_border))
+        painter.drawText(r, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._number)
+        painter.end()
+
+
 class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
     home_requested = Signal()
@@ -126,15 +152,21 @@ class ProjectListWidget(QWidget):
         self._repo = repo
         self.setMinimumWidth(200)
 
-        self._board_btn = QPushButton("Board")
+        self._board_btn = _NavButton("Board", "01")
+        self._board_btn.setChecked(True)
         self._board_btn.clicked.connect(self.home_requested)
 
-        self._notes_btn = QPushButton("Notes")
+        self._notes_btn = _NavButton("Notes", "02")
         self._notes_btn.clicked.connect(self.notes_requested)
 
+        self._nav_group = QButtonGroup(self)
+        self._nav_group.setExclusive(True)
+        self._nav_group.addButton(self._board_btn)
+        self._nav_group.addButton(self._notes_btn)
+
         nav_layout = QHBoxLayout()
-        nav_layout.setContentsMargins(0, 0, 0, 0)
-        nav_layout.setSpacing(0)
+        nav_layout.setContentsMargins(6, 6, 6, 4)
+        nav_layout.setSpacing(6)
         nav_layout.addWidget(self._board_btn)
         nav_layout.addWidget(self._notes_btn)
 

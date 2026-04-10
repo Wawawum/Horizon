@@ -46,6 +46,9 @@
   "clock_hand":        "#cccccc",
   "clock_second":      "#c82828",
 
+  "nav_btn_gradient_from": "rgba(21,101,192,40)",
+  "nav_btn_gradient_to":   "rgba(21,101,192,40)",
+
   "color_btn_border":  "#666666",
   "delete_btn_text":   "#ffffff",
   "delete_btn_bg":     "#cc0000",
