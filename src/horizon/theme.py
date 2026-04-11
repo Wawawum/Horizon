@@ -95,8 +95,20 @@ def current() -> Theme:
     return _current
 
 
+_RESOURCES_DIR = Path(__file__).parent / "resources"
+
+
 def make_stylesheet(t: Theme) -> str:
     """Génère le QSS global à appliquer sur QApplication."""
+    arrow_svg = (
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 6">'
+        f'<path d="M1 1L5 5L9 1" fill="none" stroke="{t.text}"'
+        f' stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'</svg>'
+    )
+    arrow_path = _RESOURCES_DIR / "combo_arrow.svg"
+    arrow_path.write_text(arrow_svg, encoding="utf-8")
+    arrow_url = arrow_path.as_posix()
     return f"""
 /* ── Base ──────────────────────────────────────────────────────────── */
 QWidget {{
@@ -203,6 +215,11 @@ QComboBox::drop-down {{
     width: 20px;
     border-left: 1px solid {t.border};
     border-radius: 0 3px 3px 0;
+}}
+QComboBox::down-arrow {{
+    image: url({arrow_url});
+    width: 10px;
+    height: 6px;
 }}
 QComboBox QAbstractItemView {{
     background-color: {t.surface_bg};
