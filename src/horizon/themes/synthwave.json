@@ -49,6 +49,8 @@
   "nav_btn_gradient_from": "rgba(255,79,216,31)",
   "nav_btn_gradient_to":   "rgba(94,242,255,31)",
 
+  "ok_btn_text":       "#5ef2ff",
+
   "color_btn_border":  "#7c6a9d",
   "delete_btn_text":   "#ffffff",
   "delete_btn_bg":     "#c82828",

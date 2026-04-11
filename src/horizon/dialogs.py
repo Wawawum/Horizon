@@ -1,5 +1,7 @@
+from pathlib import Path
+
 from PySide6.QtCore import QEvent, QSize, QTimer, Qt
-from PySide6.QtGui import QTextCursor
+from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -23,6 +25,9 @@ from PySide6.QtWidgets import (
 
 from horizon import theme as _theme
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
+
+_PLUS_ICON      = QIcon((Path(__file__).parent / "resources" / "plus_cyan.svg").as_posix())
+_PLUS_ICON_SIZE = QSize(12, 12)
 
 
 class NewProjectDialog(QDialog):
@@ -205,8 +210,9 @@ class TaskDetailDialog(QDialog):
         subtasks_header = QHBoxLayout()
         subtasks_header.addWidget(QLabel("Sub-tasks"))
         subtasks_header.addStretch()
-        add_subtask_btn = QPushButton("+")
-        add_subtask_btn.setFixedWidth(28)
+        add_subtask_btn = QPushButton("New")
+        add_subtask_btn.setIcon(_PLUS_ICON)
+        add_subtask_btn.setIconSize(_PLUS_ICON_SIZE)
         add_subtask_btn.clicked.connect(self._show_new_subtask_input)
         subtasks_header.addWidget(add_subtask_btn)
 

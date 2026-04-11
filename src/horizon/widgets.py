@@ -296,7 +296,9 @@ class ProjectListWidget(QWidget):
         self._show_archived_cb = QCheckBox("Show archived")
         self._show_archived_cb.stateChanged.connect(self._load_projects)
 
-        self._new_btn = QPushButton("\uff0b New Project")
+        self._new_btn = QPushButton("New Project")
+        self._new_btn.setIcon(_PLUS_ICON)
+        self._new_btn.setIconSize(_PLUS_ICON_SIZE)
         self._new_btn.clicked.connect(self._on_new_project)
 
         bottom_layout = QHBoxLayout()
@@ -351,6 +353,8 @@ _PRIORITY_ROLE  = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG   = (Path(__file__).parent / "resources" / "check_black.svg").as_posix()
+_PLUS_ICON   = QIcon((Path(__file__).parent / "resources" / "plus_cyan.svg").as_posix())
+_PLUS_ICON_SIZE = QSize(12, 12)
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
 _TILE_MARGIN = 2
@@ -892,8 +896,9 @@ class ProjectDetailWidget(QWidget):
         self._move_down_btn.setFixedWidth(28)
         self._move_down_btn.clicked.connect(self._on_move_down)
 
-        new_task_btn = QPushButton("+")
-        new_task_btn.setFixedWidth(28)
+        new_task_btn = QPushButton("New")
+        new_task_btn.setIcon(_PLUS_ICON)
+        new_task_btn.setIconSize(_PLUS_ICON_SIZE)
         new_task_btn.clicked.connect(self._on_new_task)
 
         tasks_header.addWidget(self._move_up_btn)
@@ -936,8 +941,9 @@ class ProjectDetailWidget(QWidget):
         notes_label = QLabel("Notes")
         notes_header.addWidget(notes_label)
         notes_header.addStretch()
-        new_note_btn = QPushButton("+")
-        new_note_btn.setFixedWidth(28)
+        new_note_btn = QPushButton("New")
+        new_note_btn.setIcon(_PLUS_ICON)
+        new_note_btn.setIconSize(_PLUS_ICON_SIZE)
         new_note_btn.clicked.connect(self._on_new_note)
         notes_header.addWidget(new_note_btn)
         notes_panel_layout.addLayout(notes_header)
@@ -1613,7 +1619,9 @@ class NotesListWidget(QWidget):
         font.setBold(True)
         title.setFont(font)
 
-        new_btn = QPushButton("+ New Note")
+        new_btn = QPushButton("New Note")
+        new_btn.setIcon(_PLUS_ICON)
+        new_btn.setIconSize(_PLUS_ICON_SIZE)
         new_btn.clicked.connect(self._on_new_note)
 
         self._show_archived_cb = QCheckBox("Show archived")

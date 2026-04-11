@@ -60,6 +60,8 @@ class Theme:
     # ── Nav buttons gradient ──────────────────────────────────────────────
     nav_btn_gradient_from: str   # start color (left) for hover/active bg
     nav_btn_gradient_to: str     # end color (right) for hover/active bg
+    # ── Bouton OK ─────────────────────────────────────────────────────────
+    ok_btn_text: str
     # ── Aperçu Markdown ───────────────────────────────────────────────────
     preview_text: str
     preview_bg: str
@@ -378,6 +380,14 @@ QToolTip {{
     color: {t.text};
     border: 1px solid {t.border};
     padding: 2px 6px;
+}}
+
+/* ── Boutons OK / Cancel ─────────────────────────────────────────────── */
+QDialogButtonBox QPushButton {{
+    font-weight: bold;
+}}
+QPushButton:default {{
+    color: {t.ok_btn_text};
 }}
 
 /* ── Boîte de message ───────────────────────────────────────────────── */
