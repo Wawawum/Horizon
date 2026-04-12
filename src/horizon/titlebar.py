@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PySide6.QtCore import Qt
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
@@ -22,8 +20,7 @@ class TitleBar(QWidget):
 
         # Icône de l'application
         icon_label = QLabel()
-        icon_path = str(Path(__file__).parent / "resources" / "Horizon_Icon.png")
-        pixmap = QPixmap(icon_path).scaled(
+        pixmap = QPixmap(":/icons/Horizon_Icon.png").scaled(
             16, 16,
             Qt.AspectRatioMode.KeepAspectRatio,
             Qt.TransformationMode.SmoothTransformation,

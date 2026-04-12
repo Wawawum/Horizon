@@ -2,6 +2,7 @@ import sys
 
 from PySide6.QtWidgets import QApplication
 
+import horizon.resources_rc  # enregistre les ressources Qt (:/fonts/..., :/icons/...)
 from horizon.app import MainWindow
 from horizon.database import Database
 

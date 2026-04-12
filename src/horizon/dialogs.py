@@ -1,5 +1,3 @@
-from pathlib import Path
-
 from PySide6.QtCore import QEvent, QSize, QTimer, Qt
 from PySide6.QtGui import QIcon, QTextCursor
 from PySide6.QtWidgets import (
@@ -15,7 +13,6 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
-    QMessageBox,
     QPlainTextEdit,
     QPushButton,
     QTextEdit,
@@ -27,8 +24,77 @@ from horizon import theme as _theme
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
 from horizon.titlebar import TitleBar
 
-_PLUS_ICON      = QIcon((Path(__file__).parent / "resources" / "plus_cyan.svg").as_posix())
+_PLUS_ICON      = QIcon(":/icons/plus_cyan.svg")
 _PLUS_ICON_SIZE = QSize(12, 12)
+
+
+class ConfirmDialog(QDialog):
+    """Dialog de confirmation frameless (Oui / Annuler)."""
+
+    def __init__(self, title: str, message: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(360)
+
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Yes | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 12, 16, 16)
+        content_layout.setSpacing(16)
+        content_layout.addWidget(msg_label)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle=title, show_min_max=False))
+        layout.addWidget(content)
+
+    @staticmethod
+    def ask(title: str, message: str, parent=None) -> bool:
+        return ConfirmDialog(title, message, parent).exec() == QDialog.DialogCode.Accepted
+
+
+class AlertDialog(QDialog):
+    """Dialog d'alerte frameless (Ok uniquement)."""
+
+    def __init__(self, title: str, message: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(360)
+
+        msg_label = QLabel(message)
+        msg_label.setWordWrap(True)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Ok)
+        btn_box.accepted.connect(self.accept)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 12, 16, 16)
+        content_layout.setSpacing(16)
+        content_layout.addWidget(msg_label)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle=title, show_min_max=False))
+        layout.addWidget(content)
+
+    @staticmethod
+    def warn(title: str, message: str, parent=None) -> None:
+        AlertDialog(title, message, parent).exec()
 
 
 class NewProjectDialog(QDialog):
@@ -93,7 +159,7 @@ class NewProjectDialog(QDialog):
 
     def _on_accepted(self) -> None:
         if not self._name_edit.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Project name cannot be blank.")
+            AlertDialog.warn("Validation Error", "Project name cannot be blank.", self)
             return
         self.accept()
 
@@ -167,7 +233,7 @@ class NewTaskDialog(QDialog):
 
     def _on_accepted(self) -> None:
         if not self._title_edit.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Task title cannot be blank.")
+            AlertDialog.warn("Validation Error", "Task title cannot be blank.", self)
             return
         self.accept()
 
@@ -400,7 +466,7 @@ class TaskDetailDialog(QDialog):
 
     def _on_accepted(self) -> None:
         if not self._title_edit.text().strip():
-            QMessageBox.warning(self, "Validation Error", "Task title cannot be blank.")
+            AlertDialog.warn("Validation Error", "Task title cannot be blank.", self)
             return
         self.accept()
 
@@ -429,12 +495,10 @@ class TaskDetailDialog(QDialog):
         self._delete_btn.setVisible(self._archive_cb.isChecked())
 
     def _on_delete_clicked(self) -> None:
-        answer = QMessageBox.question(
-            self,
+        if ConfirmDialog.ask(
             "Delete Task",
             f"Permanently delete \"{self._title_edit.text().strip()}\"?\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
+            self,
+        ):
             self._deleted = True
             self.accept()

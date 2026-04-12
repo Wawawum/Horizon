@@ -32,7 +32,6 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QTextEdit,
     QMenu,
-    QMessageBox,
     QToolButton,
     QVBoxLayout,
     QWidget,
@@ -42,7 +41,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
-from horizon.dialogs import NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.dialogs import AlertDialog, ConfirmDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
@@ -236,8 +235,8 @@ _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE  = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
-_CHECK_SVG   = (Path(__file__).parent / "resources" / "check_black.svg").as_posix()
-_PLUS_ICON   = QIcon((Path(__file__).parent / "resources" / "plus_cyan.svg").as_posix())
+_CHECK_SVG   = ":/icons/check_black.svg"
+_PLUS_ICON   = QIcon(":/icons/plus_cyan.svg")
 _PLUS_ICON_SIZE = QSize(12, 12)
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
@@ -908,13 +907,11 @@ class ProjectDetailWidget(QWidget):
     def _on_purge(self) -> None:
         if self._current_project_id is None:
             return
-        reply = QMessageBox.question(
-            self,
+        if not ConfirmDialog.ask(
             "Purge completed tasks",
             "Archive all completed tasks in this project?",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if reply != QMessageBox.StandardButton.Yes:
+            self,
+        ):
             return
         tasks = self._task_repo.list_for_project(self._current_project_id)
         for task in tasks:
@@ -1834,13 +1831,11 @@ class NoteDetailWidget(QWidget):
     def _on_delete_clicked(self) -> None:
         if self._current_note is None or not self._current_note.archived:
             return
-        answer = QMessageBox.question(
-            self,
+        if ConfirmDialog.ask(
             "Delete Note",
             f"Permanently delete \"{self._current_note.title}\"?\nThis cannot be undone.",
-            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
-        )
-        if answer == QMessageBox.StandardButton.Yes:
+            self,
+        ):
             self._note_repo.delete(self._current_note.id)
             self._current_note = None
             self.back_requested.emit()

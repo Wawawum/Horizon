@@ -1,0 +1,11 @@
+<!DOCTYPE RCC>
+<RCC version="1.0">
+    <qresource prefix="/fonts">
+        <file alias="JetBrainsMono-Regular.ttf">resources/JetBrainsMono-Regular.ttf</file>
+    </qresource>
+    <qresource prefix="/icons">
+        <file alias="Horizon_Icon.png">resources/Horizon_Icon.png</file>
+        <file alias="check_black.svg">resources/check_black.svg</file>
+        <file alias="plus_cyan.svg">resources/plus_cyan.svg</file>
+    </qresource>
+</RCC>

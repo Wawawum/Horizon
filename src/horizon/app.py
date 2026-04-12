@@ -1,9 +1,8 @@
 import ctypes
 import ctypes.wintypes
-from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt
-from PySide6.QtGui import QIcon
+from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
 from horizon import theme as _theme
@@ -36,9 +35,16 @@ class MainWindow(QMainWindow):
         self._prefs = Preferences()
         _theme.init(self._prefs.theme)
         QApplication.instance().setStyleSheet(_theme.make_stylesheet(_theme.current()))
+        font_id = QFontDatabase.addApplicationFont(":/fonts/JetBrainsMono-Regular.ttf")
+        if font_id != -1:
+            families = QFontDatabase.applicationFontFamilies(font_id)
+            if families:
+                app_font = QFont(families[0])
+                app_font.setPointSize(9)
+                QApplication.instance().setFont(app_font)
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
-        self.setWindowIcon(QIcon(str(Path(__file__).parent / "resources" / "Horizon_Icon.png")))
+        self.setWindowIcon(QIcon(":/icons/Horizon_Icon.png"))
         w, h = self._prefs.window_size
         self.resize(w, h)
         if self._prefs.window_maximized:
