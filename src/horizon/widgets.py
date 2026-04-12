@@ -13,6 +13,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QFrame,
+    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -759,21 +760,14 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         content_layout.addWidget(self._desc_text)
 
-        # Separator before tasks
-        sep2 = QFrame()
-        sep2.setFrameShape(QFrame.Shape.HLine)
-        sep2.setFrameShadow(QFrame.Shadow.Sunken)
-        content_layout.addWidget(sep2)
-
         # ── Tasks panel (left side of splitter) ──────────────────────────
-        tasks_panel = QWidget()
+        tasks_panel = QGroupBox("Tasks")
         tasks_panel_layout = QVBoxLayout(tasks_panel)
-        tasks_panel_layout.setContentsMargins(0, 0, 0, 0)
+        tasks_panel_layout.setContentsMargins(8, 4, 8, 8)
         tasks_panel_layout.setSpacing(4)
 
-        # Tasks header row: label left, view selector + "+" button right
+        # Tasks header row: view selector + "+" button right
         tasks_header = QHBoxLayout()
-        tasks_header.addWidget(QLabel("Tasks"))
         tasks_header.addStretch()
 
         self._view_selector = QComboBox()
@@ -836,14 +830,12 @@ class ProjectDetailWidget(QWidget):
         tasks_panel_layout.addWidget(self._task_view_stack, stretch=1)
 
         # ── Notes panel (right side of splitter) ─────────────────────────
-        notes_panel = QWidget()
+        notes_panel = QGroupBox("Notes")
         notes_panel_layout = QVBoxLayout(notes_panel)
-        notes_panel_layout.setContentsMargins(0, 0, 0, 0)
+        notes_panel_layout.setContentsMargins(8, 4, 8, 8)
         notes_panel_layout.setSpacing(4)
 
         notes_header = QHBoxLayout()
-        notes_label = QLabel("Notes")
-        notes_header.addWidget(notes_label)
         notes_header.addStretch()
         new_note_btn = QPushButton("New")
         new_note_btn.setIcon(_PLUS_ICON)
@@ -869,6 +861,7 @@ class ProjectDetailWidget(QWidget):
         h_splitter.addWidget(notes_panel)
         h_splitter.setStretchFactor(0, 3)
         h_splitter.setStretchFactor(1, 2)
+        h_splitter.setHandleWidth(16)
         content_layout.addWidget(h_splitter, stretch=1)
 
         # --- Stack ---

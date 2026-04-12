@@ -136,6 +136,24 @@ QMainWindow, QDialog {{
     background-color: {t.app_bg};
 }}
 
+/* ── Group boxes (Tasks / Notes panels) ─────────────────────────── */
+QGroupBox {{
+    border: 1px solid {t.border};
+    border-radius: 4px;
+    margin-top: 10px;
+    padding-top: 4px;
+    font-weight: bold;
+    background-color: transparent;
+}}
+QGroupBox::title {{
+    subcontrol-origin: margin;
+    subcontrol-position: top left;
+    left: 10px;
+    padding: 0 4px;
+    background-color: {t.app_bg};
+    color: {t.text};
+}}
+
 /* ── Widgets transparents / pass-through ──────────────────────────── */
 QLabel {{
     background-color: transparent;
@@ -316,7 +334,7 @@ QSplitter::handle {{
     background-color: {t.border};
 }}
 QSplitter::handle:horizontal {{
-    width: 1px;
+    background-color: {t.app_bg};
 }}
 QSplitter::handle:vertical {{
     height: 1px;
