@@ -237,6 +237,7 @@ _PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG   = ":/icons/check_black.svg"
 _PLUS_ICON   = QIcon(":/icons/plus_cyan.svg")
+_JETBRAINS_MONO_URL = (Path(__file__).parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
 _PLUS_ICON_SIZE = QSize(12, 12)
 _BAND_WIDTH  = 5
 _TILE_RADIUS = 4
@@ -1582,10 +1583,16 @@ def _make_preview_html() -> str:
 <head>
 <meta charset="utf-8">
 <style>
+  @font-face {{
+    font-family: 'JetBrains Mono';
+    src: url('{_JETBRAINS_MONO_URL}');
+    font-weight: normal;
+    font-style: normal;
+  }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
-    font-family: 'Segoe UI', system-ui, sans-serif;
-    font-size: 14px; line-height: 1.6; color: {t.preview_text};
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 13px; line-height: 1.6; color: {t.preview_text};
     background: {t.preview_bg}; padding: 16px 24px; max-width: 860px;
   }}
   h1, h2, h3, h4, h5, h6 {{ margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }}
@@ -1593,7 +1600,7 @@ def _make_preview_html() -> str:
   h2 {{ font-size: 1.4em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.15em; }}
   p {{ margin-bottom: 0.8em; }}
   ul, ol {{ margin-left: 1.5em; margin-bottom: 0.8em; }}
-  code {{ font-family: 'Cascadia Code', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }}
+  code {{ font-family: 'JetBrains Mono', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }}
   pre {{ background: {t.preview_code_bg}; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }}
   pre code {{ background: none; padding: 0; }}
   blockquote {{ border-left: 3px solid {t.preview_blockquote_border}; margin-left: 0; padding-left: 1em; color: {t.preview_blockquote_text}; margin-bottom: 0.8em; }}
