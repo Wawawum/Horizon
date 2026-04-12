@@ -46,6 +46,16 @@
   "clock_hand":        "#f7eefe",
   "clock_second":      "#5ef2ff",
 
+  "gshock_case":        "#1a0d2e",
+  "gshock_case_shadow": "#0a0614",
+  "gshock_bezel":       "#3a1840",
+  "gshock_lcd_bg":      "#060318",
+  "gshock_lcd_fg":      "#5ef2ff",
+  "gshock_lcd_dim":     "#0c0630",
+  "gshock_lcd_label":   "#3a8a99",
+  "gshock_lcd_alarm":   "#ff4fd8",
+  "gshock_screw":       "#2d1050",
+
   "nav_btn_gradient_from": "rgba(255,79,216,31)",
   "nav_btn_gradient_to":   "rgba(94,242,255,31)",
 

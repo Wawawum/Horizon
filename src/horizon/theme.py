@@ -1,5 +1,5 @@
 import json
-from dataclasses import dataclass, fields
+from dataclasses import dataclass, field, fields
 from pathlib import Path
 
 
@@ -71,6 +71,16 @@ class Theme:
     preview_blockquote_text: str
     preview_link: str
     preview_table_header_bg: str
+    # ── Montre G-Shock ────────────────────────────────────────────────────
+    gshock_case: str        = field(default="#1c1c1c")
+    gshock_case_shadow: str = field(default="#0a0a0a")
+    gshock_bezel: str       = field(default="#2a2a2a")
+    gshock_lcd_bg: str      = field(default="#0d1a0d")
+    gshock_lcd_fg: str      = field(default="#4de8c2")
+    gshock_lcd_dim: str     = field(default="#0e1e10")
+    gshock_lcd_label: str   = field(default="#3ab89a")
+    gshock_lcd_alarm: str   = field(default="#c87820")
+    gshock_screw: str       = field(default="#383838")
 
 
 _current: Theme | None = None
