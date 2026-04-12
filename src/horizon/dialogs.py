@@ -25,6 +25,7 @@ from PySide6.QtWidgets import (
 
 from horizon import theme as _theme
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
+from horizon.titlebar import TitleBar
 
 _PLUS_ICON      = QIcon((Path(__file__).parent / "resources" / "plus_cyan.svg").as_posix())
 _PLUS_ICON_SIZE = QSize(12, 12)
@@ -34,6 +35,7 @@ class NewProjectDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Project")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumWidth(400)
         self._color: str = ""
 
@@ -62,14 +64,22 @@ class NewProjectDialog(QDialog):
         btn_box.accepted.connect(self._on_accepted)
         btn_box.rejected.connect(self.reject)
 
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addWidget(QLabel("Name"))
+        content_layout.addWidget(self._name_edit)
+        content_layout.addWidget(QLabel("Description"))
+        content_layout.addWidget(self._desc_edit)
+        content_layout.addWidget(QLabel("Color"))
+        content_layout.addLayout(color_layout)
+        content_layout.addWidget(btn_box)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Name"))
-        layout.addWidget(self._name_edit)
-        layout.addWidget(QLabel("Description"))
-        layout.addWidget(self._desc_edit)
-        layout.addWidget(QLabel("Color"))
-        layout.addLayout(color_layout)
-        layout.addWidget(btn_box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="New Project", show_min_max=False))
+        layout.addWidget(content)
 
     def _pick_color(self) -> None:
         from PySide6.QtGui import QColor
@@ -101,6 +111,7 @@ class NewTaskDialog(QDialog):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Task")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumWidth(400)
 
         self._title_edit = QLineEdit()
@@ -133,18 +144,26 @@ class NewTaskDialog(QDialog):
         btn_box.accepted.connect(self._on_accepted)
         btn_box.rejected.connect(self.reject)
 
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addWidget(QLabel("Title"))
+        content_layout.addWidget(self._title_edit)
+        content_layout.addWidget(QLabel("Description"))
+        content_layout.addWidget(self._desc_edit)
+        content_layout.addWidget(QLabel("State"))
+        content_layout.addWidget(self._state_combo)
+        content_layout.addWidget(QLabel("Priority"))
+        content_layout.addWidget(self._priority_combo)
+        content_layout.addWidget(QLabel("Bucket"))
+        content_layout.addWidget(self._bucket_combo)
+        content_layout.addWidget(btn_box)
+
         layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Title"))
-        layout.addWidget(self._title_edit)
-        layout.addWidget(QLabel("Description"))
-        layout.addWidget(self._desc_edit)
-        layout.addWidget(QLabel("State"))
-        layout.addWidget(self._state_combo)
-        layout.addWidget(QLabel("Priority"))
-        layout.addWidget(self._priority_combo)
-        layout.addWidget(QLabel("Bucket"))
-        layout.addWidget(self._bucket_combo)
-        layout.addWidget(btn_box)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="New Task", show_min_max=False))
+        layout.addWidget(content)
 
     def _on_accepted(self) -> None:
         if not self._title_edit.text().strip():
@@ -172,6 +191,7 @@ class TaskDetailDialog(QDialog):
     def __init__(self, task, subtask_repo: SubtaskRepository, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Task Details")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumWidth(400)
 
         self._task_id: int = task.id
@@ -245,26 +265,34 @@ class TaskDetailDialog(QDialog):
         btn_box.accepted.connect(self._on_accepted)
         btn_box.rejected.connect(self.reject)
 
-        layout = QVBoxLayout(self)
-        layout.addWidget(QLabel("Title"))
-        layout.addWidget(self._title_edit)
-        layout.addWidget(QLabel("Description"))
-        layout.addWidget(self._desc_edit)
-        layout.addWidget(QLabel("State"))
-        layout.addWidget(self._state_combo)
-        layout.addWidget(QLabel("Priority"))
-        layout.addWidget(self._priority_combo)
-        layout.addWidget(QLabel("Bucket"))
-        layout.addWidget(self._bucket_combo)
-        layout.addLayout(subtasks_header)
-        layout.addWidget(self._subtask_list)
-        layout.addWidget(self._new_subtask_edit)
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addWidget(QLabel("Title"))
+        content_layout.addWidget(self._title_edit)
+        content_layout.addWidget(QLabel("Description"))
+        content_layout.addWidget(self._desc_edit)
+        content_layout.addWidget(QLabel("State"))
+        content_layout.addWidget(self._state_combo)
+        content_layout.addWidget(QLabel("Priority"))
+        content_layout.addWidget(self._priority_combo)
+        content_layout.addWidget(QLabel("Bucket"))
+        content_layout.addWidget(self._bucket_combo)
+        content_layout.addLayout(subtasks_header)
+        content_layout.addWidget(self._subtask_list)
+        content_layout.addWidget(self._new_subtask_edit)
         archive_row = QHBoxLayout()
         archive_row.addWidget(self._archive_cb)
         archive_row.addWidget(self._delete_btn)
         archive_row.addStretch()
-        layout.addLayout(archive_row)
-        layout.addWidget(btn_box)
+        content_layout.addLayout(archive_row)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="Task Details", show_min_max=False))
+        layout.addWidget(content)
 
         self._load_subtasks()
 

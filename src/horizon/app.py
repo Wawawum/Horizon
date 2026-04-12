@@ -13,7 +13,8 @@ from horizon.note import NoteRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
-from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, TitleBar
+from horizon.titlebar import TitleBar
+from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
 
 
 def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
