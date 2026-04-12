@@ -235,11 +235,19 @@ _KANBAN_MIME = "application/x-horizon-task-id"
 _PRIORITY_ROLE  = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE   = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE  = Qt.ItemDataRole.UserRole + 3
-_CHECK_SVG   = ":/icons/check_black.svg"
-_PLUS_ICON   = QIcon(":/icons/plus_cyan.svg")
+_CHECK_SVG      = ":/icons/check_black.svg"
+_PLUS_ICON      = QIcon(":/icons/plus_cyan.svg")
 _JETBRAINS_MONO_URL = (Path(__file__).parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
 _PLUS_ICON_SIZE = QSize(12, 12)
+_ARROW_ICON_SIZE = QSize(10, 10)
 _BAND_WIDTH  = 5
+
+_RESOURCES_DIR = Path(__file__).parent / "resources"
+
+
+def _arrow_icon(direction: str) -> QIcon:
+    """Charge l'icône de flèche (up/down) depuis le fichier SVG généré par le thème."""
+    return QIcon(str(_RESOURCES_DIR / f"arrow_{direction}.svg"))
 _TILE_RADIUS = 4
 _TILE_MARGIN = 2
 
@@ -576,12 +584,18 @@ class HomeWidget(QWidget):
         font.setBold(True)
         title.setFont(font)
 
-        self._move_up_btn = QPushButton("↑")
+        self._move_up_btn = QPushButton()
+        self._move_up_btn.setIcon(_arrow_icon("up"))
+        self._move_up_btn.setIconSize(_ARROW_ICON_SIZE)
         self._move_up_btn.setFixedWidth(28)
+        self._move_up_btn.setToolTip("Move up")
         self._move_up_btn.clicked.connect(self._on_move_up)
 
-        self._move_down_btn = QPushButton("↓")
+        self._move_down_btn = QPushButton()
+        self._move_down_btn.setIcon(_arrow_icon("down"))
+        self._move_down_btn.setIconSize(_ARROW_ICON_SIZE)
         self._move_down_btn.setFixedWidth(28)
+        self._move_down_btn.setToolTip("Move down")
         self._move_down_btn.clicked.connect(self._on_move_down)
 
         self._show_archived_cb = QCheckBox("Show archived")
@@ -772,12 +786,18 @@ class ProjectDetailWidget(QWidget):
         self._purge_btn.clicked.connect(self._on_purge)
         tasks_header.addWidget(self._purge_btn)
 
-        self._move_up_btn = QPushButton("↑")
+        self._move_up_btn = QPushButton()
+        self._move_up_btn.setIcon(_arrow_icon("up"))
+        self._move_up_btn.setIconSize(_ARROW_ICON_SIZE)
         self._move_up_btn.setFixedWidth(28)
+        self._move_up_btn.setToolTip("Move up")
         self._move_up_btn.clicked.connect(self._on_move_up)
 
-        self._move_down_btn = QPushButton("↓")
+        self._move_down_btn = QPushButton()
+        self._move_down_btn.setIcon(_arrow_icon("down"))
+        self._move_down_btn.setIconSize(_ARROW_ICON_SIZE)
         self._move_down_btn.setFixedWidth(28)
+        self._move_down_btn.setToolTip("Move down")
         self._move_down_btn.clicked.connect(self._on_move_down)
 
         new_task_btn = QPushButton("New")

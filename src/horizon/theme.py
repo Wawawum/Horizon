@@ -111,6 +111,21 @@ def make_stylesheet(t: Theme) -> str:
     arrow_path = _RESOURCES_DIR / "combo_arrow.svg"
     arrow_path.write_text(arrow_svg, encoding="utf-8")
     arrow_url = arrow_path.as_posix()
+
+    (_RESOURCES_DIR / "arrow_up.svg").write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f'<path d="M1 7L5 3L9 7" fill="none" stroke="{t.priority_medium}"'
+        f' stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'</svg>',
+        encoding="utf-8",
+    )
+    (_RESOURCES_DIR / "arrow_down.svg").write_text(
+        f'<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">'
+        f'<path d="M1 3L5 7L9 3" fill="none" stroke="{t.priority_medium}"'
+        f' stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"/>'
+        f'</svg>',
+        encoding="utf-8",
+    )
     return f"""
 /* ── Base ──────────────────────────────────────────────────────────── */
 QWidget {{
