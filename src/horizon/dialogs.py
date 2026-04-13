@@ -1,5 +1,5 @@
-from PySide6.QtCore import QEvent, QSize, QTimer, Qt
-from PySide6.QtGui import QIcon, QTextCursor
+from PySide6.QtCore import QByteArray, QEvent, QRectF, QSize, QTimer, Qt
+from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
@@ -8,6 +8,8 @@ from PySide6.QtWidgets import (
     QDialog,
     QDialogButtonBox,
     QFrame,
+    QGraphicsScene,
+    QGraphicsView,
     QHBoxLayout,
     QLabel,
     QLineEdit,
@@ -502,3 +504,93 @@ class TaskDetailDialog(QDialog):
         ):
             self._deleted = True
             self.accept()
+
+
+class _ZoomableGraphicsView(QGraphicsView):
+    _ZOOM_FACTOR = 1.15
+    _MIN_SCALE   = 0.05
+    _MAX_SCALE   = 20.0
+
+    def __init__(self, scene: QGraphicsScene, parent=None) -> None:
+        super().__init__(scene, parent)
+        self.setDragMode(QGraphicsView.DragMode.ScrollHandDrag)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setRenderHint(QPainter.RenderHint.SmoothPixmapTransform)
+        self.setFrameShape(QFrame.Shape.NoFrame)
+        self._scale = 1.0
+
+    def wheelEvent(self, event) -> None:
+        delta = event.angleDelta().y()
+        if delta == 0:
+            return super().wheelEvent(event)
+        factor = self._ZOOM_FACTOR if delta > 0 else 1.0 / self._ZOOM_FACTOR
+        new_scale = self._scale * factor
+        if self._MIN_SCALE <= new_scale <= self._MAX_SCALE:
+            self._scale = new_scale
+            self.scale(factor, factor)
+        event.accept()
+
+    def zoom_by(self, factor: float) -> None:
+        new_scale = self._scale * factor
+        if self._MIN_SCALE <= new_scale <= self._MAX_SCALE:
+            self._scale = new_scale
+            self.scale(factor, factor)
+
+    def fit(self, rect: QRectF) -> None:
+        self.fitInView(rect, Qt.AspectRatioMode.KeepAspectRatio)
+        self._scale = self.transform().m11()
+
+
+class ImageViewerDialog(QDialog):
+    _ZOOM_IN  = 1.2
+    _ZOOM_OUT = 1.0 / 1.2
+
+    def __init__(self, data_uri: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.resize(860, 640)
+
+        pixmap = QPixmap()
+        if data_uri.startswith("data:"):
+            _, _, b64 = data_uri.partition(",")
+            pixmap.loadFromData(QByteArray.fromBase64(b64.encode("ascii")))
+
+        scene = QGraphicsScene(self)
+        scene.addPixmap(pixmap)
+        scene.setSceneRect(QRectF(pixmap.rect()))
+        self._scene_rect = scene.sceneRect()
+
+        self._view = _ZoomableGraphicsView(scene, self)
+
+        zoom_in_btn  = QPushButton("+")
+        zoom_out_btn = QPushButton("−")
+        fit_btn      = QPushButton("Fit")
+        for btn in (zoom_in_btn, zoom_out_btn, fit_btn):
+            btn.setFixedWidth(40)
+
+        zoom_in_btn.clicked.connect(lambda: self._view.zoom_by(self._ZOOM_IN))
+        zoom_out_btn.clicked.connect(lambda: self._view.zoom_by(self._ZOOM_OUT))
+        fit_btn.clicked.connect(lambda: self._view.fit(self._scene_rect))
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(8, 6, 8, 6)
+        toolbar.addWidget(zoom_out_btn)
+        toolbar.addWidget(zoom_in_btn)
+        toolbar.addWidget(fit_btn)
+        toolbar.addStretch()
+
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addLayout(toolbar)
+        cl.addWidget(self._view, stretch=1)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="Image", show_min_max=True))
+        layout.addWidget(content)
+
+        QTimer.singleShot(0, lambda: self._view.fit(self._scene_rect))

@@ -110,15 +110,29 @@ def _make_preview_html() -> str:
       }}
     }});
   }}
+  function attachImageHandlers() {{
+    document.querySelectorAll('#content img').forEach(function(img) {{
+      if (img.dataset.zoomBound) return;
+      img.dataset.zoomBound = '1';
+      img.style.cursor = 'zoom-in';
+      img.addEventListener('click', function() {{
+        var src = img.getAttribute('src');
+        if (src && src.startsWith('data:')) {{
+          window.bridge.open_image(src);
+        }}
+      }});
+    }});
+  }}
   function applyHtml(html) {{
     var doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
     styleTableHeaders();
+    attachImageHandlers();
   }}
   new QWebChannel(qt.webChannelTransport, function(channel) {{
-    var bridge = channel.objects.bridge;
-    bridge.html_changed.connect(function(html) {{ applyHtml(html); }});
-    bridge.get_current_html(function(html) {{ if (html) applyHtml(html); }});
+    window.bridge = channel.objects.bridge;
+    window.bridge.html_changed.connect(function(html) {{ applyHtml(html); }});
+    window.bridge.get_current_html(function(html) {{ if (html) applyHtml(html); }});
   }});
 </script>
 </body>
@@ -288,7 +302,8 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 
 
 class MarkdownBridge(QObject):
-    html_changed = Signal(str)
+    html_changed  = Signal(str)
+    image_clicked = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -301,6 +316,10 @@ class MarkdownBridge(QObject):
     @Slot(result=str)
     def get_current_html(self) -> str:
         return self._current_html
+
+    @Slot(str)
+    def open_image(self, data_uri: str) -> None:
+        self.image_clicked.emit(data_uri)
 
 
 class MarkdownEditor(QPlainTextEdit):
@@ -462,6 +481,7 @@ class NoteDetailWidget(QWidget):
         self._preview.page().setWebChannel(self._channel)
         self._channel.registerObject("bridge", self._bridge)
         self._preview.setHtml(_make_preview_html())
+        self._bridge.image_clicked.connect(self._on_image_clicked)
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
 
@@ -536,6 +556,11 @@ class NoteDetailWidget(QWidget):
 
     def _on_editor_text_changed(self) -> None:
         self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+
+    def _on_image_clicked(self, data_uri: str) -> None:
+        from horizon.dialogs import ImageViewerDialog
+        dlg = ImageViewerDialog(data_uri, parent=self)
+        dlg.exec()
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self._prefs is not None:
