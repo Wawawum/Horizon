@@ -70,7 +70,8 @@
   "preview_border":             "#e0e0e0",
   "preview_code_bg":            "#f5f5f5",
   "preview_blockquote_border":  "#bdbdbd",
+  "preview_blockquote_bg":      "#f0f4f8",
   "preview_blockquote_text":    "#757575",
   "preview_link":               "#1565c0",
-  "preview_table_header_bg":    "#eeeeee"
+  "preview_table_header_bg":    "#d4b8ef"
 }

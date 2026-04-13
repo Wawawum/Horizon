@@ -68,6 +68,7 @@ class Theme:
     preview_border: str
     preview_code_bg: str
     preview_blockquote_border: str
+    preview_blockquote_bg: str
     preview_blockquote_text: str
     preview_link: str
     preview_table_header_bg: str

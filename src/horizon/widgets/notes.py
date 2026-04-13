@@ -40,6 +40,21 @@ _JETBRAINS_MONO_URL = (Path(__file__).parent.parent / "resources" / "JetBrainsMo
 _MD_IMG_RE  = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
 _HTML_PH_RE = re.compile(r'HORIZONIMG(\d+)END')
 
+# Blockquote extraction: one or more "> …" lines + optional {.is-TYPE} annotation
+_BQ_EXTRACT_RE      = re.compile(
+    r'((?:^[ \t]*>[ \t]?[^\n]*\n?)+)(?:\{\.is-(info|success|warning|danger)\}[ \t]*\n?)?',
+    re.MULTILINE,
+)
+_BQ_GT_PREFIX_RE    = re.compile(r'^[ \t]*>[ \t]?', re.MULTILINE)
+# Strip Qt inline styles from <p> so our CSS rules apply (used on both full and inner HTML)
+_BLOCK_STYLE_RE     = re.compile(r'(<(?:p|blockquote)\b[^>]*?) style="[^"]*"')
+# Locate <body>…</body> in Qt's full HTML output
+_QT_BODY_RE         = re.compile(r'<body[^>]*>(.*)</body>', re.DOTALL | re.IGNORECASE)
+# Detect lines that begin a block-level element (must not receive a line-break marker)
+_BLOCK_LINE_RE  = re.compile(r'^(#{1,6} |> ?|[-*+] |\d+\. |    |\t|```|~~~|\|)')
+# Detect standalone horizontal-rule lines (---, ***, ___, with optional spaces)
+_HR_LINE_RE     = re.compile(r'^[-*_](\s*[-*_]){2,}\s*$')
+
 
 def _make_preview_html() -> str:
     t = _theme.current()
@@ -63,26 +78,42 @@ def _make_preview_html() -> str:
   h1, h2, h3, h4, h5, h6 {{ margin-top: 1.2em; margin-bottom: 0.4em; font-weight: 600; }}
   h1 {{ font-size: 1.75em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.2em; }}
   h2 {{ font-size: 1.4em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.15em; }}
-  p {{ margin-bottom: 0.8em; }}
+  p {{ margin-bottom: 0.8em !important; }}
   ul, ol {{ margin-left: 1.5em; margin-bottom: 0.8em; }}
   code {{ font-family: 'JetBrains Mono', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }}
   pre {{ background: {t.preview_code_bg}; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }}
   pre code {{ background: none; padding: 0; }}
-  blockquote {{ border-left: 3px solid {t.preview_blockquote_border}; margin-left: 0; padding-left: 1em; color: {t.preview_blockquote_text}; margin-bottom: 0.8em; }}
+  blockquote {{ border-left: 4px solid {t.preview_blockquote_border}; background: {t.preview_blockquote_bg}; margin-left: 0; padding: 0.6em 1em; color: {t.preview_blockquote_text}; margin-bottom: 0.8em; border-radius: 0 4px 4px 0; }}
+  blockquote.bq-info    {{ border-left-color: #3b82f6; background: rgba(59,130,246,0.10); color: inherit; }}
+  blockquote.bq-success {{ border-left-color: #22c55e; background: rgba(34,197,94,0.10);  color: inherit; }}
+  blockquote.bq-warning {{ border-left-color: #f59e0b; background: rgba(245,158,11,0.10); color: inherit; }}
+  blockquote.bq-danger  {{ border-left-color: #ef4444; background: rgba(239,68,68,0.10);  color: inherit; }}
   hr {{ border: none; border-top: 1px solid {t.preview_border}; margin: 1em 0; }}
   a {{ color: {t.preview_link}; }}
   table {{ border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }}
-  th, td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
-  th {{ background: {t.preview_table_header_bg}; font-weight: 600; }}
+  td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
 </style>
 </head>
 <body>
 <div id="content"></div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
+  var TABLE_HEADER_BG = '{t.preview_table_header_bg}';
+  function styleTableHeaders() {{
+    document.querySelectorAll('#content table').forEach(function(table) {{
+      var firstRow = table.querySelector('tr');
+      if (firstRow) {{
+        firstRow.querySelectorAll('td').forEach(function(td) {{
+          td.style.backgroundColor = TABLE_HEADER_BG;
+          td.style.fontWeight = '600';
+        }});
+      }}
+    }});
+  }}
   function applyHtml(html) {{
     var doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
+    styleTableHeaders();
   }}
   new QWebChannel(qt.webChannelTransport, function(channel) {{
     var bridge = channel.objects.bridge;
@@ -92,6 +123,112 @@ def _make_preview_html() -> str:
 </script>
 </body>
 </html>"""
+
+
+def _add_hard_breaks(md: str) -> str:
+    """Mark paragraph soft breaks with a HORIZONLBR text placeholder.
+
+    Qt compiles markdown with MarkdownNoHTML (part of MarkdownDialectGitHub),
+    so injecting raw <br> tags would be stripped.  Instead we embed a plain-text
+    marker that survives Qt's parser and is replaced with <br> in post-processing.
+
+    Block-level lines (headings, blockquotes, list items, tables, code fences,
+    horizontal rules) are left untouched so Qt can still parse them correctly.
+    """
+    lines = md.split('\n')
+    result = []
+    in_fence = False
+
+    for i, line in enumerate(lines):
+        stripped = line.strip()
+
+        # Track fenced code blocks — never modify content inside them
+        if stripped.startswith('```') or stripped.startswith('~~~'):
+            in_fence = not in_fence
+            result.append(line)
+            continue
+
+        if in_fence or not stripped:
+            result.append(line)
+            continue
+
+        # Block-level element: pass through unchanged
+        if _BLOCK_LINE_RE.match(stripped) or _HR_LINE_RE.match(stripped):
+            result.append(line)
+            continue
+
+        # Plain paragraph line: embed marker only when the *next* line is also
+        # a plain paragraph line (not blank, not a block/HR element).
+        next_stripped = lines[i + 1].strip() if i + 1 < len(lines) else ''
+        next_is_para  = (
+            bool(next_stripped)
+            and not _BLOCK_LINE_RE.match(next_stripped)
+            and not _HR_LINE_RE.match(next_stripped)
+        )
+
+        result.append(line + ('HORIZONLBR' if next_is_para else ''))
+
+    return '\n'.join(result)
+
+
+def _extract_blockquotes(md: str) -> tuple[str, list[tuple[list[str], str | None]]]:
+    """Remove blockquote blocks from *md* and return them as a separate list.
+
+    Each entry in the returned list is ``(content_lines, css_class_or_None)``
+    where *content_lines* are the blockquote lines with their ``> `` prefix
+    stripped, and *css_class_or_None* is e.g. ``"danger"`` when a
+    ``{.is-danger}`` annotation was present.
+
+    The blockquotes are replaced by ``HORIZONBLOCKQUOTEN`` placeholders so Qt
+    never sees the ``>`` syntax (whose HTML representation varies across Qt
+    versions and cannot be relied upon for post-processing).
+    """
+    bq_list: list[tuple[list[str], str | None]] = []
+
+    def replace(m: re.Match) -> str:
+        idx      = len(bq_list)
+        raw_bq   = m.group(1)          # the "> …" lines (with trailing \n)
+        cls      = m.group(2)          # "info" / … or None
+        lines    = [
+            _BQ_GT_PREFIX_RE.sub('', ln)
+            for ln in raw_bq.rstrip('\n').split('\n')
+        ]
+        bq_list.append((lines, cls))
+        # Surround with blank lines so Qt treats the placeholder as its own block
+        return f'\nHORIZONBLOCKQUOTE{idx}END\n\n'
+
+    return _BQ_EXTRACT_RE.sub(replace, md), bq_list
+
+
+def _blockquote_inner_html(lines: list[str]) -> str:
+    """Convert blockquote content lines to inner HTML, applying line-break markers."""
+    md = _add_hard_breaks('\n'.join(lines))
+    doc = QTextDocument()
+    doc.setMarkdown(md)
+    raw = doc.toHtml()
+    body = _QT_BODY_RE.search(raw)
+    inner = body.group(1).strip() if body else '\n'.join(lines)
+    inner = _BLOCK_STYLE_RE.sub(r'\1', inner)
+    inner = inner.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
+    return inner
+
+
+def _inject_blockquotes(html: str, bq_list: list[tuple[list[str], str | None]]) -> str:
+    """Replace HORIZONBLOCKQUOTEN placeholders with styled <blockquote> elements."""
+    for idx, (lines, cls) in enumerate(bq_list):
+        placeholder = f'HORIZONBLOCKQUOTE{idx}END'
+        inner       = _blockquote_inner_html(lines)
+        cls_attr    = f' class="bq-{cls}"' if cls else ''
+        bq_html     = f'<blockquote{cls_attr}>{inner}</blockquote>'
+        # Qt may have wrapped the placeholder in a <p>…</p>; handle both forms
+        html = re.sub(
+            r'<p[^>]*>\s*' + re.escape(placeholder) + r'\s*</p>',
+            bq_html,
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = html.replace(placeholder, bq_html)   # fallback (naked placeholder)
+    return html
 
 
 def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) -> str:
@@ -104,6 +241,7 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     """
     images: dict[int, bytes | None] = {}
 
+    # Step 1: extract image references
     if image_repo is not None:
         def _extract(m: re.Match) -> str:
             img_id = int(m.group(2))
@@ -113,10 +251,29 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 
         markdown = _MD_IMG_RE.sub(_extract, markdown)
 
+    # Step 2: extract blockquotes (with optional {.is-TYPE} annotations) so Qt
+    #         never sees "> …" lines whose HTML representation is unpredictable.
+    markdown, bq_list = _extract_blockquotes(markdown)
+
+    # Step 3: mark paragraph soft-breaks with a plain-text placeholder
+    markdown = _add_hard_breaks(markdown)
+
+    # Step 4: Qt markdown → HTML
     doc = QTextDocument()
     doc.setMarkdown(markdown)
     html = doc.toHtml()
 
+    # Step 5: strip Qt inline styles from <p> so our CSS controls spacing
+    html = _BLOCK_STYLE_RE.sub(r'\1', html)
+
+    # Step 6: inject blockquote HTML (replaces HORIZONBLOCKQUOTEN placeholders)
+    html = _inject_blockquotes(html, bq_list)
+
+    # Step 7: replace line-break placeholders with <br>
+    # Qt emits a soft-break space between the two halves; strip it as well.
+    html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
+
+    # Step 8: re-inject images
     if images:
         def _inject(m: re.Match) -> str:
             data = images.get(int(m.group(1)))
@@ -275,6 +432,9 @@ class NoteDetailWidget(QWidget):
         self._project_combo = QComboBox()
         self._project_combo.currentIndexChanged.connect(self._on_project_changed)
 
+        self._view_source_btn = QPushButton("View source")
+        self._view_source_btn.clicked.connect(self._on_view_source)
+
         header_layout = QHBoxLayout()
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._archive_cb)
@@ -285,6 +445,7 @@ class NoteDetailWidget(QWidget):
         project_row.addWidget(QLabel("Project:"))
         project_row.addWidget(self._project_combo)
         project_row.addStretch()
+        project_row.addWidget(self._view_source_btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -321,6 +482,20 @@ class NoteDetailWidget(QWidget):
 
         self._restore_splitter_sizes()
 
+    def _on_view_source(self) -> None:
+        """Open a dialog showing the raw HTML sent to the preview."""
+        html = self._bridge._current_html
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Preview HTML source")
+        dlg.resize(800, 600)
+        text = QPlainTextEdit(dlg)
+        text.setReadOnly(True)
+        text.setPlainText(html)
+        text.setFont(QFont("Courier New", 9))
+        lay = QVBoxLayout(dlg)
+        lay.addWidget(text)
+        dlg.exec()
+
     def load_note(self, note: Note, projects: list) -> None:
         self._current_note = note
         self._body_raw = note.body
@@ -341,6 +516,7 @@ class NoteDetailWidget(QWidget):
         self._editor.blockSignals(True)
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
+
         self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
 
     def eventFilter(self, obj, event) -> bool:
