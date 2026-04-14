@@ -28,6 +28,7 @@ from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog
+from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
@@ -417,15 +418,17 @@ class NotesListWidget(QWidget):
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, prefs=None, image_repo: ImageRepository | None = None, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
+        self._folder_repo = folder_repo
         self._prefs = prefs
         self._image_repo = image_repo
         self._current_note: Note | None = None
         self._body_raw: str = ""
         self._updating_combo = False
+        self._updating_folder_combo = False
 
         back_btn = QPushButton("← Back")
         back_btn.clicked.connect(self.back_requested)
@@ -451,6 +454,10 @@ class NoteDetailWidget(QWidget):
         self._project_combo = QComboBox()
         self._project_combo.currentIndexChanged.connect(self._on_project_changed)
 
+        self._folder_combo = QComboBox()
+        self._folder_combo.currentIndexChanged.connect(self._on_folder_changed)
+        self._folder_label = QLabel("Folder:")
+
         self._view_source_btn = QPushButton("View source")
         self._view_source_btn.clicked.connect(self._on_view_source)
 
@@ -465,6 +472,11 @@ class NoteDetailWidget(QWidget):
         project_row.addWidget(self._project_combo)
         project_row.addStretch()
         project_row.addWidget(self._view_source_btn)
+
+        folder_row = QHBoxLayout()
+        folder_row.addWidget(self._folder_label)
+        folder_row.addWidget(self._folder_combo)
+        folder_row.addStretch()
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -497,6 +509,7 @@ class NoteDetailWidget(QWidget):
         layout.setSpacing(8)
         layout.addLayout(header_layout)
         layout.addLayout(project_row)
+        layout.addLayout(folder_row)
         layout.addWidget(sep)
         layout.addWidget(self._body_splitter, stretch=1)
 
@@ -533,11 +546,43 @@ class NoteDetailWidget(QWidget):
         self._project_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._updating_combo = False
 
+        self._updating_folder_combo = True
+        if note.project_id is not None:
+            self._folder_label.setVisible(True)
+            self._folder_combo.setVisible(True)
+            self._populate_folder_combo(note.project_id, note.folder_id)
+        else:
+            self._folder_label.setVisible(False)
+            self._folder_combo.setVisible(False)
+            self._folder_combo.clear()
+        self._updating_folder_combo = False
+
         self._editor.blockSignals(True)
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
 
         self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+
+    def _populate_folder_combo(self, project_id: int, selected_folder_id: int | None) -> None:
+        self._folder_combo.clear()
+        self._folder_combo.addItem("No folder", userData=None)
+
+        all_folders = self._folder_repo.list_for_project(project_id)
+
+        def _dfs(parent_id: int | None, depth: int) -> None:
+            children = sorted(
+                [f for f in all_folders if f.parent_id == parent_id],
+                key=lambda f: f.name.lower(),
+            )
+            for folder in children:
+                prefix = "  " * depth + ("└ " if depth > 0 else "")
+                self._folder_combo.addItem(prefix + folder.name, userData=folder.id)
+                _dfs(folder.id, depth + 1)
+
+        _dfs(None, 0)
+
+        idx = self._folder_combo.findData(selected_folder_id)
+        self._folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
     def eventFilter(self, obj, event) -> bool:
         if obj is self._editor and event.type() == QEvent.Type.FocusOut:
@@ -601,5 +646,24 @@ class NoteDetailWidget(QWidget):
     def _on_project_changed(self, _index: int) -> None:
         if self._updating_combo or self._current_note is None:
             return
-        self._current_note.project_id = self._project_combo.currentData()
+        new_project_id = self._project_combo.currentData()
+        self._current_note.project_id = new_project_id
+        self._current_note.folder_id = None
+        self._note_repo.update(self._current_note)
+
+        self._updating_folder_combo = True
+        if new_project_id is not None:
+            self._folder_label.setVisible(True)
+            self._folder_combo.setVisible(True)
+            self._populate_folder_combo(new_project_id, None)
+        else:
+            self._folder_label.setVisible(False)
+            self._folder_combo.setVisible(False)
+            self._folder_combo.clear()
+        self._updating_folder_combo = False
+
+    def _on_folder_changed(self, _index: int) -> None:
+        if self._updating_folder_combo or self._current_note is None:
+            return
+        self._current_note.folder_id = self._folder_combo.currentData()
         self._note_repo.update(self._current_note)

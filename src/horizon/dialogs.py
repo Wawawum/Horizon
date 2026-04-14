@@ -506,6 +506,47 @@ class TaskDetailDialog(QDialog):
             self.accept()
 
 
+class NewFolderDialog(QDialog):
+    def __init__(self, title: str = "New Folder", initial_name: str = "", parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(360)
+
+        self._name_edit = QLineEdit(initial_name)
+        self._name_edit.setMaxLength(255)
+        self._name_edit.setPlaceholderText("Folder name")
+        self._name_edit.selectAll()
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self._on_accepted)
+        btn_box.rejected.connect(self.reject)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addWidget(QLabel("Name"))
+        content_layout.addWidget(self._name_edit)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle=title, show_min_max=False))
+        layout.addWidget(content)
+
+    def _on_accepted(self) -> None:
+        if not self._name_edit.text().strip():
+            AlertDialog.warn("Validation Error", "Folder name cannot be blank.", self)
+            return
+        self.accept()
+
+    def name(self) -> str:
+        return self._name_edit.text().strip()
+
+
 class _ZoomableGraphicsView(QGraphicsView):
     _ZOOM_FACTOR = 1.15
     _MIN_SCALE   = 0.05

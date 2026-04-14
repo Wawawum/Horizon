@@ -12,25 +12,26 @@ class Note:
     body: str
     dt: datetime  # stored as ISO-8601 TEXT in SQLite
     archived: bool = False
+    folder_id: int | None = None
 
 
 class NoteRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def create(self, project_id: int | None, title: str, body: str = "", dt: datetime | None = None, archived: bool = False) -> "Note":
+    def create(self, project_id: int | None, title: str, body: str = "", dt: datetime | None = None, archived: bool = False, folder_id: int | None = None) -> "Note":
         if dt is None:
             dt = datetime.now()
         cur = self._db.conn.execute(
-            "INSERT INTO notes (project_id, title, body, dt, archived) VALUES (?, ?, ?, ?, ?)",
-            (project_id, title, body, dt.isoformat(), int(archived)),
+            "INSERT INTO notes (project_id, title, body, dt, archived, folder_id) VALUES (?, ?, ?, ?, ?, ?)",
+            (project_id, title, body, dt.isoformat(), int(archived), folder_id),
         )
         self._db.conn.commit()
-        return Note(id=cur.lastrowid, project_id=project_id, title=title, body=body, dt=dt, archived=archived)
+        return Note(id=cur.lastrowid, project_id=project_id, title=title, body=body, dt=dt, archived=archived, folder_id=folder_id)
 
     def get(self, note_id: int) -> "Note | None":
         row = self._db.conn.execute(
-            "SELECT id, project_id, title, body, dt, archived FROM notes WHERE id = ?",
+            "SELECT id, project_id, title, body, dt, archived, folder_id FROM notes WHERE id = ?",
             (note_id,),
         ).fetchone()
         if row is None:
@@ -42,11 +43,12 @@ class NoteRepository:
             body=row["body"],
             dt=datetime.fromisoformat(row["dt"]),
             archived=bool(row["archived"]),
+            folder_id=row["folder_id"],
         )
 
     def list_all_for_project(self, project_id: int) -> list["Note"]:
         rows = self._db.conn.execute(
-            "SELECT id, project_id, title, body, dt, archived FROM notes"
+            "SELECT id, project_id, title, body, dt, archived, folder_id FROM notes"
             " WHERE project_id = ? ORDER BY dt DESC",
             (project_id,),
         ).fetchall()
@@ -58,13 +60,14 @@ class NoteRepository:
                 body=row["body"],
                 dt=datetime.fromisoformat(row["dt"]),
                 archived=bool(row["archived"]),
+                folder_id=row["folder_id"],
             )
             for row in rows
         ]
 
     def list_all(self, archived_only: bool = False) -> list["Note"]:
         rows = self._db.conn.execute(
-            "SELECT notes.id, notes.project_id, notes.title, notes.body, notes.dt, notes.archived"
+            "SELECT notes.id, notes.project_id, notes.title, notes.body, notes.dt, notes.archived, notes.folder_id"
             " FROM notes LEFT JOIN projects ON notes.project_id = projects.id"
             " WHERE notes.archived = ? AND (notes.project_id IS NULL OR projects.archived = 0)"
             " ORDER BY notes.dt DESC",
@@ -78,14 +81,15 @@ class NoteRepository:
                 body=row["body"],
                 dt=datetime.fromisoformat(row["dt"]),
                 archived=bool(row["archived"]),
+                folder_id=row["folder_id"],
             )
             for row in rows
         ]
 
     def update(self, note: "Note") -> None:
         self._db.conn.execute(
-            "UPDATE notes SET project_id = ?, title = ?, body = ?, dt = ?, archived = ? WHERE id = ?",
-            (note.project_id, note.title, note.body, note.dt.isoformat(), int(note.archived), note.id),
+            "UPDATE notes SET project_id = ?, title = ?, body = ?, dt = ?, archived = ?, folder_id = ? WHERE id = ?",
+            (note.project_id, note.title, note.body, note.dt.isoformat(), int(note.archived), note.folder_id, note.id),
         )
         self._db.conn.commit()
 

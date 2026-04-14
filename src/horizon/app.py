@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidg
 
 from horizon import theme as _theme
 from horizon.database import Database
+from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository
 from horizon.preferences import Preferences
@@ -54,6 +55,7 @@ class MainWindow(QMainWindow):
         task_repo = TaskRepository(db)
         subtask_repo = SubtaskRepository(db)
         self._note_repo = NoteRepository(db)
+        self._folder_repo = FolderRepository(db)
         image_repo = ImageRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
@@ -68,13 +70,13 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._prefs)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._prefs)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._notes_list)      # index 2
 
-        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, prefs=self._prefs, image_repo=image_repo)
+        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, self._folder_repo, prefs=self._prefs, image_repo=image_repo)
         self._right_stack.addWidget(self._note_detail)     # index 3
 
         self._splitter.addWidget(self._right_stack)

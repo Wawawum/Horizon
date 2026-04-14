@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPushButton,
     QScrollArea,
     QSizePolicy,
@@ -30,12 +31,15 @@ from PySide6.QtWidgets import (
     QTableWidgetItem,
     QTextEdit,
     QToolButton,
+    QTreeWidget,
+    QTreeWidgetItem,
     QVBoxLayout,
     QWidget,
 )
 
 from horizon import theme as _theme
-from horizon.dialogs import ConfirmDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
@@ -51,6 +55,8 @@ _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG          = ":/icons/check_black.svg"
 _PLUS_ICON          = QIcon(":/icons/plus_cyan.svg")
 _PLUS_ICON_SIZE     = QSize(12, 12)
+_FOLDER_ICON        = QIcon(":/icons/folder_cyan.svg")
+_FOLDER_ICON_SIZE   = QSize(14, 14)
 _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
 _TILE_RADIUS        = 4
@@ -641,20 +647,31 @@ class HomeWidget(QWidget):
         self._task_repo.set_order_for_bucket(bucket, task_ids)
 
 
+# QTreeWidget item data roles for the notes panel folder tree
+_NOTE_NODE_DATA_ROLE   = Qt.ItemDataRole.UserRole        # folder_id or note_id
+_NOTE_NODE_TYPE_ROLE   = Qt.ItemDataRole.UserRole + 1   # "folder" | "note"
+_NOTE_NODE_FOLDER_ROLE = Qt.ItemDataRole.UserRole + 2   # folder_id of the note (note nodes only)
+
+_NOTE_NODE_TYPE_FOLDER = "folder"
+_NOTE_NODE_TYPE_NOTE   = "note"
+
+
 class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, prefs=None, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
         self._subtask_repo = subtask_repo
         self._note_repo = note_repo
+        self._folder_repo = folder_repo
         self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
         self._desc_raw: str = ""
+        self._note_selected_folder_id: int | None = None
 
         # --- Empty state page ---
         empty_label = QLabel("Select a project from the list")
@@ -797,23 +814,28 @@ class ProjectDetailWidget(QWidget):
 
         notes_header = QHBoxLayout()
         notes_header.addStretch()
-        new_note_btn = QPushButton("New")
+        self._new_folder_btn = QPushButton("New Folder")
+        self._new_folder_btn.setIcon(_PLUS_ICON)
+        self._new_folder_btn.setIconSize(_PLUS_ICON_SIZE)
+        self._new_folder_btn.clicked.connect(self._on_new_folder)
+        notes_header.addWidget(self._new_folder_btn)
+        new_note_btn = QPushButton("New Note")
         new_note_btn.setIcon(_PLUS_ICON)
         new_note_btn.setIconSize(_PLUS_ICON_SIZE)
         new_note_btn.clicked.connect(self._on_new_note)
         notes_header.addWidget(new_note_btn)
         notes_panel_layout.addLayout(notes_header)
 
-        self._note_table = QTableWidget()
-        self._note_table.setColumnCount(2)
-        self._note_table.setHorizontalHeaderLabels(["Title", "Date"])
-        self._note_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
-        self._note_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
-        self._note_table.verticalHeader().setVisible(False)
-        self._note_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
-        self._note_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
-        self._note_table.cellDoubleClicked.connect(self._on_note_double_clicked)
-        notes_panel_layout.addWidget(self._note_table, stretch=1)
+        self._note_tree = QTreeWidget()
+        self._note_tree.setColumnCount(1)
+        self._note_tree.setHeaderHidden(True)
+        self._note_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._note_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._note_tree.itemDoubleClicked.connect(self._on_note_item_double_clicked)
+        self._note_tree.currentItemChanged.connect(self._on_note_selection_changed)
+        self._note_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
+        notes_panel_layout.addWidget(self._note_tree, stretch=1)
 
         # ── Horizontal splitter holding both panels ───────────────────────
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -1042,24 +1064,129 @@ class ProjectDetailWidget(QWidget):
             self._load_tasks(self._current_project_id)
 
     def _load_notes(self, project_id: int) -> None:
-        notes = [n for n in self._note_repo.list_all_for_project(project_id) if not n.archived]
-        self._note_table.setRowCount(len(notes))
-        for row, note in enumerate(notes):
-            title_item = QTableWidgetItem(note.title)
-            title_item.setData(Qt.ItemDataRole.UserRole, note.id)
-            self._note_table.setItem(row, 0, title_item)
-            date_item = QTableWidgetItem(note.dt.strftime("%Y-%m-%d %H:%M"))
-            self._note_table.setItem(row, 1, date_item)
+        self._note_tree.clear()
+        self._note_selected_folder_id = None
 
-    def _on_note_double_clicked(self, row: int, _col: int) -> None:
-        item = self._note_table.item(row, 0)
-        if item is not None:
-            self.note_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
+        notes = [n for n in self._note_repo.list_all_for_project(project_id) if not n.archived]
+        all_folders = self._folder_repo.list_for_project(project_id)
+        notes_by_folder = self._index_notes_by_folder(notes)
+        self._build_note_folder_subtree(None, all_folders, None, notes_by_folder)
+        self._note_tree.expandAll()
+
+    def _index_notes_by_folder(self, notes) -> dict:
+        index: dict = {}
+        for note in notes:
+            index.setdefault(note.folder_id, []).append(note)
+        return index
+
+    def _build_note_folder_subtree(self, parent_item, all_folders, parent_id, notes_by_folder) -> None:
+        children = sorted(
+            [f for f in all_folders if f.parent_id == parent_id],
+            key=lambda f: f.name.lower(),
+        )
+        for folder in children:
+            if parent_item is None:
+                folder_item = QTreeWidgetItem(self._note_tree)
+            else:
+                folder_item = QTreeWidgetItem(parent_item)
+            folder_item.setText(0, folder.name)
+            folder_item.setIcon(0, _FOLDER_ICON)
+            folder_item.setData(0, _NOTE_NODE_DATA_ROLE, folder.id)
+            folder_item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_FOLDER)
+            folder_item.setExpanded(True)
+
+            self._build_note_folder_subtree(folder_item, all_folders, folder.id, notes_by_folder)
+
+            for note in sorted(notes_by_folder.get(folder.id, []), key=lambda n: n.title.lower()):
+                self._make_note_tree_item(folder_item, note)
+
+        if parent_id is None:
+            for note in sorted(notes_by_folder.get(None, []), key=lambda n: n.title.lower()):
+                self._make_note_tree_item(None, note)
+
+    def _make_note_tree_item(self, parent, note) -> QTreeWidgetItem:
+        if parent is None:
+            item = QTreeWidgetItem(self._note_tree)
+        else:
+            item = QTreeWidgetItem(parent)
+        item.setText(0, note.title)
+        item.setData(0, _NOTE_NODE_DATA_ROLE, note.id)
+        item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_NOTE)
+        item.setData(0, _NOTE_NODE_FOLDER_ROLE, note.folder_id)
+        return item
+
+    def _on_note_selection_changed(self, current, _previous) -> None:
+        if current is None:
+            self._note_selected_folder_id = None
+            return
+        node_type = current.data(0, _NOTE_NODE_TYPE_ROLE)
+        if node_type == _NOTE_NODE_TYPE_FOLDER:
+            self._note_selected_folder_id = current.data(0, _NOTE_NODE_DATA_ROLE)
+        elif node_type == _NOTE_NODE_TYPE_NOTE:
+            self._note_selected_folder_id = current.data(0, _NOTE_NODE_FOLDER_ROLE)
+
+    def _on_note_item_double_clicked(self, item, _col) -> None:
+        if item.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_NOTE:
+            self.note_edit_requested.emit(item.data(0, _NOTE_NODE_DATA_ROLE))
+
+    def _on_notes_context_menu(self, pos) -> None:
+        item = self._note_tree.itemAt(pos)
+        if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+            return
+        menu = QMenu(self)
+        rename_action = menu.addAction("Rename")
+        if menu.exec(self._note_tree.viewport().mapToGlobal(pos)) is rename_action:
+            self._rename_note_folder(item)
+
+    def _rename_note_folder(self, item) -> None:
+        folder_id: int = item.data(0, _NOTE_NODE_DATA_ROLE)
+        current_name: str = item.text(0)
+
+        parent_item = item.parent()
+        if parent_item is not None and parent_item.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER:
+            parent_id: int | None = parent_item.data(0, _NOTE_NODE_DATA_ROLE)
+        else:
+            parent_id = None
+
+        dlg = NewFolderDialog(title="Rename Folder", initial_name=current_name, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        new_name = dlg.name()
+        if new_name == current_name:
+            return
+
+        if self._folder_repo.exists_with_name(self._current_project_id, parent_id, new_name):
+            AlertDialog.warn("Duplicate Name", f'A folder named "{new_name}" already exists at this level.', self)
+            return
+
+        self._folder_repo.rename(folder_id, new_name)
+        self._load_notes(self._current_project_id)
+
+    def _on_new_folder(self) -> None:
+        if self._current_project_id is None:
+            return
+
+        dlg = NewFolderDialog(parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+
+        name = dlg.name()
+        if self._folder_repo.exists_with_name(self._current_project_id, self._note_selected_folder_id, name):
+            AlertDialog.warn("Duplicate Name", f'A folder named "{name}" already exists at this level.', self)
+            return
+
+        self._folder_repo.create(self._current_project_id, name, self._note_selected_folder_id)
+        self._load_notes(self._current_project_id)
 
     def _on_new_note(self) -> None:
         if self._current_project_id is None:
             return
-        note = self._note_repo.create(project_id=self._current_project_id, title="New Note")
+        note = self._note_repo.create(
+            project_id=self._current_project_id,
+            title="New Note",
+            folder_id=self._note_selected_folder_id,
+        )
         self._load_notes(self._current_project_id)
         self.note_edit_requested.emit(note.id)
 

@@ -7,5 +7,6 @@
         <file alias="Horizon_Icon.png">resources/Horizon_Icon.png</file>
         <file alias="check_black.svg">resources/check_black.svg</file>
         <file alias="plus_cyan.svg">resources/plus_cyan.svg</file>
+        <file alias="folder_cyan.svg">resources/folder_cyan.svg</file>
     </qresource>
 </RCC>
