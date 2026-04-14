@@ -656,6 +656,72 @@ _NOTE_NODE_TYPE_FOLDER = "folder"
 _NOTE_NODE_TYPE_NOTE   = "note"
 
 
+class _FolderTree(QTreeWidget):
+    """QTreeWidget avec drag-and-drop pour déplacer des dossiers."""
+
+    folder_moved = Signal(int, object)  # (folder_id, new_parent_id: int | None)
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDropIndicatorShown(True)
+
+    def startDrag(self, supported_actions) -> None:
+        item = self.currentItem()
+        if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+            return  # seuls les dossiers sont déplaçables
+        super().startDrag(supported_actions)
+
+    def dropEvent(self, event) -> None:
+        dragged = self.currentItem()
+        if dragged is None or dragged.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+            event.ignore()
+            return
+
+        target = self.itemAt(event.position().toPoint())
+        if target is None or target is dragged:
+            event.ignore()
+            return
+
+        # Déterminer le nouveau parent selon la position du drop indicator
+        indicator = self.dropIndicatorPosition()
+        if (target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER
+                and indicator == QAbstractItemView.DropIndicatorPosition.OnItem):
+            new_parent_item = target
+        else:
+            # Au-dessus/en-dessous d'un item ou sur une note → même niveau que la cible
+            new_parent_item = target.parent()  # None = racine
+
+        # Refuser si on dépose dans soi-même ou un descendant
+        ancestor = new_parent_item
+        while ancestor is not None:
+            if ancestor is dragged:
+                event.ignore()
+                return
+            ancestor = ancestor.parent()
+
+        folder_id: int = dragged.data(0, _NOTE_NODE_DATA_ROLE)
+        new_parent_id = (
+            new_parent_item.data(0, _NOTE_NODE_DATA_ROLE)
+            if new_parent_item is not None else None
+        )
+
+        # Aucun changement si même parent
+        current_parent_item = dragged.parent()
+        current_parent_id = (
+            current_parent_item.data(0, _NOTE_NODE_DATA_ROLE)
+            if current_parent_item is not None else None
+        )
+        if new_parent_id == current_parent_id:
+            event.ignore()
+            return
+
+        event.ignore()  # empêche le déplacement visuel par Qt
+        self.folder_moved.emit(folder_id, new_parent_id)
+
+
 class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
     project_renamed = Signal()
@@ -826,7 +892,7 @@ class ProjectDetailWidget(QWidget):
         notes_header.addWidget(new_note_btn)
         notes_panel_layout.addLayout(notes_header)
 
-        self._note_tree = QTreeWidget()
+        self._note_tree = _FolderTree()
         self._note_tree.setColumnCount(1)
         self._note_tree.setHeaderHidden(True)
         self._note_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
@@ -835,6 +901,7 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.currentItemChanged.connect(self._on_note_selection_changed)
         self._note_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
+        self._note_tree.folder_moved.connect(self._on_folder_moved)
         notes_panel_layout.addWidget(self._note_tree, stretch=1)
 
         # ── Horizontal splitter holding both panels ───────────────────────
@@ -1178,6 +1245,23 @@ class ProjectDetailWidget(QWidget):
             return
 
         self._folder_repo.rename(folder_id, new_name)
+        self._load_notes(self._current_project_id)
+
+    def _on_folder_moved(self, folder_id: int, new_parent_id) -> None:
+        if self._current_project_id is None:
+            return
+        folders = self._folder_repo.list_for_project(self._current_project_id)
+        folder = next((f for f in folders if f.id == folder_id), None)
+        if folder is None:
+            return
+        if self._folder_repo.exists_with_name(self._current_project_id, new_parent_id, folder.name):
+            AlertDialog.warn(
+                "Duplicate Name",
+                f'A folder named "{folder.name}" already exists at the destination.',
+                self,
+            )
+            return
+        self._folder_repo.move(folder_id, new_parent_id)
         self._load_notes(self._current_project_id)
 
     def _on_new_folder(self) -> None:

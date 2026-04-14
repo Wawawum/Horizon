@@ -41,6 +41,13 @@ class FolderRepository:
         self._db.conn.execute("DELETE FROM folders WHERE id = ?", (folder_id,))
         self._db.conn.commit()
 
+    def move(self, folder_id: int, new_parent_id: int | None) -> None:
+        self._db.conn.execute(
+            "UPDATE folders SET parent_id = ? WHERE id = ?",
+            (new_parent_id, folder_id),
+        )
+        self._db.conn.commit()
+
     def exists_with_name(self, project_id: int, parent_id: int | None, name: str) -> bool:
         row = self._db.conn.execute(
             "SELECT 1 FROM folders WHERE project_id = ? AND parent_id IS ? AND name = ? COLLATE NOCASE LIMIT 1",
