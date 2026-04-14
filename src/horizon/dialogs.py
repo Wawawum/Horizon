@@ -1,7 +1,8 @@
-from PySide6.QtCore import QByteArray, QEvent, QRectF, QSize, QTimer, Qt
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, QTimer, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QCheckBox,
     QColorDialog,
     QComboBox,
@@ -28,6 +29,34 @@ from horizon.titlebar import TitleBar
 
 _PLUS_ICON      = QIcon(":/icons/plus_cyan.svg")
 _PLUS_ICON_SIZE = QSize(12, 12)
+
+
+class _DragHandle(QLabel):
+    """Grip icon that initiates a QListWidget InternalMove drag."""
+
+    def __init__(self, list_widget: QListWidget, item: QListWidgetItem, parent=None) -> None:
+        super().__init__("⠿", parent)
+        self._list = list_widget
+        self._item = item
+        self._start: QPoint | None = None
+        self.setCursor(Qt.CursorShape.SizeAllCursor)
+        self.setFixedWidth(18)
+        self.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.setToolTip("Drag to reorder")
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._start = event.pos()
+        event.accept()
+
+    def mouseMoveEvent(self, event) -> None:
+        if not (event.buttons() & Qt.MouseButton.LeftButton) or self._start is None:
+            return
+        if (event.pos() - self._start).manhattanLength() < QApplication.startDragDistance():
+            return
+        self._list.setCurrentItem(self._item)
+        self._list.startDrag(Qt.DropAction.MoveAction)
+        event.accept()
 
 
 class ConfirmDialog(QDialog):
@@ -370,9 +399,16 @@ class TaskDetailDialog(QDialog):
         for subtask in self._subtask_repo.list_for_task(self._task_id):
             subtask_id = subtask.id
 
+            item = QListWidgetItem()
+            item.setData(Qt.ItemDataRole.UserRole, subtask_id)
+            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
+
             row = QWidget()
             row_layout = QHBoxLayout(row)
             row_layout.setContentsMargins(4, 0, 4, 0)
+
+            handle = _DragHandle(self._subtask_list, item)
+            row_layout.addWidget(handle)
 
             cb = QCheckBox(subtask.title)
             cb.setChecked(subtask.completed)
@@ -392,9 +428,6 @@ class TaskDetailDialog(QDialog):
             row._del_btn = del_btn  # type: ignore[attr-defined]
             row.installEventFilter(self)
 
-            item = QListWidgetItem()
-            item.setData(Qt.ItemDataRole.UserRole, subtask_id)
-            item.setFlags(item.flags() | Qt.ItemFlag.ItemIsDragEnabled)
             item.setSizeHint(QSize(0, row.sizeHint().height()))
             self._subtask_list.addItem(item)
             self._subtask_list.setItemWidget(item, row)
