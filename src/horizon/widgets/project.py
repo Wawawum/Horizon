@@ -1135,8 +1135,25 @@ class ProjectDetailWidget(QWidget):
             return
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
-        if menu.exec(self._note_tree.viewport().mapToGlobal(pos)) is rename_action:
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        chosen = menu.exec(self._note_tree.viewport().mapToGlobal(pos))
+        if chosen is rename_action:
             self._rename_note_folder(item)
+        elif chosen is delete_action:
+            self._delete_note_folder(item)
+
+    def _delete_note_folder(self, item) -> None:
+        folder_id: int = item.data(0, _NOTE_NODE_DATA_ROLE)
+        folder_name: str = item.text(0)
+        if ConfirmDialog.ask(
+            "Delete Folder",
+            f"Delete folder \"{folder_name}\"?\n"
+            "Sub-folders will also be deleted. Notes will be moved to the root.",
+            self,
+        ):
+            self._folder_repo.delete(folder_id)
+            self._load_notes(self._current_project_id)
 
     def _rename_note_folder(self, item) -> None:
         folder_id: int = item.data(0, _NOTE_NODE_DATA_ROLE)
