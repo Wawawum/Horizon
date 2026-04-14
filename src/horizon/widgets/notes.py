@@ -470,13 +470,11 @@ class NoteDetailWidget(QWidget):
         project_row = QHBoxLayout()
         project_row.addWidget(QLabel("Project:"))
         project_row.addWidget(self._project_combo)
+        project_row.addSpacing(16)
+        project_row.addWidget(self._folder_label)
+        project_row.addWidget(self._folder_combo)
         project_row.addStretch()
         project_row.addWidget(self._view_source_btn)
-
-        folder_row = QHBoxLayout()
-        folder_row.addWidget(self._folder_label)
-        folder_row.addWidget(self._folder_combo)
-        folder_row.addStretch()
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -509,7 +507,6 @@ class NoteDetailWidget(QWidget):
         layout.setSpacing(8)
         layout.addLayout(header_layout)
         layout.addLayout(project_row)
-        layout.addLayout(folder_row)
         layout.addWidget(sep)
         layout.addWidget(self._body_splitter, stretch=1)
 
