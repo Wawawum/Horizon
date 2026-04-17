@@ -207,6 +207,11 @@ class ProjectListWidget(QWidget):
         if current is None:
             self.project_selected.emit(None)
             return
+        self._nav_group.setExclusive(False)
+        checked = self._nav_group.checkedButton()
+        if checked:
+            checked.setChecked(False)
+        self._nav_group.setExclusive(True)
         project_id = current.data(Qt.ItemDataRole.UserRole)
         self.project_selected.emit(self._repo.get(project_id))
 
