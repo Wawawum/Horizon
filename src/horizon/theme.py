@@ -130,6 +130,12 @@ def make_icon(resource_path: str, size: "QSize") -> "QIcon":
 _RESOURCES_DIR = Path(__file__).parent / "resources"
 
 
+def _hex_to_rgba(hex_color: str, alpha: int) -> str:
+    h = hex_color.lstrip("#")
+    r, g, b = int(h[0:2], 16), int(h[2:4], 16), int(h[4:6], 16)
+    return f"rgba({r}, {g}, {b}, {alpha})"
+
+
 def make_stylesheet(t: Theme) -> str:
     """Génère le QSS global à appliquer sur QApplication."""
     arrow_svg = (
@@ -495,18 +501,18 @@ QPushButton[title_btn="close"] {{
 }}
 QPushButton[title_btn="min"]:hover,
 QPushButton[title_btn="max"]:hover {{
-    background-color: rgba(94, 242, 255, 25);
-    color: #5ef2ff;
+    background-color: {_hex_to_rgba(t.accent_color, 25)};
+    color: {t.accent_color};
 }}
 QPushButton[title_btn="close"]:hover {{
-    background-color: rgba(255, 79, 216, 30);
-    color: #ff4fd8;
+    background-color: {_hex_to_rgba(t.priority_high, 30)};
+    color: {t.priority_high};
 }}
 QPushButton[title_btn="min"]:pressed,
 QPushButton[title_btn="max"]:pressed {{
-    background-color: rgba(94, 242, 255, 50);
+    background-color: {_hex_to_rgba(t.accent_color, 50)};
 }}
 QPushButton[title_btn="close"]:pressed {{
-    background-color: rgba(255, 79, 216, 60);
+    background-color: {_hex_to_rgba(t.priority_high, 60)};
 }}
 """
