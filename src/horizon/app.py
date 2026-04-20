@@ -41,7 +41,9 @@ class MainWindow(QMainWindow):
         app_font.setPointSize(9)
         QApplication.instance().setFont(app_font)
         super().__init__()
-        self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
+        # Keep WS_OVERLAPPEDWINDOW (includes WS_THICKFRAME + WS_CAPTION) so that
+        # Windows Aero snap and Win+arrow shortcuts work. The native title bar and
+        # borders are hidden by returning 0 in WM_NCCALCSIZE (see nativeEvent).
         self.setWindowIcon(QIcon(":/icons/Horizon_Icon.png"))
         w, h = self._prefs.window_size
         self.resize(w, h)
@@ -169,24 +171,41 @@ class MainWindow(QMainWindow):
     def nativeEvent(self, event_type, message):
         if event_type == b"windows_generic_MSG":
             msg = ctypes.wintypes.MSG.from_address(int(message))
-            if msg.message == 0x0084 and not self.isMaximized():  # WM_NCHITTEST
+            if msg.message == 0x0083 and msg.wParam:  # WM_NCCALCSIZE — hide native frame
+                if self.isMaximized():
+                    # When maximized with WS_THICKFRAME, Windows offsets the window by the
+                    # frame border width to hide the resize handles off-screen. Compensate
+                    # so the client area fills the monitor work area exactly.
+                    b = (ctypes.windll.user32.GetSystemMetrics(32) +
+                         ctypes.windll.user32.GetSystemMetrics(92))  # SM_CXSIZEFRAME + SM_CXPADDEDBORDER
+                    rect = ctypes.wintypes.RECT.from_address(msg.lParam)
+                    rect.left += b
+                    rect.top += b
+                    rect.right -= b
+                    rect.bottom -= b
+                return True, 0
+            if msg.message == 0x0084:  # WM_NCHITTEST
                 lp = msg.lParam
                 x = ctypes.c_int16(lp & 0xFFFF).value
                 y = ctypes.c_int16((lp >> 16) & 0xFFFF).value
                 r = self.frameGeometry()
-                b = 6  # resize border width in pixels
-                left   = x < r.left()   + b
-                right  = x > r.right()  - b
-                top    = y < r.top()    + b
-                bottom = y > r.bottom() - b
-                if top    and left:  return True, 13  # HTTOPLEFT
-                if top    and right: return True, 14  # HTTOPRIGHT
-                if bottom and left:  return True, 16  # HTBOTTOMLEFT
-                if bottom and right: return True, 17  # HTBOTTOMRIGHT
-                if left:             return True, 10  # HTLEFT
-                if right:            return True, 11  # HTRIGHT
-                if top:              return True, 12  # HTTOP
-                if bottom:           return True, 15  # HTBOTTOM
+                # Title bar zone (exclude rightmost 138px reserved for the 3 control buttons)
+                if r.top() <= y < r.top() + 36 and x < r.right() - 138:
+                    return True, 2  # HTCAPTION — enables Win+arrows and Aero snap
+                if not self.isMaximized():
+                    b = 6  # resize border width in pixels
+                    left   = x < r.left()   + b
+                    right  = x > r.right()  - b
+                    top    = y < r.top()    + b
+                    bottom = y > r.bottom() - b
+                    if top    and left:  return True, 13  # HTTOPLEFT
+                    if top    and right: return True, 14  # HTTOPRIGHT
+                    if bottom and left:  return True, 16  # HTBOTTOMLEFT
+                    if bottom and right: return True, 17  # HTBOTTOMRIGHT
+                    if left:             return True, 10  # HTLEFT
+                    if right:            return True, 11  # HTRIGHT
+                    if top:              return True, 12  # HTTOP
+                    if bottom:           return True, 15  # HTBOTTOM
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:

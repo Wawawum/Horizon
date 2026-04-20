@@ -12,7 +12,6 @@ class TitleBar(QWidget):
         super().__init__(parent)
         self.setProperty("titlebar", "true")
         self.setFixedHeight(36)
-        self._drag_pos = None
 
         layout = QHBoxLayout(self)
         layout.setContentsMargins(12, 0, 0, 0)
@@ -121,18 +120,3 @@ class TitleBar(QWidget):
             self._toggle_maximize()
         super().mouseDoubleClickEvent(event)
 
-    def mousePressEvent(self, event) -> None:
-        if event.button() == Qt.MouseButton.LeftButton and not self.window().isMaximized():
-            self._drag_pos = (
-                event.globalPosition().toPoint() - self.window().frameGeometry().topLeft()
-            )
-        super().mousePressEvent(event)
-
-    def mouseMoveEvent(self, event) -> None:
-        if event.buttons() == Qt.MouseButton.LeftButton and self._drag_pos is not None:
-            self.window().move(event.globalPosition().toPoint() - self._drag_pos)
-        super().mouseMoveEvent(event)
-
-    def mouseReleaseEvent(self, event) -> None:
-        self._drag_pos = None
-        super().mouseReleaseEvent(event)
