@@ -6,6 +6,8 @@ from pathlib import Path
 @dataclass
 class Theme:
     name: str
+    font_family: str
+    icon_color: str
     # ── App-level surfaces ────────────────────────────────────────────────
     app_bg: str           # fenêtre principale, dialogs
     surface_bg: str       # panneaux, listes, tables, champs
@@ -106,6 +108,25 @@ def current() -> Theme:
     if _current is None:
         raise RuntimeError("theme.init() has not been called")
     return _current
+
+
+def make_icon(resource_path: str, size: "QSize") -> "QIcon":
+    from PySide6.QtCore import QFile, QIODevice, QByteArray, Qt
+    from PySide6.QtSvg import QSvgRenderer
+    from PySide6.QtGui import QPixmap, QPainter, QIcon
+
+    f = QFile(resource_path)
+    f.open(QIODevice.OpenModeFlag.ReadOnly)
+    svg = bytes(f.readAll()).decode("utf-8")
+    f.close()
+    svg = svg.replace("#5ef2ff", current().icon_color)
+    renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
+    pixmap = QPixmap(size)
+    pixmap.fill(Qt.GlobalColor.transparent)
+    painter = QPainter(pixmap)
+    renderer.render(painter)
+    painter.end()
+    return QIcon(pixmap)
 
 
 _RESOURCES_DIR = Path(__file__).parent / "resources"

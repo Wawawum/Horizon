@@ -1,5 +1,7 @@
 {
   "name": "synthwave",
+  "font_family": "JetBrains Mono",
+  "icon_color": "#5ef2ff",
 
   "app_bg":              "#0a0614",
   "surface_bg":          "#0f0a1c",

@@ -1,5 +1,7 @@
 {
   "name": "light",
+  "font_family": "Segoe UI",
+  "icon_color": "#1976d2",
 
   "app_bg":         "#f0f0f0",
   "surface_bg":     "#ffffff",

@@ -33,8 +33,14 @@ from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository
 from horizon.project import ProjectRepository
 
-_PLUS_ICON      = QIcon(":/icons/plus_cyan.svg")
+_PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE = QSize(12, 12)
+
+def _plus_icon() -> QIcon:
+    global _PLUS_ICON
+    if _PLUS_ICON is None:
+        _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
+    return _PLUS_ICON
 
 _JETBRAINS_MONO_URL = (Path(__file__).parent.parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
 
@@ -357,7 +363,7 @@ class NotesListWidget(QWidget):
         title.setFont(font)
 
         new_btn = QPushButton("New Note")
-        new_btn.setIcon(_PLUS_ICON)
+        new_btn.setIcon(_plus_icon())
         new_btn.setIconSize(_PLUS_ICON_SIZE)
         new_btn.clicked.connect(self._on_new_note)
 

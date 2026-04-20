@@ -53,10 +53,22 @@ _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG          = ":/icons/check_black.svg"
-_PLUS_ICON          = QIcon(":/icons/plus_cyan.svg")
+_PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE     = QSize(12, 12)
-_FOLDER_ICON        = QIcon(":/icons/folder_cyan.svg")
+_FOLDER_ICON: QIcon | None = None
 _FOLDER_ICON_SIZE   = QSize(14, 14)
+
+def _plus_icon() -> QIcon:
+    global _PLUS_ICON
+    if _PLUS_ICON is None:
+        _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
+    return _PLUS_ICON
+
+def _folder_icon() -> QIcon:
+    global _FOLDER_ICON
+    if _FOLDER_ICON is None:
+        _FOLDER_ICON = _theme.make_icon(":/icons/folder_cyan.svg", _FOLDER_ICON_SIZE)
+    return _FOLDER_ICON
 _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
 _TILE_RADIUS        = 4
@@ -171,7 +183,7 @@ class ProjectListWidget(QWidget):
         self._show_archived_cb.stateChanged.connect(self._load_projects)
 
         self._new_btn = QPushButton("New Project")
-        self._new_btn.setIcon(_PLUS_ICON)
+        self._new_btn.setIcon(_plus_icon())
         self._new_btn.setIconSize(_PLUS_ICON_SIZE)
         self._new_btn.clicked.connect(self._on_new_project)
 
@@ -843,7 +855,7 @@ class ProjectDetailWidget(QWidget):
         self._move_down_btn.clicked.connect(self._on_move_down)
 
         new_task_btn = QPushButton("New")
-        new_task_btn.setIcon(_PLUS_ICON)
+        new_task_btn.setIcon(_plus_icon())
         new_task_btn.setIconSize(_PLUS_ICON_SIZE)
         new_task_btn.clicked.connect(self._on_new_task)
 
@@ -886,12 +898,12 @@ class ProjectDetailWidget(QWidget):
         notes_header = QHBoxLayout()
         notes_header.addStretch()
         self._new_folder_btn = QPushButton("New Folder")
-        self._new_folder_btn.setIcon(_PLUS_ICON)
+        self._new_folder_btn.setIcon(_plus_icon())
         self._new_folder_btn.setIconSize(_PLUS_ICON_SIZE)
         self._new_folder_btn.clicked.connect(self._on_new_folder)
         notes_header.addWidget(self._new_folder_btn)
         new_note_btn = QPushButton("New Note")
-        new_note_btn.setIcon(_PLUS_ICON)
+        new_note_btn.setIcon(_plus_icon())
         new_note_btn.setIconSize(_PLUS_ICON_SIZE)
         new_note_btn.clicked.connect(self._on_new_note)
         notes_header.addWidget(new_note_btn)
@@ -1162,7 +1174,7 @@ class ProjectDetailWidget(QWidget):
             else:
                 folder_item = QTreeWidgetItem(parent_item)
             folder_item.setText(0, folder.name)
-            folder_item.setIcon(0, _FOLDER_ICON)
+            folder_item.setIcon(0, _folder_icon())
             folder_item.setData(0, _NOTE_NODE_DATA_ROLE, folder.id)
             folder_item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_FOLDER)
             folder_item.setExpanded(True)

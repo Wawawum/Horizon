@@ -27,8 +27,14 @@ from horizon import theme as _theme
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
 from horizon.titlebar import TitleBar
 
-_PLUS_ICON      = QIcon(":/icons/plus_cyan.svg")
+_PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE = QSize(12, 12)
+
+def _plus_icon() -> QIcon:
+    global _PLUS_ICON
+    if _PLUS_ICON is None:
+        _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
+    return _PLUS_ICON
 
 
 class _DragHandle(QLabel):
@@ -328,7 +334,7 @@ class TaskDetailDialog(QDialog):
         subtasks_header.addWidget(QLabel("Sub-tasks"))
         subtasks_header.addStretch()
         add_subtask_btn = QPushButton("New")
-        add_subtask_btn.setIcon(_PLUS_ICON)
+        add_subtask_btn.setIcon(_plus_icon())
         add_subtask_btn.setIconSize(_PLUS_ICON_SIZE)
         add_subtask_btn.clicked.connect(self._show_new_subtask_input)
         subtasks_header.addWidget(add_subtask_btn)

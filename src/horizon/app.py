@@ -36,13 +36,10 @@ class MainWindow(QMainWindow):
         self._prefs = Preferences()
         _theme.init(self._prefs.theme)
         QApplication.instance().setStyleSheet(_theme.make_stylesheet(_theme.current()))
-        font_id = QFontDatabase.addApplicationFont(":/fonts/JetBrainsMono-Regular.ttf")
-        if font_id != -1:
-            families = QFontDatabase.applicationFontFamilies(font_id)
-            if families:
-                app_font = QFont(families[0])
-                app_font.setPointSize(9)
-                QApplication.instance().setFont(app_font)
+        QFontDatabase.addApplicationFont(":/fonts/JetBrainsMono-Regular.ttf")
+        app_font = QFont(_theme.current().font_family)
+        app_font.setPointSize(9)
+        QApplication.instance().setFont(app_font)
         super().__init__()
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint)
         self.setWindowIcon(QIcon(":/icons/Horizon_Icon.png"))
