@@ -674,9 +674,10 @@ _NOTE_NODE_TYPE_NOTE   = "note"
 
 
 class _FolderTree(QTreeWidget):
-    """QTreeWidget avec drag-and-drop pour déplacer des dossiers."""
+    """QTreeWidget avec drag-and-drop pour déplacer des dossiers et des notes."""
 
     folder_moved = Signal(int, object)  # (folder_id, new_parent_id: int | None)
+    note_moved   = Signal(int, object)  # (note_id,   new_folder_id: int | None)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -687,31 +688,42 @@ class _FolderTree(QTreeWidget):
 
     def startDrag(self, supported_actions) -> None:
         item = self.currentItem()
-        if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
-            return  # seuls les dossiers sont déplaçables
+        if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) not in (
+            _NOTE_NODE_TYPE_FOLDER, _NOTE_NODE_TYPE_NOTE
+        ):
+            return
         super().startDrag(supported_actions)
 
     def dropEvent(self, event) -> None:
         dragged = self.currentItem()
-        if dragged is None or dragged.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+        if dragged is None:
             event.ignore()
             return
 
+        dragged_type = dragged.data(0, _NOTE_NODE_TYPE_ROLE)
         target = self.itemAt(event.position().toPoint())
         if target is None or target is dragged:
             event.ignore()
             return
 
-        # Déterminer le nouveau parent selon la position du drop indicator
         indicator = self.dropIndicatorPosition()
-        if (target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER
-                and indicator == QAbstractItemView.DropIndicatorPosition.OnItem):
+        on_item = indicator == QAbstractItemView.DropIndicatorPosition.OnItem
+
+        if dragged_type == _NOTE_NODE_TYPE_FOLDER:
+            self._handle_folder_drop(dragged, target, on_item, event)
+        elif dragged_type == _NOTE_NODE_TYPE_NOTE:
+            self._handle_note_drop(dragged, target, on_item, event)
+        else:
+            event.ignore()
+
+    def _handle_folder_drop(self, dragged, target, on_item, event) -> None:
+        # Nouveau parent : le dossier cible (OnItem) ou le parent de la cible
+        if target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER and on_item:
             new_parent_item = target
         else:
-            # Au-dessus/en-dessous d'un item ou sur une note → même niveau que la cible
             new_parent_item = target.parent()  # None = racine
 
-        # Refuser si on dépose dans soi-même ou un descendant
+        # Refuser si dépôt dans soi-même ou un descendant
         ancestor = new_parent_item
         while ancestor is not None:
             if ancestor is dragged:
@@ -724,8 +736,6 @@ class _FolderTree(QTreeWidget):
             new_parent_item.data(0, _NOTE_NODE_DATA_ROLE)
             if new_parent_item is not None else None
         )
-
-        # Aucun changement si même parent
         current_parent_item = dragged.parent()
         current_parent_id = (
             current_parent_item.data(0, _NOTE_NODE_DATA_ROLE)
@@ -735,8 +745,32 @@ class _FolderTree(QTreeWidget):
             event.ignore()
             return
 
-        event.ignore()  # empêche le déplacement visuel par Qt
+        event.ignore()
         self.folder_moved.emit(folder_id, new_parent_id)
+
+    def _handle_note_drop(self, dragged, target, on_item, event) -> None:
+        # Nouveau dossier : le dossier cible (OnItem) ou le dossier parent de la cible
+        if target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER and on_item:
+            new_folder_item = target
+        else:
+            parent = target.parent()
+            new_folder_item = (
+                parent
+                if parent is not None and parent.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER
+                else None
+            )
+
+        note_id: int = dragged.data(0, _NOTE_NODE_DATA_ROLE)
+        new_folder_id = (
+            new_folder_item.data(0, _NOTE_NODE_DATA_ROLE)
+            if new_folder_item is not None else None
+        )
+        if new_folder_id == dragged.data(0, _NOTE_NODE_FOLDER_ROLE):
+            event.ignore()
+            return
+
+        event.ignore()
+        self.note_moved.emit(note_id, new_folder_id)
 
 
 class ProjectDetailWidget(QWidget):
@@ -919,6 +953,7 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
         self._note_tree.folder_moved.connect(self._on_folder_moved)
+        self._note_tree.note_moved.connect(self._on_note_moved)
         notes_panel_layout.addWidget(self._note_tree, stretch=1)
 
         # ── Horizontal splitter holding both panels ───────────────────────
@@ -1262,6 +1297,14 @@ class ProjectDetailWidget(QWidget):
             return
 
         self._folder_repo.rename(folder_id, new_name)
+        self._load_notes(self._current_project_id)
+
+    def _on_note_moved(self, note_id: int, new_folder_id) -> None:
+        note = self._note_repo.get(note_id)
+        if note is None:
+            return
+        note.folder_id = new_folder_id
+        self._note_repo.update(note)
         self._load_notes(self._current_project_id)
 
     def _on_folder_moved(self, folder_id: int, new_parent_id) -> None:
