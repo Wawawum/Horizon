@@ -7,7 +7,7 @@ from pathlib import Path
 class Theme:
     name: str
     font_family: str
-    icon_color: str
+    accent_color: str
     # ── App-level surfaces ────────────────────────────────────────────────
     app_bg: str           # fenêtre principale, dialogs
     surface_bg: str       # panneaux, listes, tables, champs
@@ -62,8 +62,6 @@ class Theme:
     # ── Nav buttons gradient ──────────────────────────────────────────────
     nav_btn_gradient_from: str   # start color (left) for hover/active bg
     nav_btn_gradient_to: str     # end color (right) for hover/active bg
-    # ── Bouton OK ─────────────────────────────────────────────────────────
-    ok_btn_text: str
     # ── Aperçu Markdown ───────────────────────────────────────────────────
     preview_text: str
     preview_bg: str
@@ -119,7 +117,7 @@ def make_icon(resource_path: str, size: "QSize") -> "QIcon":
     f.open(QIODevice.OpenModeFlag.ReadOnly)
     svg = bytes(f.readAll()).decode("utf-8")
     f.close()
-    svg = svg.replace("#5ef2ff", current().icon_color)
+    svg = svg.replace("#5ef2ff", current().accent_color)
     renderer = QSvgRenderer(QByteArray(svg.encode("utf-8")))
     pixmap = QPixmap(size)
     pixmap.fill(Qt.GlobalColor.transparent)
@@ -193,6 +191,17 @@ QLabel {{
 QCheckBox {{
     background-color: transparent;
     spacing: 6px;
+}}
+QCheckBox::indicator {{
+    width: 13px;
+    height: 13px;
+    border: 1px solid {t.color_btn_border};
+    border-radius: 3px;
+    background-color: {t.input_bg};
+}}
+QCheckBox::indicator:checked {{
+    background-color: {t.accent_color};
+    border-color: {t.accent_color};
 }}
 QScrollArea {{
     background-color: transparent;
@@ -452,7 +461,7 @@ QDialogButtonBox QPushButton {{
     font-weight: bold;
 }}
 QPushButton:default {{
-    color: {t.ok_btn_text};
+    color: {t.accent_color};
 }}
 
 /* ── Boîte de message ───────────────────────────────────────────────── */

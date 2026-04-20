@@ -779,9 +779,9 @@ class ProjectDetailWidget(QWidget):
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
         self._color_btn = QPushButton()
-        self._color_btn.setFixedSize(24, 24)
+        self._color_btn.setFixedWidth(24)
         self._color_btn.setToolTip("Choose a color")
-        self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;")
+        self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px; padding: 0; min-height: 0;")
         self._color_btn.clicked.connect(self._pick_color)
 
         name_header = QHBoxLayout()
@@ -980,7 +980,7 @@ class ProjectDetailWidget(QWidget):
             self._current_project.color = chosen.name()
             self._project_repo.update(self._current_project)
             self._color_btn.setStyleSheet(
-                f"background-color: {self._current_project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;"
+                f"background-color: {self._current_project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px; padding: 0; min-height: 0;"
             )
             self.project_renamed.emit()
 
@@ -1320,10 +1320,10 @@ class ProjectDetailWidget(QWidget):
             self._archive_cb.setChecked(project.archived)
             if project.color:
                 self._color_btn.setStyleSheet(
-                    f"background-color: {project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;"
+                    f"background-color: {project.color}; border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px; padding: 0; min-height: 0;"
                 )
             else:
-                self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px;")
+                self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px; padding: 0; min-height: 0;")
             self._desc_raw = project.description
             if self._desc_raw:
                 self._desc_text.setMarkdown(self._desc_raw)

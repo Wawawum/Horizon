@@ -1,7 +1,7 @@
 {
   "name": "dark",
   "font_family": "Segoe UI",
-  "icon_color": "#4ea1f3",
+  "accent_color": "#4ea1f3",
 
   "app_bg":              "#1e1e1e",
   "surface_bg":          "#252526",
@@ -61,9 +61,7 @@
   "nav_btn_gradient_from": "rgba(21,101,192,40)",
   "nav_btn_gradient_to":   "rgba(21,101,192,40)",
 
-  "ok_btn_text":       "#5ef2ff",
-
-  "color_btn_border":  "#666666",
+"color_btn_border":  "#666666",
   "delete_btn_text":   "#ffffff",
   "delete_btn_bg":     "#cc0000",
 

@@ -35,7 +35,7 @@ class TitleBar(QWidget):
         # Nom de l'application
         title_label = QLabel("HORIZON")
         title_label.setStyleSheet(
-            "color: rgb(94, 242, 255);"
+            f"color: {_theme.current().accent_color};"
             "font-size: 11px;"
             "font-weight: bold;"
             "letter-spacing: 3px;"

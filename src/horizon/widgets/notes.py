@@ -78,7 +78,7 @@ def _make_preview_html() -> str:
   }}
   * {{ box-sizing: border-box; margin: 0; padding: 0; }}
   body {{
-    font-family: 'JetBrains Mono', monospace;
+    font-family: '{t.font_family}', sans-serif;
     font-size: 13px; line-height: 1.6; color: {t.preview_text};
     background: {t.preview_bg}; padding: 16px 24px; max-width: 860px;
   }}
@@ -86,7 +86,8 @@ def _make_preview_html() -> str:
   h1 {{ font-size: 1.75em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.2em; }}
   h2 {{ font-size: 1.4em; border-bottom: 1px solid {t.preview_border}; padding-bottom: 0.15em; }}
   p {{ margin-bottom: 0.8em !important; }}
-  ul, ol {{ margin-left: 1.5em; margin-bottom: 0.8em; }}
+  ul, ol {{ padding-left: 1.5em; margin-bottom: 0.8em; }}
+  li {{ margin-bottom: 0.2em; }}
   code {{ font-family: 'JetBrains Mono', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; font-size: 0.9em; }}
   pre {{ background: {t.preview_code_bg}; border-radius: 4px; padding: 12px 16px; overflow-x: auto; margin-bottom: 0.8em; }}
   pre code {{ background: none; padding: 0; }}
