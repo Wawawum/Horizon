@@ -1,8 +1,9 @@
 import base64
+import html as _html_mod
 import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QBuffer, QByteArray, QIODevice, QObject, QEvent, QSize, Slot
+from PySide6.QtCore import Qt, Signal, QBuffer, QByteArray, QIODevice, QObject, QEvent, QSize, Slot, QUrl
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -42,7 +43,15 @@ def _plus_icon() -> QIcon:
         _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
     return _PLUS_ICON
 
-_JETBRAINS_MONO_URL = (Path(__file__).parent.parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
+_JETBRAINS_MONO_URL   = (Path(__file__).parent.parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
+_MERMAID_JS_URL       = (Path(__file__).parent.parent / "resources" / "mermaid.min.js").as_uri()
+_RESOURCES_BASE_URL   = QUrl((Path(__file__).parent.parent / "resources" / "").as_uri())
+
+_MERMAID_FENCE_RE = re.compile(
+    r'^[ \t]*```[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*```[ \t]*$',
+    re.MULTILINE | re.DOTALL,
+)
+_MERMAID_PH_RE = re.compile(r'HORIZONMERMAID(\d+)END')
 
 _MD_IMG_RE  = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
 _HTML_PH_RE = re.compile(r'HORIZONIMG(\d+)END')
@@ -65,6 +74,7 @@ _HR_LINE_RE     = re.compile(r'^[-*_](\s*[-*_]){2,}\s*$')
 
 def _make_preview_html() -> str:
     t = _theme.current()
+    _mermaid_theme = "default" if t.name == "light" else "dark"
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -100,12 +110,16 @@ def _make_preview_html() -> str:
   a {{ color: {t.preview_link}; }}
   table {{ border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }}
   td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
+  .mermaid {{ margin-bottom: 0.8em; overflow-x: auto; text-align: center; }}
+  .mermaid svg {{ max-width: 100%; height: auto; }}
 </style>
+<script src="{_MERMAID_JS_URL}"></script>
 </head>
 <body>
 <div id="content"></div>
 <script src="qrc:///qtwebchannel/qwebchannel.js"></script>
 <script>
+  mermaid.initialize({{ startOnLoad: false, theme: '{_mermaid_theme}', securityLevel: 'loose' }});
   var TABLE_HEADER_BG = '{t.preview_table_header_bg}';
   function styleTableHeaders() {{
     document.querySelectorAll('#content table').forEach(function(table) {{
@@ -136,6 +150,12 @@ def _make_preview_html() -> str:
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
     styleTableHeaders();
     attachImageHandlers();
+    var nodes = document.getElementById('content').querySelectorAll('.mermaid');
+    if (nodes.length > 0) {{
+      mermaid.run({{ nodes: nodes }}).catch(function(err) {{
+        console.warn('Mermaid render error:', err);
+      }});
+    }}
   }}
   new QWebChannel(qt.webChannelTransport, function(channel) {{
     window.bridge = channel.objects.bridge;
@@ -253,6 +273,36 @@ def _inject_blockquotes(html: str, bq_list: list[tuple[list[str], str | None]]) 
     return html
 
 
+def _extract_mermaid(md: str) -> tuple[str, list[str]]:
+    diagrams: list[str] = []
+
+    def _replace(m: re.Match) -> str:
+        idx = len(diagrams)
+        diagrams.append(m.group(1))
+        return f'\nHORIZONMERMAID{idx}END\n\n'
+
+    return _MERMAID_FENCE_RE.sub(_replace, md), diagrams
+
+
+def _inject_mermaid(html: str, diagrams: list[str]) -> str:
+    for idx, source in enumerate(diagrams):
+        placeholder = f'HORIZONMERMAID{idx}END'
+        stripped = source.strip()
+        if not stripped:
+            replacement = ''
+        else:
+            escaped = _html_mod.escape(stripped)
+            replacement = f'<div class="mermaid">{escaped}</div>'
+        html = re.sub(
+            r'<p[^>]*>\s*' + re.escape(placeholder) + r'\s*</p>',
+            replacement,
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = html.replace(placeholder, replacement)
+    return html
+
+
 def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) -> str:
     """Convert markdown to HTML, resolving horizon-image:// references to inline data URIs.
 
@@ -273,6 +323,9 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 
         markdown = _MD_IMG_RE.sub(_extract, markdown)
 
+    # Step 1.5: extract mermaid fenced blocks before Qt's parser
+    markdown, diagrams = _extract_mermaid(markdown)
+
     # Step 2: extract blockquotes (with optional {.is-TYPE} annotations) so Qt
     #         never sees "> …" lines whose HTML representation is unpredictable.
     markdown, bq_list = _extract_blockquotes(markdown)
@@ -290,6 +343,9 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 
     # Step 6: inject blockquote HTML (replaces HORIZONBLOCKQUOTEN placeholders)
     html = _inject_blockquotes(html, bq_list)
+
+    # Step 6.5: inject mermaid diagrams
+    html = _inject_mermaid(html, diagrams)
 
     # Step 7: replace line-break placeholders with <br>
     # Qt emits a soft-break space between the two halves; strip it as well.
@@ -497,7 +553,7 @@ class NoteDetailWidget(QWidget):
         self._preview = QWebEngineView()
         self._preview.page().setWebChannel(self._channel)
         self._channel.registerObject("bridge", self._bridge)
-        self._preview.setHtml(_make_preview_html())
+        self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
         self._bridge.image_clicked.connect(self._on_image_clicked)
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
