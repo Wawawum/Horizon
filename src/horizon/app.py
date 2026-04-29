@@ -115,7 +115,7 @@ class MainWindow(QMainWindow):
 
     def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
         subject = meeting.subject[:220]
-        title = f"Meeting note - {subject} - {meeting.start.strftime('%Y-%m-%d %H:%M')}"
+        title = f"{meeting.start.strftime('%Y-%m-%d')} {subject}"
         body = _build_meeting_note_body(meeting)
         note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start)
         projects = self._proj_repo.list_all()
