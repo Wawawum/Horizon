@@ -53,6 +53,12 @@ _MERMAID_FENCE_RE = re.compile(
 )
 _MERMAID_PH_RE = re.compile(r'HORIZONMERMAID(\d+)END')
 
+_CODE_FENCE_RE = re.compile(
+    r'^[ \t]*(`{3,}|~{3,})([^\n]*)\n(.*?)^\1[ \t]*$',
+    re.MULTILINE | re.DOTALL,
+)
+_CODE_PH_RE = re.compile(r'HORIZONCODEBLOCK(\d+)END')
+
 _MD_IMG_RE  = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
 _HTML_PH_RE = re.compile(r'HORIZONIMG(\d+)END')
 
@@ -284,6 +290,37 @@ def _extract_mermaid(md: str) -> tuple[str, list[str]]:
     return _MERMAID_FENCE_RE.sub(_replace, md), diagrams
 
 
+def _extract_code_blocks(md: str) -> tuple[str, list[tuple[str, str]]]:
+    """Remove fenced code blocks from *md* and return them as a separate list."""
+    blocks: list[tuple[str, str]] = []
+
+    def replace(m: re.Match) -> str:
+        idx  = len(blocks)
+        lang = m.group(2).strip()
+        code = m.group(3)
+        blocks.append((lang, code))
+        return f'\nHORIZONCODEBLOCK{idx}END\n\n'
+
+    return _CODE_FENCE_RE.sub(replace, md), blocks
+
+
+def _inject_code_blocks(html: str, blocks: list[tuple[str, str]]) -> str:
+    """Replace HORIZONCODEBLOCKN placeholders with <pre><code> elements."""
+    for idx, (lang, code) in enumerate(blocks):
+        placeholder = f'HORIZONCODEBLOCK{idx}END'
+        escaped     = _html_mod.escape(code.rstrip('\n'))
+        lang_attr   = f' class="language-{lang}"' if lang else ''
+        block_html  = f'<pre><code{lang_attr}>{escaped}</code></pre>'
+        html = re.sub(
+            r'<p[^>]*>\s*' + re.escape(placeholder) + r'\s*</p>',
+            block_html,
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = html.replace(placeholder, block_html)
+    return html
+
+
 def _inject_mermaid(html: str, diagrams: list[str]) -> str:
     for idx, source in enumerate(diagrams):
         placeholder = f'HORIZONMERMAID{idx}END'
@@ -326,6 +363,10 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     # Step 1.5: extract mermaid fenced blocks before Qt's parser
     markdown, diagrams = _extract_mermaid(markdown)
 
+    # Step 1.6: extract regular fenced code blocks before Qt's parser so that
+    #           Qt does not split each line into its own <pre> element.
+    markdown, code_blocks = _extract_code_blocks(markdown)
+
     # Step 2: extract blockquotes (with optional {.is-TYPE} annotations) so Qt
     #         never sees "> …" lines whose HTML representation is unpredictable.
     markdown, bq_list = _extract_blockquotes(markdown)
@@ -344,7 +385,10 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     # Step 6: inject blockquote HTML (replaces HORIZONBLOCKQUOTEN placeholders)
     html = _inject_blockquotes(html, bq_list)
 
-    # Step 6.5: inject mermaid diagrams
+    # Step 6.5: inject code blocks (replaces HORIZONCODEBLOCKN placeholders)
+    html = _inject_code_blocks(html, code_blocks)
+
+    # Step 6.6: inject mermaid diagrams
     html = _inject_mermaid(html, diagrams)
 
     # Step 7: replace line-break placeholders with <br>
