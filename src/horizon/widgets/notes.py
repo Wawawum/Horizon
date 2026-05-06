@@ -43,9 +43,15 @@ def _plus_icon() -> QIcon:
         _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
     return _PLUS_ICON
 
-_JETBRAINS_MONO_URL   = (Path(__file__).parent.parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
-_MERMAID_JS_URL       = (Path(__file__).parent.parent / "resources" / "mermaid.min.js").as_uri()
-_RESOURCES_BASE_URL   = QUrl((Path(__file__).parent.parent / "resources" / "").as_uri())
+_JETBRAINS_MONO_URL        = (Path(__file__).parent.parent / "resources" / "JetBrainsMono-Regular.ttf").as_uri()
+_MERMAID_JS_URL            = (Path(__file__).parent.parent / "resources" / "mermaid.min.js").as_uri()
+_HIGHLIGHT_JS_URL          = (Path(__file__).parent.parent / "resources" / "highlight.min.js").as_uri()
+_HIGHLIGHT_CSHARP_URL      = (Path(__file__).parent.parent / "resources" / "highlight-csharp.min.js").as_uri()
+_HIGHLIGHT_DOCKERFILE_URL  = (Path(__file__).parent.parent / "resources" / "highlight-dockerfile.min.js").as_uri()
+_HIGHLIGHT_POWERSHELL_URL  = (Path(__file__).parent.parent / "resources" / "highlight-powershell.min.js").as_uri()
+_HIGHLIGHT_CSS_LIGHT_URL   = (Path(__file__).parent.parent / "resources" / "highlight-light.min.css").as_uri()
+_HIGHLIGHT_CSS_DARK_URL    = (Path(__file__).parent.parent / "resources" / "highlight-dark.min.css").as_uri()
+_RESOURCES_BASE_URL        = QUrl((Path(__file__).parent.parent / "resources" / "").as_uri())
 
 _MERMAID_FENCE_RE = re.compile(
     r'^[ \t]*```[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*```[ \t]*$',
@@ -119,7 +125,15 @@ def _make_preview_html() -> str:
   .mermaid {{ margin-bottom: 0.8em; overflow-x: auto; text-align: center; }}
   .mermaid svg {{ max-width: 100%; height: auto; }}
 </style>
+<link rel="stylesheet" href="{_HIGHLIGHT_CSS_LIGHT_URL if t.name == 'light' else _HIGHLIGHT_CSS_DARK_URL}">
+<style>
+  pre code.hljs {{ background: transparent !important; padding: 0 !important; font-size: inherit; }}
+</style>
 <script src="{_MERMAID_JS_URL}"></script>
+<script src="{_HIGHLIGHT_JS_URL}"></script>
+<script src="{_HIGHLIGHT_CSHARP_URL}"></script>
+<script src="{_HIGHLIGHT_DOCKERFILE_URL}"></script>
+<script src="{_HIGHLIGHT_POWERSHELL_URL}"></script>
 </head>
 <body>
 <div id="content"></div>
@@ -156,6 +170,9 @@ def _make_preview_html() -> str:
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
     styleTableHeaders();
     attachImageHandlers();
+    document.querySelectorAll('#content pre code').forEach(function(el) {{
+      hljs.highlightElement(el);
+    }});
     var nodes = document.getElementById('content').querySelectorAll('.mermaid');
     if (nodes.length > 0) {{
       mermaid.run({{ nodes: nodes }}).catch(function(err) {{
