@@ -165,11 +165,22 @@ def _make_preview_html() -> str:
       }});
     }});
   }}
+  function attachLinkHandlers() {{
+    document.querySelectorAll('#content a[href]').forEach(function(a) {{
+      if (a.dataset.linkBound) return;
+      a.dataset.linkBound = '1';
+      a.addEventListener('click', function(e) {{
+        e.preventDefault();
+        window.bridge.open_link(a.getAttribute('href'));
+      }});
+    }});
+  }}
   function applyHtml(html) {{
     var doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
     styleTableHeaders();
     attachImageHandlers();
+    attachLinkHandlers();
     document.querySelectorAll('#content pre code').forEach(function(el) {{
       hljs.highlightElement(el);
     }});
@@ -429,6 +440,7 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 class MarkdownBridge(QObject):
     html_changed  = Signal(str)
     image_clicked = Signal(str)
+    link_clicked  = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -445,6 +457,10 @@ class MarkdownBridge(QObject):
     @Slot(str)
     def open_image(self, data_uri: str) -> None:
         self.image_clicked.emit(data_uri)
+
+    @Slot(str)
+    def open_link(self, url: str) -> None:
+        self.link_clicked.emit(url)
 
 
 class MarkdownEditor(QPlainTextEdit):
@@ -616,6 +632,7 @@ class NoteDetailWidget(QWidget):
         self._channel.registerObject("bridge", self._bridge)
         self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
         self._bridge.image_clicked.connect(self._on_image_clicked)
+        self._bridge.link_clicked.connect(self._on_link_clicked)
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
 
@@ -727,6 +744,11 @@ class NoteDetailWidget(QWidget):
         from horizon.dialogs import ImageViewerDialog
         dlg = ImageViewerDialog(data_uri, parent=self)
         dlg.exec()
+
+    def _on_link_clicked(self, url: str) -> None:
+        from PySide6.QtGui import QDesktopServices
+        from PySide6.QtCore import QUrl
+        QDesktopServices.openUrl(QUrl(url))
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self._prefs is not None:
