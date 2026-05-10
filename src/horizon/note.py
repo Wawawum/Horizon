@@ -26,8 +26,13 @@ class NoteRepository:
             "INSERT INTO notes (project_id, title, body, dt, archived, folder_id) VALUES (?, ?, ?, ?, ?, ?)",
             (project_id, title, body, dt.isoformat(), int(archived), folder_id),
         )
+        note_id = cur.lastrowid
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('note', ?, ?, ?)",
+            (note_id, title, body),
+        )
         self._db.conn.commit()
-        return Note(id=cur.lastrowid, project_id=project_id, title=title, body=body, dt=dt, archived=archived, folder_id=folder_id)
+        return Note(id=note_id, project_id=project_id, title=title, body=body, dt=dt, archived=archived, folder_id=folder_id)
 
     def get(self, note_id: int) -> "Note | None":
         row = self._db.conn.execute(
@@ -91,8 +96,18 @@ class NoteRepository:
             "UPDATE notes SET project_id = ?, title = ?, body = ?, dt = ?, archived = ?, folder_id = ? WHERE id = ?",
             (note.project_id, note.title, note.body, note.dt.isoformat(), int(note.archived), note.folder_id, note.id),
         )
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type = 'note' AND entity_id = ?", (note.id,)
+        )
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('note', ?, ?, ?)",
+            (note.id, note.title, note.body),
+        )
         self._db.conn.commit()
 
     def delete(self, note_id: int) -> None:
         self._db.conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type = 'note' AND entity_id = ?", (note_id,)
+        )
         self._db.conn.commit()

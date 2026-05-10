@@ -1100,6 +1100,9 @@ class ProjectDetailWidget(QWidget):
             self._task_repo.update(task)
             self._load_tasks(self._current_project_id)
 
+    def open_task(self, task_id: int) -> None:
+        self._on_kanban_task_edit_requested(task_id)
+
     def _on_kanban_task_edit_requested(self, task_id: int) -> None:
         task = self._task_repo.get(task_id)
         if task is None:

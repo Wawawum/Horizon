@@ -1,7 +1,7 @@
 import ctypes
 import ctypes.wintypes
 
-from PySide6.QtCore import QEvent, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
@@ -12,9 +12,10 @@ from horizon.image import ImageRepository
 from horizon.note import NoteRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
+from horizon.search import SearchRepository
 from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
-from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget
+from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 
 
 def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
@@ -52,10 +53,13 @@ class MainWindow(QMainWindow):
 
         self._proj_repo = ProjectRepository(db)
         task_repo = TaskRepository(db)
+        self._task_repo = task_repo
         subtask_repo = SubtaskRepository(db)
+        self._subtask_repo = subtask_repo
         self._note_repo = NoteRepository(db)
         self._folder_repo = FolderRepository(db)
         image_repo = ImageRepository(db)
+        self._search_repo = SearchRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -78,6 +82,9 @@ class MainWindow(QMainWindow):
         self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, self._folder_repo, prefs=self._prefs, image_repo=image_repo)
         self._right_stack.addWidget(self._note_detail)     # index 3
 
+        self._search_results = SearchResultsWidget()
+        self._right_stack.addWidget(self._search_results)  # index 4
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -88,6 +95,8 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(2, 0)  # right panel keeps its natural width
 
         self._right_panel.create_note_requested.connect(self._on_create_note_from_meeting)
+        self._search_results.note_requested.connect(self._open_note_from_notes)
+        self._search_results.task_requested.connect(self._on_task_from_search)
 
         self._project_list.home_requested.connect(self._show_home)
         self._project_list.project_selected.connect(self._show_project)
@@ -104,7 +113,8 @@ class MainWindow(QMainWindow):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
-        self._title_bar = TitleBar(self)
+        self._title_bar = TitleBar(self, show_search=True)
+        self._title_bar.search_requested.connect(self._on_search)
         container_layout.addWidget(self._title_bar)
         container_layout.addWidget(self._splitter)
 
@@ -112,6 +122,21 @@ class MainWindow(QMainWindow):
         saved = self._prefs.splitter_sizes
         if saved:
             self._splitter.setSizes(saved)
+
+    def _on_search(self, query: str) -> None:
+        results = self._search_repo.search(query)
+        self._search_results.load_results(query, results)
+        self._right_stack.setCurrentIndex(4)
+
+    def _on_task_from_search(self, task_id: int) -> None:
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        project = self._proj_repo.get(task.project_id)
+        if project is None:
+            return
+        self._show_project(project)
+        self._project_detail.open_task(task_id)
 
     def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
         subject = meeting.subject[:220]
@@ -191,6 +216,12 @@ class MainWindow(QMainWindow):
                 r = self.frameGeometry()
                 # Title bar zone (exclude rightmost 138px reserved for the 3 control buttons)
                 if r.top() <= y < r.top() + 36 and x < r.right() - 138:
+                    # Exclude the search bar so it receives normal mouse events
+                    if hasattr(self, "_title_bar") and self._title_bar._search_edit is not None:
+                        edit = self._title_bar._search_edit
+                        edit_pos = edit.mapToGlobal(QPoint(0, 0))
+                        if edit_pos.x() <= x < edit_pos.x() + edit.width():
+                            return True, 1  # HTCLIENT
                     return True, 2  # HTCAPTION — enables Win+arrows and Aero snap
                 if not self.isMaximized():
                     b = 6  # resize border width in pixels

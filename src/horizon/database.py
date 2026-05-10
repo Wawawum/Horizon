@@ -49,6 +49,14 @@ CREATE TABLE IF NOT EXISTS folders (
     parent_id  INTEGER REFERENCES folders(id) ON DELETE CASCADE,
     name       TEXT    NOT NULL CHECK(length(name) <= 255)
 );
+
+CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
+    type      UNINDEXED,
+    entity_id UNINDEXED,
+    title,
+    body,
+    tokenize = 'unicode61'
+);
 """
 
 _MIGRATIONS = [
@@ -77,6 +85,7 @@ class Database:
         self._conn.executescript(_DDL)
         self._run_migrations()
         self._run_structural_migrations()
+        self._populate_search_index_if_empty()
 
     def _run_migrations(self) -> None:
         for sql in _MIGRATIONS:
@@ -85,6 +94,19 @@ class Database:
                 self._conn.commit()
             except sqlite3.OperationalError:
                 pass  # column already exists
+
+    def _populate_search_index_if_empty(self) -> None:
+        count = self._conn.execute("SELECT COUNT(*) FROM search_index").fetchone()[0]
+        if count == 0:
+            self._conn.execute(
+                "INSERT INTO search_index(type, entity_id, title, body) "
+                "SELECT 'note', id, title, body FROM notes"
+            )
+            self._conn.execute(
+                "INSERT INTO search_index(type, entity_id, title, body) "
+                "SELECT 'task', id, title, description FROM tasks"
+            )
+            self._conn.commit()
 
     def _run_structural_migrations(self) -> None:
         rows = self._conn.execute("PRAGMA table_info(notes)").fetchall()

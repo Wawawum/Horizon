@@ -1,14 +1,28 @@
-from PySide6.QtCore import Qt
-from PySide6.QtGui import QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
+from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QKeyEvent, QPixmap
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from horizon import theme as _theme
+
+
+class _SearchLineEdit(QLineEdit):
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.clear()
+        else:
+            super().keyPressEvent(event)
+
+    def mouseDoubleClickEvent(self, event) -> None:
+        # Prevent double-click from bubbling up to the title bar (would toggle maximize)
+        event.accept()
 
 
 class TitleBar(QWidget):
     """Barre de titre personnalisée au style Synthwave."""
 
-    def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True) -> None:
+    search_requested = Signal(str)
+
+    def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True, show_search: bool = False) -> None:
         super().__init__(parent)
         self.setProperty("titlebar", "true")
         self.setFixedHeight(36)
@@ -68,6 +82,27 @@ class TitleBar(QWidget):
 
         layout.addStretch()
 
+        # Barre de recherche (fenêtre principale uniquement)
+        self._search_edit: _SearchLineEdit | None = None
+        if show_search:
+            self._search_edit = _SearchLineEdit()
+            self._search_edit.setPlaceholderText("Rechercher…")
+            self._search_edit.setFixedWidth(220)
+            self._search_edit.setFixedHeight(22)
+            self._search_edit.setStyleSheet(
+                f"QLineEdit {{"
+                f"  background-color: {t.input_bg};"
+                f"  color: {t.text};"
+                f"  border: 1px solid {t.border};"
+                f"  border-radius: 3px;"
+                f"  padding: 0 6px;"
+                f"  font-size: 11px;"
+                f"}}"
+            )
+            self._search_edit.returnPressed.connect(self._on_search_return)
+            layout.addWidget(self._search_edit)
+            layout.addStretch()
+
         # Bouton minimiser
         self._btn_min = QPushButton("—")
         self._btn_min.setProperty("title_btn", "min")
@@ -93,6 +128,11 @@ class TitleBar(QWidget):
         self._btn_close.setToolTip("Fermer")
         self._btn_close.clicked.connect(self._close_window)
         layout.addWidget(self._btn_close)
+
+    def _on_search_return(self) -> None:
+        query = self._search_edit.text().strip()
+        if query:
+            self.search_requested.emit(query)
 
     def _minimize(self) -> None:
         self.window().showMinimized()

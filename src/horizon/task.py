@@ -61,8 +61,13 @@ class TaskRepository:
             " VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             (project_id, title, description, state.value, priority.value, bucket.value, next_order, int(archived)),
         )
+        task_id = cur.lastrowid
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('task', ?, ?, ?)",
+            (task_id, title, description),
+        )
         self._db.conn.commit()
-        return Task(cur.lastrowid, project_id, title, description, state, priority, bucket, next_order, archived)
+        return Task(task_id, project_id, title, description, state, priority, bucket, next_order, archived)
 
     def get(self, task_id: int) -> "Task | None":
         row = self._db.conn.execute(
@@ -90,10 +95,20 @@ class TaskRepository:
             " WHERE id=?",
             (task.title, task.description, task.state.value, task.priority.value, task.bucket.value, int(task.archived), task.id),
         )
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type = 'task' AND entity_id = ?", (task.id,)
+        )
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('task', ?, ?, ?)",
+            (task.id, task.title, task.description),
+        )
         self._db.conn.commit()
 
     def delete(self, task_id: int) -> None:
         self._db.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type = 'task' AND entity_id = ?", (task_id,)
+        )
         self._db.conn.commit()
 
     def list_for_project(self, project_id: int) -> list[Task]:
