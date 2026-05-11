@@ -1,38 +1,68 @@
 import json
 import logging
+import re
 import threading
 import urllib.parse
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from horizon.database import open_connection
+from horizon.note import Note, NoteRepository
 from horizon.search import SearchRepository
 
 logger = logging.getLogger(__name__)
 
+_NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
+
+
+def _port_file() -> Path:
+    return Path.home() / ".horizon" / "api.port"
+
 
 class _Db:
-    """Minimal shim so SearchRepository can access .conn without a full Database instance."""
+    """Minimal shim so repositories can access .conn without a full Database instance."""
     def __init__(self, conn) -> None:
         self.conn = conn
 
 
+def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
+    d = {
+        "id": note.id,
+        "project_id": note.project_id,
+        "folder_id": note.folder_id,
+        "title": note.title,
+        "dt": note.dt.isoformat(),
+        "archived": note.archived,
+    }
+    if include_body:
+        d["body"] = note.body
+    return d
+
+
 def _make_handler(db_path: Path):
-    class Handler(_SearchHandler):
+    class Handler(_Handler):
         _db_path = db_path
     return Handler
 
 
-class _SearchHandler(BaseHTTPRequestHandler):
+class _Handler(BaseHTTPRequestHandler):
     _db_path: Path
 
     def do_GET(self) -> None:
         parsed = urllib.parse.urlparse(self.path)
-        if parsed.path != "/search":
-            self._send_json(404, {"error": "not found"})
-            return
+        path = parsed.path
 
-        params = urllib.parse.parse_qs(parsed.query)
+        if path == "/search":
+            self._handle_search(parsed.query)
+        elif path == "/notes":
+            self._handle_notes_list()
+        elif m := _NOTES_ID_RE.match(path):
+            self._handle_note_detail(int(m.group(1)))
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def _handle_search(self, query_string: str) -> None:
+        params = urllib.parse.parse_qs(query_string)
         q_values = params.get("q", [])
         q = q_values[0].strip() if q_values else ""
         if not q:
@@ -55,7 +85,32 @@ class _SearchHandler(BaseHTTPRequestHandler):
         finally:
             conn.close()
 
-    def _send_json(self, status: int, data: dict) -> None:
+    def _handle_notes_list(self) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            notes = NoteRepository(_Db(conn)).list_all()
+            self._send_json(200, {"notes": [_note_to_dict(n, include_body=False) for n in notes]})
+        except Exception:
+            logger.exception("Failed to list notes")
+            self._send_json(500, {"error": "failed to list notes"})
+        finally:
+            conn.close()
+
+    def _handle_note_detail(self, note_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            note = NoteRepository(_Db(conn)).get(note_id)
+            if note is None:
+                self._send_json(404, {"error": "note not found"})
+            else:
+                self._send_json(200, _note_to_dict(note))
+        except Exception:
+            logger.exception("Failed to get note %d", note_id)
+            self._send_json(500, {"error": "failed to get note"})
+        finally:
+            conn.close()
+
+    def _send_json(self, status: int, data) -> None:
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
         self.send_response(status)
         self.send_header("Content-Type", "application/json; charset=utf-8")
@@ -88,6 +143,7 @@ class ApiServer:
         )
         self._thread.start()
         logger.info("Horizon API listening on http://127.0.0.1:%d", self._port)
+        _port_file().write_text(str(self._port))
 
     def stop(self) -> None:
         if self._server:
@@ -95,3 +151,4 @@ class ApiServer:
             self._server.server_close()
         if self._thread:
             self._thread.join(timeout=5)
+        _port_file().unlink(missing_ok=True)

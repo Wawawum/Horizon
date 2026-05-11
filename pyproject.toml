@@ -9,6 +9,8 @@ requires-python = ">=3.11"
 dependencies = [
     "PySide6",
     "pywin32",
+    "mcp",
+    "httpx",
 ]
 
 [tool.hatch.build.targets.wheel]
@@ -16,3 +18,4 @@ packages = ["src/horizon"]
 
 [project.scripts]
 horizon = "horizon.__main__:main"
+horizon-mcp = "horizon.mcp_server:main"

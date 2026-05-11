@@ -1,12 +1,17 @@
 {
   "window": {
-    "maximized": true,
-    "width": 1584,
-    "height": 771
+    "maximized": false,
+    "width": 1616,
+    "height": 872
   },
   "project_views": {
     "1": 1,
     "4": 1
   },
-"theme": "light"
+  "theme": "light",
+  "splitter_sizes": [
+    256,
+    1158,
+    200
+  ]
 }
