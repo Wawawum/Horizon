@@ -68,3 +68,12 @@ class Preferences:
     @theme.setter
     def theme(self, value: str) -> None:
         self._data["theme"] = value
+
+    @property
+    def api_port(self) -> int:
+        return self._data.get("api", {}).get("port", 5555)
+
+    @api_port.setter
+    def api_port(self, value: int) -> None:
+        self._data.setdefault("api", {})
+        self._data["api"]["port"] = value
