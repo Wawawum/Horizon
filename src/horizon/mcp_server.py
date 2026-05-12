@@ -65,8 +65,20 @@ async def _tool_search(client: httpx.AsyncClient, arguments: dict) -> list[types
     results = data.get("results", [])
     if not results:
         return [types.TextContent(type="text", text="No results found.")]
-    lines = [f"[{r['type']}] #{r['id']} — {r['title']}\n{r['body']}" for r in results]
-    return [types.TextContent(type="text", text="\n\n".join(lines))]
+
+    note_ids = [r["id"] for r in results if r["type"] == "note"]
+    note_responses = await asyncio.gather(*[client.get(f"/notes/{nid}") for nid in note_ids])
+    notes_by_id = {
+        nid: note_resp.json()
+        for nid, note_resp in zip(note_ids, note_responses)
+        if note_resp.status_code == 200
+    }
+
+    enriched = [
+        notes_by_id[r["id"]] if r["type"] == "note" and r["id"] in notes_by_id else r
+        for r in results
+    ]
+    return [types.TextContent(type="text", text=json.dumps({"results": enriched}, ensure_ascii=False, indent=2))]
 
 
 async def _tool_list_notes(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
