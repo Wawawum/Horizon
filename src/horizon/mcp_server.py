@@ -51,6 +51,38 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["note_id"],
             },
         ),
+        types.Tool(
+            name="create_note",
+            description="Create a new note in Horizon.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "title":      {"type": "string",  "description": "Note title (required)"},
+                    "body":       {"type": "string",  "description": "Note content (Markdown)"},
+                    "project_id": {"type": "integer", "description": "Optional project ID"},
+                    "folder_id":  {"type": "integer", "description": "Optional folder ID"},
+                    "dt":         {"type": "string",  "description": "ISO-8601 datetime (defaults to now)"},
+                },
+                "required": ["title"],
+            },
+        ),
+        types.Tool(
+            name="update_note",
+            description="Update an existing Horizon note by its ID. Only provided fields are changed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "note_id":    {"type": "integer", "description": "ID of the note to update"},
+                    "title":      {"type": "string",  "description": "New title"},
+                    "body":       {"type": "string",  "description": "New content (Markdown)"},
+                    "project_id": {"type": "integer", "description": "New project ID (null to unset)"},
+                    "folder_id":  {"type": "integer", "description": "New folder ID (null to unset)"},
+                    "archived":   {"type": "boolean", "description": "Archive or unarchive the note"},
+                    "dt":         {"type": "string",  "description": "New ISO-8601 datetime"},
+                },
+                "required": ["note_id"],
+            },
+        ),
     ]
 
 
@@ -107,6 +139,39 @@ async def _tool_get_note(client: httpx.AsyncClient, arguments: dict) -> list[typ
     return [types.TextContent(type="text", text=text)]
 
 
+async def _tool_create_note(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    title = arguments.get("title", "").strip()
+    if not title:
+        return [types.TextContent(type="text", text="Error: title is required")]
+    payload = {k: v for k, v in arguments.items() if k in ("title", "body", "project_id", "folder_id", "dt")}
+    resp = await client.post("/notes", json=payload)
+    data = resp.json()
+    if resp.status_code != 201:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
+async def _tool_update_note(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    note_id = arguments.get("note_id")
+    if note_id is None:
+        return [types.TextContent(type="text", text="Error: note_id is required")]
+    get_resp = await client.get(f"/notes/{note_id}")
+    if get_resp.status_code == 404:
+        return [types.TextContent(type="text", text="Note not found.")]
+    if get_resp.status_code != 200:
+        data = get_resp.json()
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    payload = get_resp.json()
+    for key in ("title", "body", "project_id", "folder_id", "archived", "dt"):
+        if key in arguments:
+            payload[key] = arguments[key]
+    put_resp = await client.put(f"/notes/{note_id}", json=payload)
+    data = put_resp.json()
+    if put_resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     async with httpx.AsyncClient(base_url=_base_url(), timeout=10.0) as client:
@@ -116,6 +181,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_list_notes(client, arguments)
         elif name == "get_note":
             return await _tool_get_note(client, arguments)
+        elif name == "create_note":
+            return await _tool_create_note(client, arguments)
+        elif name == "update_note":
+            return await _tool_update_note(client, arguments)
         else:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 

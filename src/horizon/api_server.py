@@ -3,6 +3,7 @@ import logging
 import re
 import threading
 import urllib.parse
+from datetime import datetime
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -107,6 +108,91 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to get note %d", note_id)
             self._send_json(500, {"error": "failed to get note"})
+        finally:
+            conn.close()
+
+    def do_POST(self) -> None:
+        if self.path == "/notes":
+            self._handle_create_note()
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def do_PUT(self) -> None:
+        if m := _NOTES_ID_RE.match(self.path):
+            self._handle_update_note(int(m.group(1)))
+        else:
+            self._send_json(404, {"error": "not found"})
+
+    def _read_json_body(self) -> dict:
+        length = int(self.headers.get("Content-Length", 0))
+        return json.loads(self.rfile.read(length))
+
+    def _handle_create_note(self) -> None:
+        try:
+            body = self._read_json_body()
+        except (json.JSONDecodeError, ValueError):
+            self._send_json(400, {"error": "invalid JSON body"})
+            return
+        title = body.get("title", "").strip()
+        if not title:
+            self._send_json(400, {"error": "title is required"})
+            return
+        dt_raw = body.get("dt")
+        try:
+            dt = datetime.fromisoformat(dt_raw) if dt_raw else None
+        except ValueError:
+            self._send_json(400, {"error": "invalid dt format, expected ISO-8601"})
+            return
+        conn = open_connection(self._db_path)
+        try:
+            note = NoteRepository(_Db(conn)).create(
+                project_id=body.get("project_id"),
+                title=title,
+                body=body.get("body", ""),
+                dt=dt,
+                folder_id=body.get("folder_id"),
+            )
+            self._send_json(201, _note_to_dict(note))
+        except Exception:
+            logger.exception("Failed to create note")
+            self._send_json(500, {"error": "failed to create note"})
+        finally:
+            conn.close()
+
+    def _handle_update_note(self, note_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            repo = NoteRepository(_Db(conn))
+            note = repo.get(note_id)
+            if note is None:
+                self._send_json(404, {"error": "note not found"})
+                return
+            try:
+                body = self._read_json_body()
+            except (json.JSONDecodeError, ValueError):
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            if "title" in body:
+                note.title = body["title"]
+            if "body" in body:
+                note.body = body["body"]
+            if "project_id" in body:
+                note.project_id = body["project_id"]
+            if "folder_id" in body:
+                note.folder_id = body["folder_id"]
+            if "archived" in body:
+                note.archived = bool(body["archived"])
+            if "dt" in body:
+                try:
+                    note.dt = datetime.fromisoformat(body["dt"])
+                except ValueError:
+                    self._send_json(400, {"error": "invalid dt format, expected ISO-8601"})
+                    return
+            repo.update(note)
+            self._send_json(200, _note_to_dict(note))
+        except Exception:
+            logger.exception("Failed to update note %d", note_id)
+            self._send_json(500, {"error": "failed to update note"})
         finally:
             conn.close()
 
