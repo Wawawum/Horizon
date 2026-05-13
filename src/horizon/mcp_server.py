@@ -26,7 +26,7 @@ async def list_tools() -> list[types.Tool]:
     return [
         types.Tool(
             name="search",
-            description="Search notes and tasks in Horizon using full-text search.",
+            description="Search notes, tasks, and projects in Horizon using full-text search.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -106,8 +106,18 @@ async def _tool_search(client: httpx.AsyncClient, arguments: dict) -> list[types
         if note_resp.status_code == 200
     }
 
+    project_ids = [r["id"] for r in results if r["type"] == "project"]
+    project_responses = await asyncio.gather(*[client.get(f"/projects/{pid}") for pid in project_ids])
+    projects_by_id = {
+        pid: proj_resp.json()
+        for pid, proj_resp in zip(project_ids, project_responses)
+        if proj_resp.status_code == 200
+    }
+
     enriched = [
-        notes_by_id[r["id"]] if r["type"] == "note" and r["id"] in notes_by_id else r
+        notes_by_id[r["id"]] if r["type"] == "note" and r["id"] in notes_by_id
+        else projects_by_id[r["id"]] if r["type"] == "project" and r["id"] in projects_by_id
+        else r
         for r in results
     ]
     return [types.TextContent(type="text", text=json.dumps({"results": enriched}, ensure_ascii=False, indent=2))]

@@ -97,6 +97,7 @@ class MainWindow(QMainWindow):
         self._right_panel.create_note_requested.connect(self._on_create_note_from_meeting)
         self._search_results.note_requested.connect(self._open_note_from_notes)
         self._search_results.task_requested.connect(self._on_task_from_search)
+        self._search_results.project_requested.connect(self._on_project_from_search)
 
         self._project_list.home_requested.connect(self._show_home)
         self._project_list.project_selected.connect(self._show_project)
@@ -127,6 +128,9 @@ class MainWindow(QMainWindow):
         results = self._search_repo.search(query)
         self._search_results.load_results(query, results)
         self._right_stack.setCurrentIndex(4)
+
+    def _on_project_from_search(self, project_id: int) -> None:
+        self._show_project(self._proj_repo.get(project_id))
 
     def _on_task_from_search(self, task_id: int) -> None:
         task = self._task_repo.get(task_id)

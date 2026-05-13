@@ -14,6 +14,7 @@ from horizon.search import SearchRepository
 logger = logging.getLogger(__name__)
 
 _NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
+_PROJECTS_ID_RE = re.compile(r"^/projects/(\d+)$")
 
 
 def _port_file() -> Path:
@@ -59,6 +60,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_notes_list()
         elif m := _NOTES_ID_RE.match(path):
             self._handle_note_detail(int(m.group(1)))
+        elif m := _PROJECTS_ID_RE.match(path):
+            self._handle_project_detail(int(m.group(1)))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -108,6 +111,29 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to get note %d", note_id)
             self._send_json(500, {"error": "failed to get note"})
+        finally:
+            conn.close()
+
+    def _handle_project_detail(self, project_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            row = conn.execute(
+                "SELECT id, name, description, archived, color FROM projects WHERE id = ?",
+                (project_id,),
+            ).fetchone()
+            if row is None:
+                self._send_json(404, {"error": "project not found"})
+            else:
+                self._send_json(200, {
+                    "id": row["id"],
+                    "name": row["name"],
+                    "description": row["description"],
+                    "archived": bool(row["archived"]),
+                    "color": row["color"],
+                })
+        except Exception:
+            logger.exception("Failed to get project %d", project_id)
+            self._send_json(500, {"error": "failed to get project"})
         finally:
             conn.close()
 

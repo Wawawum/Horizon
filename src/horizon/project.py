@@ -21,6 +21,10 @@ class ProjectRepository:
             "INSERT INTO projects (name, description, archived, color) VALUES (?, ?, ?, ?)",
             (name, description, int(archived), color),
         )
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('project', ?, ?, ?)",
+            (cur.lastrowid, name, description),
+        )
         self._db.conn.commit()
         return Project(id=cur.lastrowid, name=name, description=description, archived=archived, color=color)
 
@@ -59,10 +63,20 @@ class ProjectRepository:
             "UPDATE projects SET name = ?, description = ?, archived = ?, color = ? WHERE id = ?",
             (project.name, project.description, int(project.archived), project.color, project.id),
         )
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type='project' AND entity_id=?", (project.id,)
+        )
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('project', ?, ?, ?)",
+            (project.id, project.name, project.description),
+        )
         self._db.conn.commit()
 
     def delete(self, project_id: int) -> None:
         self._db.conn.execute(
             "DELETE FROM projects WHERE id = ?", (project_id,)
+        )
+        self._db.conn.execute(
+            "DELETE FROM search_index WHERE type='project' AND entity_id=?", (project_id,)
         )
         self._db.conn.commit()

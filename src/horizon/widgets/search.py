@@ -26,8 +26,13 @@ class _SearchResultItem(QWidget):
         header = QHBoxLayout()
         header.setSpacing(8)
 
-        badge = QLabel("Note" if result.type == "note" else "Tâche")
-        badge_color = t.accent_color if result.type == "note" else t.priority_medium
+        if result.type == "note":
+            badge_text, badge_color = "Note", t.accent_color
+        elif result.type == "task":
+            badge_text, badge_color = "Tâche", t.priority_medium
+        else:
+            badge_text, badge_color = "Projet", t.priority_low
+        badge = QLabel(badge_text)
         badge.setStyleSheet(
             f"color: {badge_color};"
             "font-size: 10px;"
@@ -82,6 +87,7 @@ class _SearchResultItem(QWidget):
 class SearchResultsWidget(QWidget):
     note_requested = Signal(int)
     task_requested = Signal(int)
+    project_requested = Signal(int)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -153,5 +159,7 @@ class SearchResultsWidget(QWidget):
     def _on_item_clicked(self, type_: str, entity_id: int) -> None:
         if type_ == "note":
             self.note_requested.emit(entity_id)
+        elif type_ == "project":
+            self.project_requested.emit(entity_id)
         else:
             self.task_requested.emit(entity_id)

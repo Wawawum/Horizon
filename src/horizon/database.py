@@ -67,6 +67,8 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
 );
 """
 
+_SEARCH_INDEX_VERSION = 1
+
 _MIGRATIONS = [
     "ALTER TABLE tasks ADD COLUMN bucket TEXT NOT NULL DEFAULT 'Inbox'"
     " CHECK(bucket IN ('Inbox','Today','On hold','Completed'))",
@@ -93,7 +95,7 @@ class Database:
         self._conn.executescript(_DDL)
         self._run_migrations()
         self._run_structural_migrations()
-        self._populate_search_index_if_empty()
+        self._sync_search_index()
 
     def _run_migrations(self) -> None:
         for sql in _MIGRATIONS:
@@ -103,18 +105,25 @@ class Database:
             except sqlite3.OperationalError:
                 pass  # column already exists
 
-    def _populate_search_index_if_empty(self) -> None:
-        count = self._conn.execute("SELECT COUNT(*) FROM search_index").fetchone()[0]
-        if count == 0:
-            self._conn.execute(
-                "INSERT INTO search_index(type, entity_id, title, body) "
-                "SELECT 'note', id, title, body FROM notes"
-            )
-            self._conn.execute(
-                "INSERT INTO search_index(type, entity_id, title, body) "
-                "SELECT 'task', id, title, description FROM tasks"
-            )
-            self._conn.commit()
+    def _sync_search_index(self) -> None:
+        stored = self._conn.execute("PRAGMA user_version").fetchone()[0]
+        if stored >= _SEARCH_INDEX_VERSION:
+            return
+        self._conn.execute("DELETE FROM search_index")
+        self._conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) "
+            "SELECT 'note', id, title, body FROM notes"
+        )
+        self._conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) "
+            "SELECT 'task', id, title, description FROM tasks"
+        )
+        self._conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) "
+            "SELECT 'project', id, name, description FROM projects"
+        )
+        self._conn.execute(f"PRAGMA user_version = {_SEARCH_INDEX_VERSION}")
+        self._conn.commit()
 
     def _run_structural_migrations(self) -> None:
         rows = self._conn.execute("PRAGMA table_info(notes)").fetchall()
