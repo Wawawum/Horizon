@@ -83,6 +83,96 @@ async def list_tools() -> list[types.Tool]:
                 "required": ["note_id"],
             },
         ),
+        types.Tool(
+            name="create_task",
+            description="Create a new task in Horizon. Returns the created task with its ID and subtasks.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id":  {"type": "integer", "description": "ID of the project this task belongs to (required)"},
+                    "title":       {"type": "string",  "description": "Task title (required)"},
+                    "description": {"type": "string",  "description": "Task description (optional, Markdown)"},
+                    "state": {
+                        "type": "string",
+                        "enum": ["New", "In-Progress", "On hold", "Completed", "Cancelled"],
+                        "description": "Task state. Defaults to 'New'.",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["Low", "Medium", "High"],
+                        "description": "Task priority. Defaults to 'Medium'.",
+                    },
+                    "bucket": {
+                        "type": "string",
+                        "enum": ["Inbox", "Today", "On hold", "Completed"],
+                        "description": "Kanban bucket. Defaults to 'Inbox'.",
+                    },
+                    "subtasks": {
+                        "type": "array",
+                        "description": "Optional list of subtasks to create with this task.",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "title":     {"type": "string",  "description": "Subtask title"},
+                                "completed": {"type": "boolean", "description": "Whether already completed"},
+                            },
+                            "required": ["title"],
+                        },
+                    },
+                },
+                "required": ["project_id", "title"],
+            },
+        ),
+        types.Tool(
+            name="update_task",
+            description=(
+                "Update an existing Horizon task. Only provided fields are changed. "
+                "To sync subtasks pass the full desired list — items with 'id' are updated, "
+                "items without 'id' are created, omitted existing subtasks are deleted. "
+                "Omit 'subtasks' entirely to leave them unchanged."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "task_id":     {"type": "integer", "description": "ID of the task to update (required)"},
+                    "title":       {"type": "string",  "description": "New task title"},
+                    "description": {"type": "string",  "description": "New task description (Markdown)"},
+                    "state": {
+                        "type": "string",
+                        "enum": ["New", "In-Progress", "On hold", "Completed", "Cancelled"],
+                        "description": "New task state",
+                    },
+                    "priority": {
+                        "type": "string",
+                        "enum": ["Low", "Medium", "High"],
+                        "description": "New task priority",
+                    },
+                    "bucket": {
+                        "type": "string",
+                        "enum": ["Inbox", "Today", "On hold", "Completed"],
+                        "description": "New Kanban bucket",
+                    },
+                    "archived": {"type": "boolean", "description": "Archive or unarchive the task"},
+                    "subtasks": {
+                        "type": "array",
+                        "description": (
+                            "Full desired subtask list. Items with 'id' are updated; "
+                            "items without 'id' are created; existing subtasks not in this list are deleted."
+                        ),
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "id":        {"type": "integer", "description": "Existing subtask ID (omit for new)"},
+                                "title":     {"type": "string",  "description": "Subtask title"},
+                                "completed": {"type": "boolean", "description": "Completion state"},
+                            },
+                            "required": ["title"],
+                        },
+                    },
+                },
+                "required": ["task_id"],
+            },
+        ),
     ]
 
 
@@ -182,6 +272,47 @@ async def _tool_update_note(client: httpx.AsyncClient, arguments: dict) -> list[
     return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
 
+async def _tool_create_task(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    project_id = arguments.get("project_id")
+    if not isinstance(project_id, int):
+        return [types.TextContent(type="text", text="Error: project_id is required and must be an integer")]
+    title = arguments.get("title", "").strip()
+    if not title:
+        return [types.TextContent(type="text", text="Error: title is required")]
+    payload = {"project_id": project_id, "title": title}
+    for key in ("description", "state", "priority", "bucket", "subtasks"):
+        if key in arguments:
+            payload[key] = arguments[key]
+    resp = await client.post("/tasks", json=payload)
+    data = resp.json()
+    if resp.status_code == 404:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'project not found')}")]
+    if resp.status_code != 201:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
+async def _tool_update_task(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    task_id = arguments.get("task_id")
+    if not isinstance(task_id, int):
+        return [types.TextContent(type="text", text="Error: task_id is required and must be an integer")]
+    get_resp = await client.get(f"/tasks/{task_id}")
+    if get_resp.status_code == 404:
+        return [types.TextContent(type="text", text="Task not found.")]
+    if get_resp.status_code != 200:
+        data = get_resp.json()
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    payload = {}
+    for key in ("title", "description", "state", "priority", "bucket", "archived", "subtasks"):
+        if key in arguments:
+            payload[key] = arguments[key]
+    put_resp = await client.put(f"/tasks/{task_id}", json=payload)
+    data = put_resp.json()
+    if put_resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
 @server.call_tool()
 async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
     async with httpx.AsyncClient(base_url=_base_url(), timeout=10.0) as client:
@@ -195,6 +326,10 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_create_note(client, arguments)
         elif name == "update_note":
             return await _tool_update_note(client, arguments)
+        elif name == "create_task":
+            return await _tool_create_task(client, arguments)
+        elif name == "update_task":
+            return await _tool_update_task(client, arguments)
         else:
             return [types.TextContent(type="text", text=f"Unknown tool: {name}")]
 

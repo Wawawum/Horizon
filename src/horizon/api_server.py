@@ -10,11 +10,16 @@ from pathlib import Path
 from horizon.database import open_connection
 from horizon.note import Note, NoteRepository
 from horizon.search import SearchRepository
+from horizon.task import (
+    Subtask, SubtaskRepository, Task, TaskBucket, TaskPriority, TaskRepository,
+    TaskState,
+)
 
 logger = logging.getLogger(__name__)
 
 _NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
 _PROJECTS_ID_RE = re.compile(r"^/projects/(\d+)$")
+_TASKS_ID_RE = re.compile(r"^/tasks/(\d+)$")
 
 
 def _port_file() -> Path:
@@ -41,6 +46,67 @@ def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
     return d
 
 
+def _task_to_dict(task: Task, subtasks: list) -> dict:
+    return {
+        "id": task.id,
+        "project_id": task.project_id,
+        "title": task.title,
+        "description": task.description,
+        "state": task.state.value,
+        "priority": task.priority.value,
+        "bucket": task.bucket.value,
+        "order": task.order,
+        "archived": task.archived,
+        "subtasks": [
+            {"id": s.id, "title": s.title, "completed": s.completed}
+            for s in subtasks
+        ],
+    }
+
+
+def _parse_enum(enum_class, value, field_name: str):
+    try:
+        return enum_class(value), None
+    except ValueError:
+        valid = [e.value for e in enum_class]
+        return None, f"invalid {field_name}: must be one of {valid}"
+
+
+def _sync_subtasks(conn, subtask_repo: SubtaskRepository, task_id: int, subtasks_input: list) -> list:
+    existing = subtask_repo.list_for_task(task_id)
+    existing_by_id = {s.id: s for s in existing}
+    input_ids = {item["id"] for item in subtasks_input if isinstance(item.get("id"), int)}
+
+    for s in existing:
+        if s.id not in input_ids:
+            subtask_repo.delete(s.id)
+
+    result = []
+    for item in subtasks_input:
+        st_title = str(item.get("title", "")).strip()
+        if not st_title:
+            continue
+        completed = bool(item.get("completed", False))
+        item_id = item.get("id")
+
+        if isinstance(item_id, int) and item_id in existing_by_id:
+            existing_st = existing_by_id[item_id]
+            if existing_st.title != st_title:
+                conn.execute("UPDATE subtasks SET title = ? WHERE id = ?", (st_title, item_id))
+                conn.commit()
+            if existing_st.completed != completed:
+                subtask_repo.set_completed(item_id, completed)
+            result.append(Subtask(id=item_id, task_id=task_id, title=st_title, completed=completed))
+        else:
+            subtask = subtask_repo.create(task_id, st_title)
+            if completed:
+                subtask_repo.set_completed(subtask.id, True)
+                subtask = Subtask(id=subtask.id, task_id=task_id, title=st_title, completed=True)
+            result.append(subtask)
+
+    return result
+
+
 def _make_handler(db_path: Path):
     class Handler(_Handler):
         _db_path = db_path
@@ -62,6 +128,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_note_detail(int(m.group(1)))
         elif m := _PROJECTS_ID_RE.match(path):
             self._handle_project_detail(int(m.group(1)))
+        elif m := _TASKS_ID_RE.match(path):
+            self._handle_task_detail(int(m.group(1)))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -140,12 +208,16 @@ class _Handler(BaseHTTPRequestHandler):
     def do_POST(self) -> None:
         if self.path == "/notes":
             self._handle_create_note()
+        elif self.path == "/tasks":
+            self._handle_create_task()
         else:
             self._send_json(404, {"error": "not found"})
 
     def do_PUT(self) -> None:
         if m := _NOTES_ID_RE.match(self.path):
             self._handle_update_note(int(m.group(1)))
+        elif m := _TASKS_ID_RE.match(self.path):
+            self._handle_update_task(int(m.group(1)))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -219,6 +291,167 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to update note %d", note_id)
             self._send_json(500, {"error": "failed to update note"})
+        finally:
+            conn.close()
+
+    def _handle_task_detail(self, task_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            db = _Db(conn)
+            task = TaskRepository(db).get(task_id)
+            if task is None:
+                self._send_json(404, {"error": "task not found"})
+                return
+            subtasks = SubtaskRepository(db).list_for_task(task_id)
+            self._send_json(200, _task_to_dict(task, subtasks))
+        except Exception:
+            logger.exception("Failed to get task %d", task_id)
+            self._send_json(500, {"error": "failed to get task"})
+        finally:
+            conn.close()
+
+    def _handle_create_task(self) -> None:
+        try:
+            body = self._read_json_body()
+        except (json.JSONDecodeError, ValueError):
+            self._send_json(400, {"error": "invalid JSON body"})
+            return
+
+        project_id = body.get("project_id")
+        if not isinstance(project_id, int):
+            self._send_json(400, {"error": "project_id is required and must be an integer"})
+            return
+
+        title = body.get("title", "").strip()
+        if not title:
+            self._send_json(400, {"error": "title is required"})
+            return
+
+        state = TaskState.New
+        if "state" in body:
+            state, err = _parse_enum(TaskState, body["state"], "state")
+            if err:
+                self._send_json(400, {"error": err})
+                return
+
+        priority = TaskPriority.Medium
+        if "priority" in body:
+            priority, err = _parse_enum(TaskPriority, body["priority"], "priority")
+            if err:
+                self._send_json(400, {"error": err})
+                return
+
+        bucket = TaskBucket.Inbox
+        if "bucket" in body:
+            bucket, err = _parse_enum(TaskBucket, body["bucket"], "bucket")
+            if err:
+                self._send_json(400, {"error": err})
+                return
+
+        subtasks_input = body.get("subtasks", [])
+        if not isinstance(subtasks_input, list):
+            self._send_json(400, {"error": "subtasks must be a list"})
+            return
+
+        conn = open_connection(self._db_path)
+        try:
+            row = conn.execute("SELECT id FROM projects WHERE id = ?", (project_id,)).fetchone()
+            if row is None:
+                self._send_json(404, {"error": f"project {project_id} not found"})
+                return
+            db = _Db(conn)
+            task = TaskRepository(db).create(
+                project_id=project_id,
+                title=title,
+                description=body.get("description", ""),
+                state=state,
+                priority=priority,
+                bucket=bucket,
+            )
+            subtask_repo = SubtaskRepository(db)
+            created_subtasks = []
+            for st in subtasks_input:
+                st_title = str(st.get("title", "")).strip()
+                if not st_title:
+                    continue
+                subtask = subtask_repo.create(task.id, st_title)
+                if st.get("completed"):
+                    subtask_repo.set_completed(subtask.id, True)
+                    subtask = Subtask(id=subtask.id, task_id=task.id, title=st_title, completed=True)
+                created_subtasks.append(subtask)
+            self._send_json(201, _task_to_dict(task, created_subtasks))
+        except Exception:
+            logger.exception("Failed to create task")
+            self._send_json(500, {"error": "failed to create task"})
+        finally:
+            conn.close()
+
+    def _handle_update_task(self, task_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            db = _Db(conn)
+            task_repo = TaskRepository(db)
+            task = task_repo.get(task_id)
+            if task is None:
+                self._send_json(404, {"error": "task not found"})
+                return
+
+            try:
+                body = self._read_json_body()
+            except (json.JSONDecodeError, ValueError):
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+
+            if "title" in body:
+                title = body["title"].strip()
+                if not title:
+                    self._send_json(400, {"error": "title cannot be blank"})
+                    return
+                task.title = title
+
+            if "description" in body:
+                task.description = body["description"]
+
+            if "state" in body:
+                state, err = _parse_enum(TaskState, body["state"], "state")
+                if err:
+                    self._send_json(400, {"error": err})
+                    return
+                task.state = state
+
+            if "priority" in body:
+                priority, err = _parse_enum(TaskPriority, body["priority"], "priority")
+                if err:
+                    self._send_json(400, {"error": err})
+                    return
+                task.priority = priority
+
+            if "bucket" in body:
+                bucket, err = _parse_enum(TaskBucket, body["bucket"], "bucket")
+                if err:
+                    self._send_json(400, {"error": err})
+                    return
+                task.bucket = bucket
+
+            if "archived" in body:
+                task.archived = bool(body["archived"])
+
+            task_repo.update(task)
+
+            subtask_repo = SubtaskRepository(db)
+            if "subtasks" in body:
+                subtasks_input = body["subtasks"]
+                if not isinstance(subtasks_input, list):
+                    self._send_json(400, {"error": "subtasks must be a list"})
+                    return
+                final_subtasks = _sync_subtasks(conn, subtask_repo, task_id, subtasks_input)
+            else:
+                final_subtasks = subtask_repo.list_for_task(task_id)
+
+            self._send_json(200, _task_to_dict(task, final_subtasks))
+        except Exception:
+            logger.exception("Failed to update task %d", task_id)
+            self._send_json(500, {"error": "failed to update task"})
         finally:
             conn.close()
 
