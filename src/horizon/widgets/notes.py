@@ -582,6 +582,12 @@ class NoteDetailWidget(QWidget):
         self._delete_btn.setVisible(False)
         self._delete_btn.clicked.connect(self._on_delete_clicked)
 
+        self._id_label = QLabel()
+        id_font = self._id_label.font()
+        id_font.setPointSize(id_font.pointSize() + 4)
+        id_font.setBold(True)
+        self._id_label.setFont(id_font)
+
         self._title_edit = QLineEdit()
         self._title_edit.setMaxLength(255)
         font = self._title_edit.font()
@@ -602,6 +608,7 @@ class NoteDetailWidget(QWidget):
         self._view_source_btn.clicked.connect(self._on_view_source)
 
         header_layout = QHBoxLayout()
+        header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._archive_cb)
         header_layout.addWidget(self._delete_btn)
@@ -671,6 +678,7 @@ class NoteDetailWidget(QWidget):
         self._current_note = note
         self._body_raw = note.body
 
+        self._id_label.setText(f"#{note.id}" if note.id is not None else "")
         self._title_edit.setText(note.title)
         self._archive_cb.setChecked(note.archived)
         self._delete_btn.setVisible(note.archived)
