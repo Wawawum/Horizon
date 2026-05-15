@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
+    QSizePolicy,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -344,6 +345,7 @@ class TaskDetailDialog(QDialog):
         self._subtask_list.setDefaultDropAction(Qt.DropAction.MoveAction)
         self._subtask_list.setSpacing(1)
         self._subtask_list.model().rowsMoved.connect(self._on_subtasks_reordered)
+        self._subtask_list.viewport().installEventFilter(self)
 
         self._new_subtask_edit = QLineEdit()
         self._new_subtask_edit.setMaxLength(255)
@@ -416,7 +418,7 @@ class TaskDetailDialog(QDialog):
             handle = _DragHandle(self._subtask_list, item)
             row_layout.addWidget(handle)
 
-            cb = QCheckBox(subtask.title)
+            cb = QCheckBox()
             cb.setChecked(subtask.completed)
             cb.stateChanged.connect(
                 lambda state, sid=subtask_id: self._subtask_repo.set_completed(
@@ -424,7 +426,13 @@ class TaskDetailDialog(QDialog):
                 )
             )
             row_layout.addWidget(cb)
-            row_layout.addStretch()
+
+            lbl = QLabel(subtask.title)
+            lbl.setWordWrap(True)
+            lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            lbl.mousePressEvent = lambda _e, c=cb: c.toggle()
+            lbl.setCursor(Qt.CursorShape.PointingHandCursor)
+            row_layout.addWidget(lbl)
 
             del_btn = QPushButton("Delete")
             del_btn.setVisible(False)
@@ -438,6 +446,7 @@ class TaskDetailDialog(QDialog):
             self._subtask_list.addItem(item)
             self._subtask_list.setItemWidget(item, row)
 
+        QTimer.singleShot(0, self._update_subtask_heights)
         self._subtask_list.model().blockSignals(False)
 
     def _on_subtasks_reordered(self) -> None:
@@ -450,6 +459,21 @@ class TaskDetailDialog(QDialog):
     def _delete_subtask(self, subtask_id: int) -> None:
         self._subtask_repo.delete(subtask_id)
         self._load_subtasks()
+
+    def _update_subtask_heights(self) -> None:
+        vw = self._subtask_list.viewport().width()
+        if vw <= 0:
+            return
+        for i in range(self._subtask_list.count()):
+            item = self._subtask_list.item(i)
+            row = self._subtask_list.itemWidget(item)
+            if row is None:
+                continue
+            row.setFixedWidth(vw)
+            h = row.sizeHint().height()
+            row.setMinimumWidth(0)
+            row.setMaximumWidth(16777215)
+            item.setSizeHint(QSize(0, h))
 
     def _show_new_subtask_input(self) -> None:
         self._new_subtask_edit.setVisible(True)
@@ -485,6 +509,8 @@ class TaskDetailDialog(QDialog):
         if obj is self._desc_edit:
             if event.type() == QEvent.Type.FocusOut and not self._desc_edit.isReadOnly():
                 self._save_and_render_desc()
+        if hasattr(self, '_subtask_list') and obj is self._subtask_list.viewport() and event.type() == QEvent.Type.Resize:
+            QTimer.singleShot(0, self._update_subtask_heights)
         return super().eventFilter(obj, event)
 
     def _enter_desc_edit(self) -> None:
