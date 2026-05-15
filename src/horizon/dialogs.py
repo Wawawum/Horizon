@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QStackedWidget,
     QTextEdit,
     QVBoxLayout,
     QWidget,
@@ -36,6 +37,22 @@ def _plus_icon() -> QIcon:
     if _PLUS_ICON is None:
         _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
     return _PLUS_ICON
+
+_PENCIL_ICON: QIcon | None = None
+_TRASH_ICON: QIcon | None = None
+_SUBTASK_BTN_ICON_SIZE = QSize(8, 8)
+
+def _pencil_icon() -> QIcon:
+    global _PENCIL_ICON
+    if _PENCIL_ICON is None:
+        _PENCIL_ICON = _theme.make_icon(":/icons/pencil_cyan.svg", _SUBTASK_BTN_ICON_SIZE)
+    return _PENCIL_ICON
+
+def _trash_icon() -> QIcon:
+    global _TRASH_ICON
+    if _TRASH_ICON is None:
+        _TRASH_ICON = _theme.make_icon(":/icons/trash_cyan.svg", _SUBTASK_BTN_ICON_SIZE)
+    return _TRASH_ICON
 
 
 class _DragHandle(QLabel):
@@ -432,14 +449,42 @@ class TaskDetailDialog(QDialog):
             lbl.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
             lbl.mousePressEvent = lambda _e, c=cb: c.toggle()
             lbl.setCursor(Qt.CursorShape.PointingHandCursor)
-            row_layout.addWidget(lbl)
 
-            del_btn = QPushButton("Delete")
+            edit_field = QLineEdit(subtask.title)
+            edit_field._subtask_id = subtask_id  # type: ignore[attr-defined]
+            edit_field._label = lbl              # type: ignore[attr-defined]
+            edit_field.installEventFilter(self)
+
+            stack = QStackedWidget()
+            stack.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Preferred)
+            stack.addWidget(lbl)        # index 0 — lecture
+            stack.addWidget(edit_field) # index 1 — édition
+            edit_field._stack = stack   # type: ignore[attr-defined]
+            row_layout.addWidget(stack)
+
+            _icon_btn_style = "QPushButton { min-height: 0; padding: 0; border-radius: 2px; }"
+
+            edit_btn = QPushButton()
+            edit_btn.setIcon(_pencil_icon())
+            edit_btn.setIconSize(_SUBTASK_BTN_ICON_SIZE)
+            edit_btn.setFixedSize(16, 16)
+            edit_btn.setStyleSheet(_icon_btn_style)
+            edit_btn.setToolTip("Modifier")
+            edit_btn.setVisible(False)
+            edit_btn.clicked.connect(lambda checked, s=stack, e=edit_field: self._start_subtask_edit(s, e))
+            row_layout.addWidget(edit_btn)
+
+            del_btn = QPushButton()
+            del_btn.setIcon(_trash_icon())
+            del_btn.setIconSize(_SUBTASK_BTN_ICON_SIZE)
+            del_btn.setFixedSize(16, 16)
+            del_btn.setStyleSheet(_icon_btn_style)
+            del_btn.setToolTip("Supprimer")
             del_btn.setVisible(False)
             del_btn.clicked.connect(lambda checked, sid=subtask_id: self._delete_subtask(sid))
             row_layout.addWidget(del_btn)
 
-            row._del_btn = del_btn  # type: ignore[attr-defined]
+            row._hover_btns = [edit_btn, del_btn]  # type: ignore[attr-defined]
             row.installEventFilter(self)
 
             item.setSizeHint(QSize(0, row.sizeHint().height()))
@@ -459,6 +504,22 @@ class TaskDetailDialog(QDialog):
     def _delete_subtask(self, subtask_id: int) -> None:
         self._subtask_repo.delete(subtask_id)
         self._load_subtasks()
+
+    def _start_subtask_edit(self, stack: QStackedWidget, edit: QLineEdit) -> None:
+        stack.setCurrentIndex(1)
+        edit.selectAll()
+        edit.setFocus()
+
+    def _save_subtask_edit(self, edit: QLineEdit) -> None:
+        title = edit.text().strip()
+        if title:
+            self._subtask_repo.update_title(edit._subtask_id, title)  # type: ignore[attr-defined]
+            edit._label.setText(title)                                 # type: ignore[attr-defined]
+        edit._stack.setCurrentIndex(0)                                 # type: ignore[attr-defined]
+
+    def _cancel_subtask_edit(self, edit: QLineEdit) -> None:
+        edit.setText(edit._label.text())  # type: ignore[attr-defined]
+        edit._stack.setCurrentIndex(0)    # type: ignore[attr-defined]
 
     def _update_subtask_heights(self) -> None:
         vw = self._subtask_list.viewport().width()
@@ -480,12 +541,24 @@ class TaskDetailDialog(QDialog):
         QTimer.singleShot(0, self._new_subtask_edit.setFocus)
 
     def eventFilter(self, obj, event) -> bool:
-        del_btn = getattr(obj, "_del_btn", None)
-        if del_btn is not None:
+        hover_btns = getattr(obj, "_hover_btns", None)
+        if hover_btns is not None:
             if event.type() == QEvent.Type.Enter:
-                del_btn.setVisible(True)
+                for btn in hover_btns:
+                    btn.setVisible(True)
             elif event.type() == QEvent.Type.Leave:
-                del_btn.setVisible(False)
+                for btn in hover_btns:
+                    btn.setVisible(False)
+        if getattr(obj, "_subtask_id", None) is not None:
+            if event.type() == QEvent.Type.KeyPress:
+                if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):
+                    self._save_subtask_edit(obj)
+                    return True
+                elif event.key() == Qt.Key.Key_Escape:
+                    self._cancel_subtask_edit(obj)
+                    return True
+            elif event.type() == QEvent.Type.FocusOut:
+                self._save_subtask_edit(obj)
         if obj is getattr(self, "_new_subtask_edit", None):
             if event.type() == QEvent.Type.KeyPress:
                 if event.key() in (Qt.Key.Key_Return, Qt.Key.Key_Enter):

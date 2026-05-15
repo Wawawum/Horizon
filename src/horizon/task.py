@@ -231,6 +231,13 @@ class SubtaskRepository:
         )
         self._db.conn.commit()
 
+    def update_title(self, subtask_id: int, title: str) -> None:
+        self._db.conn.execute(
+            "UPDATE subtasks SET title = ? WHERE id = ?",
+            (title, subtask_id),
+        )
+        self._db.conn.commit()
+
     def delete(self, subtask_id: int) -> None:
         self._db.conn.execute("DELETE FROM subtasks WHERE id = ?", (subtask_id,))
         self._db.conn.commit()

@@ -8,5 +8,7 @@
         <file alias="check_black.svg">resources/check_black.svg</file>
         <file alias="plus_cyan.svg">resources/plus_cyan.svg</file>
         <file alias="folder_cyan.svg">resources/folder_cyan.svg</file>
+        <file alias="pencil_cyan.svg">resources/pencil_cyan.svg</file>
+        <file alias="trash_cyan.svg">resources/trash_cyan.svg</file>
     </qresource>
 </RCC>
