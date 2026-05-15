@@ -53,6 +53,9 @@ _HIGHLIGHT_CSS_LIGHT_URL   = (Path(__file__).parent.parent / "resources" / "high
 _HIGHLIGHT_CSS_DARK_URL    = (Path(__file__).parent.parent / "resources" / "highlight-dark.min.css").as_uri()
 _RESOURCES_BASE_URL        = QUrl((Path(__file__).parent.parent / "resources" / "").as_uri())
 
+_TAG_RE    = re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
+_TAG_PH_RE = re.compile(r'HORIZONTAG(\d+)END')
+
 _MERMAID_FENCE_RE = re.compile(
     r'^[ \t]*```[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*```[ \t]*$',
     re.MULTILINE | re.DOTALL,
@@ -124,6 +127,7 @@ def _make_preview_html() -> str:
   td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
   .mermaid {{ margin-bottom: 0.8em; overflow-x: auto; text-align: center; }}
   .mermaid svg {{ max-width: 100%; height: auto; }}
+  .tag {{ display: inline-block; background-color: {t.accent_color}22; border: 1px solid {t.accent_color}; border-radius: 4px; padding: 1px 7px; color: {t.accent_color}; font-size: 0.85em; font-weight: 500; white-space: nowrap; }}
 </style>
 <link rel="stylesheet" href="{_HIGHLIGHT_CSS_LIGHT_URL if t.name == 'light' else _HIGHLIGHT_CSS_DARK_URL}">
 <style>
@@ -245,6 +249,25 @@ def _add_hard_breaks(md: str) -> str:
         result.append(line + ('HORIZONLBR' if next_is_para else ''))
 
     return '\n'.join(result)
+
+
+def _extract_tags(md: str) -> tuple[str, list[str]]:
+    tags: list[str] = []
+
+    def replace(m: re.Match) -> str:
+        idx = len(tags)
+        tags.append(m.group(1))
+        return f'HORIZONTAG{idx}END'
+
+    return _TAG_RE.sub(replace, md), tags
+
+
+def _inject_tags(html: str, tags: list[str]) -> str:
+    for idx, name in enumerate(tags):
+        placeholder = f'HORIZONTAG{idx}END'
+        span = f'<span class="tag">#{name}</span>'
+        html = html.replace(placeholder, span)
+    return html
 
 
 def _extract_blockquotes(md: str) -> tuple[str, list[tuple[list[str], str | None]]]:
@@ -388,6 +411,9 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
 
         markdown = _MD_IMG_RE.sub(_extract, markdown)
 
+    # Step 1.2: extract {#Tag} inline tags before Qt's parser
+    markdown, inline_tags = _extract_tags(markdown)
+
     # Step 1.5: extract mermaid fenced blocks before Qt's parser
     markdown, diagrams = _extract_mermaid(markdown)
 
@@ -422,6 +448,9 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     # Step 7: replace line-break placeholders with <br>
     # Qt emits a soft-break space between the two halves; strip it as well.
     html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
+
+    # Step 7.5: inject inline tag spans
+    html = _inject_tags(html, inline_tags)
 
     # Step 8: re-inject images
     if images:

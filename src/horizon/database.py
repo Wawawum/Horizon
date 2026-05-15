@@ -65,6 +65,17 @@ CREATE VIRTUAL TABLE IF NOT EXISTS search_index USING fts5(
     body,
     tokenize = 'unicode61'
 );
+
+CREATE TABLE IF NOT EXISTS tags (
+    id   INTEGER PRIMARY KEY AUTOINCREMENT,
+    name TEXT    NOT NULL UNIQUE
+);
+
+CREATE TABLE IF NOT EXISTS note_tags (
+    note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE,
+    tag_id  INTEGER NOT NULL REFERENCES tags(id)  ON DELETE CASCADE,
+    PRIMARY KEY (note_id, tag_id)
+);
 """
 
 _SEARCH_INDEX_VERSION = 1

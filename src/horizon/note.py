@@ -1,7 +1,20 @@
+import re
 from dataclasses import dataclass
 from datetime import datetime
 
 from horizon.database import Database
+
+_TAG_EXTRACT_RE = re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
+
+
+def _extract_tag_names(body: str) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in _TAG_EXTRACT_RE.findall(body):
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
 
 
 @dataclass
@@ -31,6 +44,8 @@ class NoteRepository:
             "INSERT INTO search_index(type, entity_id, title, body) VALUES ('note', ?, ?, ?)",
             (note_id, title, body),
         )
+        from horizon.tag import TagRepository
+        TagRepository(self._db).set_for_note(note_id, _extract_tag_names(body))
         self._db.conn.commit()
         return Note(id=note_id, project_id=project_id, title=title, body=body, dt=dt, archived=archived, folder_id=folder_id)
 
@@ -103,6 +118,8 @@ class NoteRepository:
             "INSERT INTO search_index(type, entity_id, title, body) VALUES ('note', ?, ?, ?)",
             (note.id, note.title, note.body),
         )
+        from horizon.tag import TagRepository
+        TagRepository(self._db).set_for_note(note.id, _extract_tag_names(note.body))
         self._db.conn.commit()
 
     def delete(self, note_id: int) -> None:
