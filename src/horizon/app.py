@@ -124,8 +124,8 @@ class MainWindow(QMainWindow):
         if saved:
             self._splitter.setSizes(saved)
 
-    def _on_search(self, query: str) -> None:
-        results = self._search_repo.search(query)
+    def _on_search(self, query: str, mode: str = "all") -> None:
+        results = self._search_repo.search(query, mode)
         self._search_results.load_results(query, results)
         self._right_stack.setCurrentIndex(4)
 
@@ -220,12 +220,13 @@ class MainWindow(QMainWindow):
                 r = self.frameGeometry()
                 # Title bar zone (exclude rightmost 138px reserved for the 3 control buttons)
                 if r.top() <= y < r.top() + 36 and x < r.right() - 138:
-                    # Exclude the search bar so it receives normal mouse events
-                    if hasattr(self, "_title_bar") and self._title_bar._search_edit is not None:
-                        edit = self._title_bar._search_edit
-                        edit_pos = edit.mapToGlobal(QPoint(0, 0))
-                        if edit_pos.x() <= x < edit_pos.x() + edit.width():
-                            return True, 1  # HTCLIENT
+                    # Exclude interactive titlebar widgets so they receive normal mouse events
+                    if hasattr(self, "_title_bar"):
+                        for widget in (self._title_bar._search_edit, self._title_bar._search_mode):
+                            if widget is not None:
+                                wpos = widget.mapToGlobal(QPoint(0, 0))
+                                if wpos.x() <= x < wpos.x() + widget.width():
+                                    return True, 1  # HTCLIENT
                     return True, 2  # HTCAPTION — enables Win+arrows and Aero snap
                 if not self.isMaximized():
                     b = 6  # resize border width in pixels

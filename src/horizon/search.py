@@ -16,8 +16,8 @@ class SearchRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def search(self, query: str) -> list[SearchResult]:
-        fts_query = self._build_query(query)
+    def search(self, query: str, mode: str = "all") -> list[SearchResult]:
+        fts_query = self._build_query(query, mode)
         if not fts_query:
             return []
         try:
@@ -42,6 +42,10 @@ class SearchRepository:
         ]
 
     @staticmethod
-    def _build_query(query: str) -> str:
+    def _build_query(query: str, mode: str = "all") -> str:
         words = re.findall(r'\w+', query, re.UNICODE)
-        return " ".join(f'"{w}"*' for w in words)
+        if not words:
+            return ""
+        parts = [f'"{w}"*' for w in words]
+        separator = " OR " if mode == "any" else " "
+        return separator.join(parts)

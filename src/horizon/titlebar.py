@@ -1,6 +1,6 @@
 from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QKeyEvent, QPixmap
-from PySide6.QtWidgets import QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
 
 from horizon import theme as _theme
 
@@ -20,7 +20,7 @@ class _SearchLineEdit(QLineEdit):
 class TitleBar(QWidget):
     """Barre de titre personnalisée au style Synthwave."""
 
-    search_requested = Signal(str)
+    search_requested = Signal(str, str)  # (query, mode)
 
     def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True, show_search: bool = False) -> None:
         super().__init__(parent)
@@ -84,6 +84,7 @@ class TitleBar(QWidget):
 
         # Barre de recherche (fenêtre principale uniquement)
         self._search_edit: _SearchLineEdit | None = None
+        self._search_mode: QComboBox | None = None
         if show_search:
             self._search_edit = _SearchLineEdit()
             self._search_edit.setPlaceholderText("Rechercher…")
@@ -101,6 +102,33 @@ class TitleBar(QWidget):
             )
             self._search_edit.returnPressed.connect(self._on_search_return)
             layout.addWidget(self._search_edit)
+
+            layout.addSpacing(6)
+
+            self._search_mode = QComboBox()
+            self._search_mode.addItem("Tous les termes", userData="all")
+            self._search_mode.addItem("Au moins un terme", userData="any")
+            self._search_mode.setFixedHeight(22)
+            self._search_mode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+            self._search_mode.setStyleSheet(
+                f"QComboBox {{"
+                f"  background-color: {t.input_bg};"
+                f"  color: {t.text};"
+                f"  border: 1px solid {t.border};"
+                f"  border-radius: 3px;"
+                f"  padding: 0 6px;"
+                f"  font-size: 11px;"
+                f"}}"
+                f"QComboBox::drop-down {{ border: none; width: 16px; }}"
+                f"QComboBox QAbstractItemView {{"
+                f"  background-color: {t.input_bg};"
+                f"  color: {t.text};"
+                f"  border: 1px solid {t.border};"
+                f"  selection-background-color: {t.accent_color};"
+                f"  selection-color: {t.app_bg};"
+                f"}}"
+            )
+            layout.addWidget(self._search_mode)
             layout.addStretch()
 
         # Bouton minimiser
@@ -132,7 +160,8 @@ class TitleBar(QWidget):
     def _on_search_return(self) -> None:
         query = self._search_edit.text().strip()
         if query:
-            self.search_requested.emit(query)
+            mode = self._search_mode.currentData() if self._search_mode else "all"
+            self.search_requested.emit(query, mode)
 
     def _minimize(self) -> None:
         self.window().showMinimized()

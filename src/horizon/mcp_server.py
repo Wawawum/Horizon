@@ -31,6 +31,11 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "query": {"type": "string", "description": "The text to search for"},
+                    "mode": {
+                        "type": "string",
+                        "enum": ["all", "any"],
+                        "description": "Match mode: 'all' (default) requires every term to be present; 'any' returns results matching at least one term",
+                    },
                 },
                 "required": ["query"],
             },
@@ -180,7 +185,10 @@ async def _tool_search(client: httpx.AsyncClient, arguments: dict) -> list[types
     query = arguments.get("query", "").strip()
     if not query:
         return [types.TextContent(type="text", text="Error: query is required")]
-    resp = await client.get("/search", params={"q": query})
+    mode = arguments.get("mode", "all")
+    if mode not in ("all", "any"):
+        mode = "all"
+    resp = await client.get("/search", params={"q": query, "mode": mode})
     data = resp.json()
     if resp.status_code != 200:
         return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]

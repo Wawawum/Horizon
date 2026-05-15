@@ -135,15 +135,17 @@ class _Handler(BaseHTTPRequestHandler):
 
     def _handle_search(self, query_string: str) -> None:
         params = urllib.parse.parse_qs(query_string)
-        q_values = params.get("q", [])
-        q = q_values[0].strip() if q_values else ""
+        q = (params.get("q", [""])[0]).strip()
+        mode = params.get("mode", ["all"])[0]
+        if mode not in ("all", "any"):
+            mode = "all"
         if not q:
             self._send_json(400, {"error": "q parameter is required"})
             return
 
         conn = open_connection(self._db_path)
         try:
-            results = SearchRepository(_Db(conn)).search(q)
+            results = SearchRepository(_Db(conn)).search(q, mode)
             payload = {
                 "results": [
                     {"type": r.type, "id": r.entity_id, "title": r.title, "body": r.snippet}
