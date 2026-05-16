@@ -1,3 +1,5 @@
+import re as _re
+
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, QTimer, Qt
 from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
@@ -53,6 +55,25 @@ def _trash_icon() -> QIcon:
     if _TRASH_ICON is None:
         _TRASH_ICON = _theme.make_icon(":/icons/trash_cyan.svg", _SUBTASK_BTN_ICON_SIZE)
     return _TRASH_ICON
+
+
+_TASK_TAG_RE = _re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
+
+
+def _render_desc_with_tags(widget: QTextEdit, desc_raw: str) -> None:
+    accent = _theme.current().accent_color
+    widget.setMarkdown(desc_raw)
+    html = widget.toHtml()
+
+    def replacer(m: _re.Match) -> str:
+        return (
+            f'<span style="display:inline; background-color:{accent}22;'
+            f' border:1px solid {accent};'
+            f' padding:1px 7px; color:{accent};'
+            f' font-size:small; font-weight:500;">#{m.group(1)}</span>'
+        )
+
+    widget.setHtml(_TASK_TAG_RE.sub(replacer, html))
 
 
 class _DragHandle(QLabel):
@@ -327,7 +348,7 @@ class TaskDetailDialog(QDialog):
         self._desc_edit.setReadOnly(True)
         self._desc_edit.setFrameShape(QFrame.Shape.NoFrame)
         if self._desc_raw:
-            self._desc_edit.setMarkdown(self._desc_raw)
+            _render_desc_with_tags(self._desc_edit, self._desc_raw)
         self._desc_edit.installEventFilter(self)
         self._desc_edit.viewport().installEventFilter(self)
         self._desc_edit.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
@@ -597,7 +618,7 @@ class TaskDetailDialog(QDialog):
     def _save_and_render_desc(self) -> None:
         self._desc_raw = self._desc_edit.toPlainText()
         if self._desc_raw:
-            self._desc_edit.setMarkdown(self._desc_raw)
+            _render_desc_with_tags(self._desc_edit, self._desc_raw)
         else:
             self._desc_edit.setPlainText("")
         self._desc_edit.setReadOnly(True)

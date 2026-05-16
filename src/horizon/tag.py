@@ -1,6 +1,19 @@
+import re
 from dataclasses import dataclass
 
 from horizon.database import Database
+
+_TAG_EXTRACT_RE = re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
+
+
+def extract_tag_names(body: str) -> list[str]:
+    seen: set[str] = set()
+    result: list[str] = []
+    for name in _TAG_EXTRACT_RE.findall(body):
+        if name not in seen:
+            seen.add(name)
+            result.append(name)
+    return result
 
 
 @dataclass
@@ -47,4 +60,25 @@ class TagRepository:
             self._db.conn.execute(
                 "INSERT OR IGNORE INTO note_tags (note_id, tag_id) VALUES (?, ?)",
                 (note_id, tag.id),
+            )
+
+    def list_for_task(self, task_id: int) -> list[Tag]:
+        rows = self._db.conn.execute(
+            "SELECT t.id, t.name FROM tags t"
+            " JOIN task_tags tt ON tt.tag_id = t.id"
+            " WHERE tt.task_id = ?"
+            " ORDER BY t.name",
+            (task_id,),
+        ).fetchall()
+        return [Tag(id=row["id"], name=row["name"]) for row in rows]
+
+    def set_for_task(self, task_id: int, tag_names: list[str]) -> None:
+        self._db.conn.execute(
+            "DELETE FROM task_tags WHERE task_id = ?", (task_id,)
+        )
+        for name in tag_names:
+            tag = self.get_or_create(name)
+            self._db.conn.execute(
+                "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?, ?)",
+                (task_id, tag.id),
             )

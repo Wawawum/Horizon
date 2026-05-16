@@ -1,20 +1,8 @@
-import re
 from dataclasses import dataclass
 from datetime import datetime
 
 from horizon.database import Database
-
-_TAG_EXTRACT_RE = re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
-
-
-def _extract_tag_names(body: str) -> list[str]:
-    seen: set[str] = set()
-    result: list[str] = []
-    for name in _TAG_EXTRACT_RE.findall(body):
-        if name not in seen:
-            seen.add(name)
-            result.append(name)
-    return result
+from horizon.tag import extract_tag_names as _extract_tag_names
 
 
 @dataclass

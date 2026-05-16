@@ -2,6 +2,7 @@ from dataclasses import dataclass, field
 from enum import Enum
 
 from horizon.database import Database
+from horizon.tag import extract_tag_names as _extract_tag_names
 
 
 class TaskState(Enum):
@@ -66,6 +67,8 @@ class TaskRepository:
             "INSERT INTO search_index(type, entity_id, title, body) VALUES ('task', ?, ?, ?)",
             (task_id, title, description),
         )
+        from horizon.tag import TagRepository
+        TagRepository(self._db).set_for_task(task_id, _extract_tag_names(description))
         self._db.conn.commit()
         return Task(task_id, project_id, title, description, state, priority, bucket, next_order, archived)
 
@@ -102,6 +105,8 @@ class TaskRepository:
             "INSERT INTO search_index(type, entity_id, title, body) VALUES ('task', ?, ?, ?)",
             (task.id, task.title, task.description),
         )
+        from horizon.tag import TagRepository
+        TagRepository(self._db).set_for_task(task.id, _extract_tag_names(task.description))
         self._db.conn.commit()
 
     def delete(self, task_id: int) -> None:
