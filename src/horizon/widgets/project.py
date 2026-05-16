@@ -151,6 +151,7 @@ class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
     home_requested = Signal()
     notes_requested = Signal()
+    tags_requested = Signal()
 
     def __init__(self, repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
@@ -164,16 +165,21 @@ class ProjectListWidget(QWidget):
         self._notes_btn = _NavButton("Notes", "02")
         self._notes_btn.clicked.connect(self.notes_requested)
 
+        self._tags_btn = _NavButton("Tags", "03")
+        self._tags_btn.clicked.connect(self.tags_requested)
+
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
         self._nav_group.addButton(self._board_btn)
         self._nav_group.addButton(self._notes_btn)
+        self._nav_group.addButton(self._tags_btn)
 
         nav_layout = QHBoxLayout()
         nav_layout.setContentsMargins(6, 6, 6, 4)
         nav_layout.setSpacing(6)
         nav_layout.addWidget(self._board_btn)
         nav_layout.addWidget(self._notes_btn)
+        nav_layout.addWidget(self._tags_btn)
 
         self._list = QListWidget()
         self._list.setItemDelegate(ProjectListDelegate(self._list))

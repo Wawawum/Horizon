@@ -32,6 +32,12 @@ class TagRepository:
         ).fetchall()
         return [Tag(id=row["id"], name=row["name"]) for row in rows]
 
+    def list_all(self) -> list[Tag]:
+        rows = self._db.conn.execute(
+            "SELECT id, name FROM tags ORDER BY name COLLATE NOCASE"
+        ).fetchall()
+        return [Tag(id=row["id"], name=row["name"]) for row in rows]
+
     def set_for_note(self, note_id: int, tag_names: list[str]) -> None:
         self._db.conn.execute(
             "DELETE FROM note_tags WHERE note_id = ?", (note_id,)

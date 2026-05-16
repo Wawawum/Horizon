@@ -106,6 +106,28 @@ class NoteRepository:
             for row in rows
         ]
 
+    def list_for_tag(self, tag_id: int) -> list["Note"]:
+        rows = self._db.conn.execute(
+            "SELECT DISTINCT n.id, n.project_id, n.title, n.body, n.dt, n.archived, n.folder_id"
+            " FROM notes n"
+            " JOIN note_tags nt ON nt.note_id = n.id"
+            " WHERE nt.tag_id = ? AND n.archived = 0"
+            " ORDER BY n.dt DESC",
+            (tag_id,),
+        ).fetchall()
+        return [
+            Note(
+                id=r["id"],
+                project_id=r["project_id"],
+                title=r["title"],
+                body=r["body"],
+                dt=datetime.fromisoformat(r["dt"]),
+                archived=bool(r["archived"]),
+                folder_id=r["folder_id"],
+            )
+            for r in rows
+        ]
+
     def update(self, note: "Note") -> None:
         self._db.conn.execute(
             "UPDATE notes SET project_id = ?, title = ?, body = ?, dt = ?, archived = ?, folder_id = ? WHERE id = ?",
