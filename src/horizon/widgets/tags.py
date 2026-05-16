@@ -181,6 +181,7 @@ class TagsWidget(QWidget):
     # ── Public API ────────────────────────────────────────────────────────
 
     def load(self) -> None:
+        self._tag_repo.delete_orphaned()
         self._selected_tag = None
         self._tag_buttons.clear()
         self._table.setRowCount(0)

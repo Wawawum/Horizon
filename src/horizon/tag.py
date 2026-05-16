@@ -82,3 +82,10 @@ class TagRepository:
                 "INSERT OR IGNORE INTO task_tags (task_id, tag_id) VALUES (?, ?)",
                 (task_id, tag.id),
             )
+
+    def delete_orphaned(self) -> None:
+        self._db.conn.execute(
+            "DELETE FROM tags"
+            " WHERE NOT EXISTS (SELECT 1 FROM note_tags WHERE tag_id = tags.id)"
+            "   AND NOT EXISTS (SELECT 1 FROM task_tags WHERE tag_id = tags.id)"
+        )
