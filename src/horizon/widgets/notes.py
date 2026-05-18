@@ -3,7 +3,7 @@ import html as _html_mod
 import re
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QBuffer, QByteArray, QIODevice, QObject, QEvent, QSize, Slot, QUrl
+from PySide6.QtCore import Qt, Signal, QBuffer, QByteArray, QIODevice, QObject, QEvent, QSize, Slot, QUrl, QTimer
 from PySide6.QtGui import QColor, QFont, QIcon, QPixmap, QTextCursor, QTextDocument
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -599,6 +599,16 @@ class NoteDetailWidget(QWidget):
         self._updating_combo = False
         self._updating_folder_combo = False
 
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(5000)
+        self._autosave_timer.timeout.connect(self._autosave)
+
+        self._status_clear_timer = QTimer(self)
+        self._status_clear_timer.setSingleShot(True)
+        self._status_clear_timer.setInterval(2000)
+        self._status_clear_timer.timeout.connect(self._clear_status)
+
         back_btn = QPushButton("← Back")
         back_btn.clicked.connect(self.back_requested)
 
@@ -679,6 +689,10 @@ class NoteDetailWidget(QWidget):
         self._body_splitter.setStretchFactor(1, 1)
         self._body_splitter.splitterMoved.connect(self._on_splitter_moved)
 
+        self._status_label = QLabel("")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
@@ -686,6 +700,7 @@ class NoteDetailWidget(QWidget):
         layout.addLayout(project_row)
         layout.addWidget(sep)
         layout.addWidget(self._body_splitter, stretch=1)
+        layout.addWidget(self._status_label)
 
         self._restore_splitter_sizes()
 
@@ -704,6 +719,8 @@ class NoteDetailWidget(QWidget):
         dlg.exec()
 
     def load_note(self, note: Note, projects: list) -> None:
+        self._autosave_timer.stop()
+        self._status_label.setText("")
         self._current_note = note
         self._body_raw = note.body
 
@@ -764,18 +781,30 @@ class NoteDetailWidget(QWidget):
             self._save_body()
         return super().eventFilter(obj, event)
 
-    def _save_body(self) -> None:
+    def _autosave(self) -> None:
+        self._save_body(show_status=True)
+
+    def _clear_status(self) -> None:
+        self._status_label.setText("")
+
+    def _save_body(self, show_status: bool = False) -> None:
         if self._current_note is None:
             return
         new_body = self._editor.toPlainText()
         if new_body == self._body_raw:
             return
+        self._autosave_timer.stop()
         self._body_raw = new_body
         self._current_note.body = self._body_raw
         self._note_repo.update(self._current_note)
+        if show_status:
+            self._status_label.setText("Saving...")
+            self._status_clear_timer.start()
 
     def _on_editor_text_changed(self) -> None:
         self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+        if self._current_note is not None:
+            self._autosave_timer.start()
 
     def _on_image_clicked(self, data_uri: str) -> None:
         from horizon.dialogs import ImageViewerDialog
