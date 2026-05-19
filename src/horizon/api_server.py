@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from horizon.database import open_connection
-from horizon.note import Note, NoteRepository
+from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.search import SearchRepository
 from horizon.task import (
     Subtask, SubtaskRepository, Task, TaskBucket, TaskPriority, TaskRepository,
@@ -18,6 +18,7 @@ from horizon.task import (
 logger = logging.getLogger(__name__)
 
 _NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
+_NOTES_VERSIONS_RE = re.compile(r"^/notes/(\d+)/versions$")
 _PROJECTS_ID_RE = re.compile(r"^/projects/(\d+)$")
 _TASKS_ID_RE = re.compile(r"^/tasks/(\d+)$")
 
@@ -30,6 +31,11 @@ class _Db:
     """Minimal shim so repositories can access .conn without a full Database instance."""
     def __init__(self, conn) -> None:
         self.conn = conn
+
+
+def _version_to_dict(v: NoteVersion) -> dict:
+    return {"id": v.id, "note_id": v.note_id, "title": v.title, "body": v.body,
+            "version_dt": v.version_dt.isoformat(), "is_current": v.is_current}
 
 
 def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
@@ -124,6 +130,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_search(parsed.query)
         elif path == "/notes":
             self._handle_notes_list()
+        elif m := _NOTES_VERSIONS_RE.match(path):
+            self._handle_note_versions(int(m.group(1)))
         elif m := _NOTES_ID_RE.match(path):
             self._handle_note_detail(int(m.group(1)))
         elif m := _PROJECTS_ID_RE.match(path):
@@ -181,6 +189,21 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to get note %d", note_id)
             self._send_json(500, {"error": "failed to get note"})
+        finally:
+            conn.close()
+
+    def _handle_note_versions(self, note_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            note = NoteRepository(_Db(conn)).get(note_id)
+            if note is None:
+                self._send_json(404, {"error": "note not found"})
+                return
+            versions = NoteVersionRepository(_Db(conn)).list_for_note(note_id)
+            self._send_json(200, {"versions": [_version_to_dict(v) for v in versions]})
+        except Exception:
+            logger.exception("Failed to list versions for note %d", note_id)
+            self._send_json(500, {"error": "failed to list note versions"})
         finally:
             conn.close()
 
@@ -245,13 +268,15 @@ class _Handler(BaseHTTPRequestHandler):
             return
         conn = open_connection(self._db_path)
         try:
-            note = NoteRepository(_Db(conn)).create(
+            db = _Db(conn)
+            note = NoteRepository(db).create(
                 project_id=body.get("project_id"),
                 title=title,
                 body=body.get("body", ""),
                 dt=dt,
                 folder_id=body.get("folder_id"),
             )
+            NoteVersionRepository(db).create_version(note)
             self._send_json(201, _note_to_dict(note))
         except Exception:
             logger.exception("Failed to create note")
@@ -289,6 +314,7 @@ class _Handler(BaseHTTPRequestHandler):
                     self._send_json(400, {"error": "invalid dt format, expected ISO-8601"})
                     return
             repo.update(note)
+            NoteVersionRepository(_Db(conn)).create_version(note)
             self._send_json(200, _note_to_dict(note))
         except Exception:
             logger.exception("Failed to update note %d", note_id)

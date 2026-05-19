@@ -15,6 +15,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -31,7 +33,7 @@ from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
-from horizon.note import Note, NoteRepository
+from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.project import ProjectRepository
 
 _PLUS_ICON: QIcon | None = None
@@ -587,15 +589,18 @@ class NotesListWidget(QWidget):
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
         self._folder_repo = folder_repo
         self._prefs = prefs
         self._image_repo = image_repo
+        self._version_repo = version_repo
         self._current_note: Note | None = None
         self._body_raw: str = ""
+        self._body_at_open: str = ""
+        self._viewing_version: NoteVersion | None = None
         self._updating_combo = False
         self._updating_folder_combo = False
 
@@ -610,7 +615,8 @@ class NoteDetailWidget(QWidget):
         self._status_clear_timer.timeout.connect(self._clear_status)
 
         back_btn = QPushButton("← Back")
-        back_btn.clicked.connect(self.back_requested)
+        self._back_btn = back_btn
+        self._back_btn.clicked.connect(self._on_back_clicked)
 
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
@@ -643,6 +649,10 @@ class NoteDetailWidget(QWidget):
         self._folder_combo.currentIndexChanged.connect(self._on_folder_changed)
         self._folder_label = QLabel("Folder:")
 
+        self._history_btn = QPushButton("History")
+        self._history_btn.setCheckable(True)
+        self._history_btn.clicked.connect(self._on_toggle_history)
+
         self._view_source_btn = QPushButton("View source")
         self._view_source_btn.clicked.connect(self._on_view_source)
 
@@ -660,6 +670,7 @@ class NoteDetailWidget(QWidget):
         project_row.addWidget(self._folder_label)
         project_row.addWidget(self._folder_combo)
         project_row.addStretch()
+        project_row.addWidget(self._history_btn)
         project_row.addWidget(self._view_source_btn)
 
         sep = QFrame()
@@ -682,16 +693,34 @@ class NoteDetailWidget(QWidget):
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
 
+        self._history_panel = QWidget()
+        _hp_layout = QVBoxLayout(self._history_panel)
+        _hp_layout.setContentsMargins(8, 0, 0, 0)
+        _hp_layout.setSpacing(4)
+        _hp_layout.addWidget(QLabel("Version history"))
+        self._history_list = QListWidget()
+        self._history_list.setFixedWidth(200)
+        self._history_list.currentItemChanged.connect(self._on_history_item_selected)
+        _hp_layout.addWidget(self._history_list)
+        self._history_panel.setVisible(False)
+
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._body_splitter.addWidget(self._editor)
         self._body_splitter.addWidget(self._preview)
+        self._body_splitter.addWidget(self._history_panel)
         self._body_splitter.setStretchFactor(0, 1)
         self._body_splitter.setStretchFactor(1, 1)
+        self._body_splitter.setStretchFactor(2, 0)
         self._body_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self._status_label = QLabel("")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
         self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+
+        self._readonly_banner = QLabel("Viewing historical version — read only. Press ← Back to return.")
+        self._readonly_banner.setStyleSheet("background: #f59e0b; color: #1a1a1a; padding: 4px 8px; font-size: 11px;")
+        self._readonly_banner.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._readonly_banner.setVisible(False)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -699,6 +728,7 @@ class NoteDetailWidget(QWidget):
         layout.addLayout(header_layout)
         layout.addLayout(project_row)
         layout.addWidget(sep)
+        layout.addWidget(self._readonly_banner)
         layout.addWidget(self._body_splitter, stretch=1)
         layout.addWidget(self._status_label)
 
@@ -723,6 +753,14 @@ class NoteDetailWidget(QWidget):
         self._status_label.setText("")
         self._current_note = note
         self._body_raw = note.body
+        self._body_at_open = note.body
+        self._viewing_version = None
+        self._readonly_banner.setVisible(False)
+        self._back_btn.setText("← Back")
+        self._editor.setReadOnly(False)
+        if self._history_btn.isChecked():
+            self._history_btn.setChecked(False)
+            self._history_panel.setVisible(False)
 
         self._id_label.setText(f"#{note.id}" if note.id is not None else "")
         self._title_edit.setText(note.title)
@@ -788,6 +826,8 @@ class NoteDetailWidget(QWidget):
         self._status_label.setText("")
 
     def _save_body(self, show_status: bool = False) -> None:
+        if self._viewing_version is not None:
+            return
         if self._current_note is None:
             return
         new_body = self._editor.toPlainText()
@@ -803,7 +843,7 @@ class NoteDetailWidget(QWidget):
 
     def _on_editor_text_changed(self) -> None:
         self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
-        if self._current_note is not None:
+        if self._current_note is not None and self._viewing_version is None:
             self._autosave_timer.start()
 
     def _on_image_clicked(self, data_uri: str) -> None:
@@ -876,3 +916,73 @@ class NoteDetailWidget(QWidget):
             return
         self._current_note.folder_id = self._folder_combo.currentData()
         self._note_repo.update(self._current_note)
+
+    def _on_back_clicked(self) -> None:
+        if self._viewing_version is not None:
+            self._viewing_version = None
+            self._readonly_banner.setVisible(False)
+            self._back_btn.setText("← Back")
+            self._editor.setReadOnly(False)
+            self._editor.blockSignals(True)
+            self._editor.setPlainText(self._body_raw)
+            self._editor.blockSignals(False)
+            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+            self._history_list.blockSignals(True)
+            if self._history_list.count() > 0:
+                self._history_list.setCurrentRow(0)
+            self._history_list.blockSignals(False)
+            return
+
+        self._autosave_timer.stop()
+        self._save_body()
+
+        if (self._version_repo is not None
+                and self._current_note is not None
+                and self._body_raw != self._body_at_open):
+            self._version_repo.create_version(self._current_note)
+
+        self.back_requested.emit()
+
+    def _on_toggle_history(self, checked: bool) -> None:
+        self._history_panel.setVisible(checked)
+        if checked and self._current_note is not None:
+            self._load_history()
+
+    def _load_history(self) -> None:
+        if self._version_repo is None or self._current_note is None:
+            return
+        self._history_list.blockSignals(True)
+        self._history_list.clear()
+        for v in self._version_repo.list_for_note(self._current_note.id):
+            label = v.version_dt.strftime("%Y-%m-%d %H:%M:%S")
+            if v.is_current:
+                label += " (current)"
+            item = QListWidgetItem(label)
+            item.setData(Qt.ItemDataRole.UserRole, v.id)
+            self._history_list.addItem(item)
+        self._history_list.blockSignals(False)
+
+    def _on_history_item_selected(self, current: QListWidgetItem | None, _previous) -> None:
+        if current is None or self._version_repo is None:
+            return
+        version = self._version_repo.get(current.data(Qt.ItemDataRole.UserRole))
+        if version is None:
+            return
+        if version.is_current:
+            self._viewing_version = None
+            self._readonly_banner.setVisible(False)
+            self._back_btn.setText("← Back")
+            self._editor.setReadOnly(False)
+            self._editor.blockSignals(True)
+            self._editor.setPlainText(self._body_raw)
+            self._editor.blockSignals(False)
+            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+        else:
+            self._viewing_version = version
+            self._readonly_banner.setVisible(True)
+            self._back_btn.setText("← Return to current")
+            self._editor.setReadOnly(True)
+            self._editor.blockSignals(True)
+            self._editor.setPlainText(version.body)
+            self._editor.blockSignals(False)
+            self._bridge.push_html(_markdown_to_html(version.body, self._image_repo))

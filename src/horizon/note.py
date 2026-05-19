@@ -16,6 +16,16 @@ class Note:
     folder_id: int | None = None
 
 
+@dataclass
+class NoteVersion:
+    id: int | None
+    note_id: int
+    title: str
+    body: str
+    version_dt: datetime
+    is_current: bool
+
+
 class NoteRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
@@ -138,3 +148,45 @@ class NoteRepository:
             "DELETE FROM search_index WHERE type = 'note' AND entity_id = ?", (note_id,)
         )
         self._db.conn.commit()
+
+
+class NoteVersionRepository:
+    def __init__(self, db) -> None:
+        self._db = db
+
+    def create_version(self, note: "Note") -> "NoteVersion":
+        now = datetime.now()
+        self._db.conn.execute(
+            "UPDATE note_versions SET is_current = 0 WHERE note_id = ?", (note.id,)
+        )
+        cur = self._db.conn.execute(
+            "INSERT INTO note_versions (note_id, title, body, version_dt, is_current) VALUES (?, ?, ?, ?, 1)",
+            (note.id, note.title, note.body, now.isoformat()),
+        )
+        self._db.conn.commit()
+        return NoteVersion(id=cur.lastrowid, note_id=note.id, title=note.title,
+                           body=note.body, version_dt=now, is_current=True)
+
+    def list_for_note(self, note_id: int) -> list["NoteVersion"]:
+        rows = self._db.conn.execute(
+            "SELECT id, note_id, title, body, version_dt, is_current FROM note_versions"
+            " WHERE note_id = ? ORDER BY version_dt DESC",
+            (note_id,),
+        ).fetchall()
+        return [
+            NoteVersion(id=r["id"], note_id=r["note_id"], title=r["title"],
+                        body=r["body"], version_dt=datetime.fromisoformat(r["version_dt"]),
+                        is_current=bool(r["is_current"]))
+            for r in rows
+        ]
+
+    def get(self, version_id: int) -> "NoteVersion | None":
+        row = self._db.conn.execute(
+            "SELECT id, note_id, title, body, version_dt, is_current FROM note_versions WHERE id = ?",
+            (version_id,),
+        ).fetchone()
+        if row is None:
+            return None
+        return NoteVersion(id=row["id"], note_id=row["note_id"], title=row["title"],
+                           body=row["body"], version_dt=datetime.fromisoformat(row["version_dt"]),
+                           is_current=bool(row["is_current"]))

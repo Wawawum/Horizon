@@ -89,6 +89,17 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list_note_versions",
+            description="List all saved versions of a Horizon note, newest first.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "note_id": {"type": "integer", "description": "The note ID"},
+                },
+                "required": ["note_id"],
+            },
+        ),
+        types.Tool(
             name="create_task",
             description="Create a new task in Horizon. Returns the created task with its ID and subtasks.",
             inputSchema={
@@ -280,6 +291,22 @@ async def _tool_update_note(client: httpx.AsyncClient, arguments: dict) -> list[
     return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
 
+async def _tool_list_note_versions(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    note_id = arguments.get("note_id")
+    if note_id is None:
+        return [types.TextContent(type="text", text="Error: note_id is required")]
+    resp = await client.get(f"/notes/{note_id}/versions")
+    data = resp.json()
+    if resp.status_code == 404:
+        return [types.TextContent(type="text", text="Note not found.")]
+    if resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    versions = data.get("versions", [])
+    if not versions:
+        return [types.TextContent(type="text", text="No versions found for this note.")]
+    return [types.TextContent(type="text", text=json.dumps(versions, ensure_ascii=False, indent=2))]
+
+
 async def _tool_create_task(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
     project_id = arguments.get("project_id")
     if not isinstance(project_id, int):
@@ -334,6 +361,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_create_note(client, arguments)
         elif name == "update_note":
             return await _tool_update_note(client, arguments)
+        elif name == "list_note_versions":
+            return await _tool_list_note_versions(client, arguments)
         elif name == "create_task":
             return await _tool_create_task(client, arguments)
         elif name == "update_task":

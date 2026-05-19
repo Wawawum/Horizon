@@ -9,7 +9,7 @@ from horizon import theme as _theme
 from horizon.database import Database
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
-from horizon.note import NoteRepository
+from horizon.note import NoteRepository, NoteVersionRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
@@ -59,6 +59,7 @@ class MainWindow(QMainWindow):
         subtask_repo = SubtaskRepository(db)
         self._subtask_repo = subtask_repo
         self._note_repo = NoteRepository(db)
+        self._note_version_repo = NoteVersionRepository(db)
         self._folder_repo = FolderRepository(db)
         self._tag_repo = TagRepository(db)
         image_repo = ImageRepository(db)
@@ -82,7 +83,11 @@ class MainWindow(QMainWindow):
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._notes_list)      # index 2
 
-        self._note_detail = NoteDetailWidget(self._note_repo, self._proj_repo, self._folder_repo, prefs=self._prefs, image_repo=image_repo)
+        self._note_detail = NoteDetailWidget(
+            self._note_repo, self._proj_repo, self._folder_repo,
+            prefs=self._prefs, image_repo=image_repo,
+            version_repo=self._note_version_repo,
+        )
         self._right_stack.addWidget(self._note_detail)     # index 3
 
         self._search_results = SearchResultsWidget()
