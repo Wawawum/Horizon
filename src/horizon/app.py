@@ -18,6 +18,7 @@ from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
 from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 from horizon.widgets.tags import TagsWidget
+from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
 from horizon.widgets.deliverables import (
     DeliverablesWidget,
@@ -70,6 +71,8 @@ class MainWindow(QMainWindow):
         self._tag_repo = TagRepository(db)
         image_repo = ImageRepository(db)
         self._search_repo = SearchRepository(db)
+        self._tmpl_repo = DeliverableTemplateRepository(db)
+        self._deliverable_repo = DeliverableRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -83,7 +86,7 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._prefs)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._deliverable_repo, self._tmpl_repo, self._prefs)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
@@ -101,8 +104,6 @@ class MainWindow(QMainWindow):
 
         self._tags_widget = TagsWidget(self._tag_repo, self._note_repo, self._proj_repo, self._folder_repo)
         self._right_stack.addWidget(self._tags_widget)     # index 5
-
-        self._tmpl_repo = DeliverableTemplateRepository(db)
 
         self._deliverables_widget = DeliverablesWidget()
         self._right_stack.addWidget(self._deliverables_widget)   # index 6

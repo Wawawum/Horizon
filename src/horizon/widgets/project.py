@@ -38,11 +38,14 @@ from PySide6.QtWidgets import (
 )
 
 from horizon import theme as _theme
+from horizon.deliverable import DeliverableRepository
+from horizon.deliverable_template import DeliverableTemplateRepository
 from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
+from horizon.widgets.deliverables import ProjectDeliverablesPanel
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
 
@@ -858,13 +861,15 @@ class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, prefs=None, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
         self._subtask_repo = subtask_repo
         self._note_repo = note_repo
         self._folder_repo = folder_repo
+        self._deliverable_repo = deliverable_repo
+        self._tmpl_repo = tmpl_repo
         self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
@@ -1038,16 +1043,17 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.note_moved.connect(self._on_note_moved)
         notes_content_layout.addWidget(self._note_tree, stretch=1)
 
-        # Placeholders
-        deliverables_placeholder = QLabel("Deliverables — coming soon")
-        deliverables_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        # Deliverables panel
+        self._deliverables_panel = ProjectDeliverablesPanel(self._deliverable_repo, self._tmpl_repo)
+
+        # Placeholder
         documents_placeholder = QLabel("Documents — coming soon")
         documents_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         # Stacked content + vertical tab bar
         self._right_stack = QStackedWidget()
         self._right_stack.addWidget(notes_content)           # index 0
-        self._right_stack.addWidget(deliverables_placeholder) # index 1
+        self._right_stack.addWidget(self._deliverables_panel) # index 1
         self._right_stack.addWidget(documents_placeholder)    # index 2
 
         right_tab_bar = _VerticalTabBar(["Notes", "Deliverables", "Documents"])
@@ -1483,6 +1489,7 @@ class ProjectDetailWidget(QWidget):
             self._desc_text.setFrameShape(QFrame.Shape.NoFrame)
             self._load_tasks(project.id)
             self._load_notes(project.id)
+            self._deliverables_panel.load(project.id)
             if self._prefs is not None:
                 view_index = self._prefs.get_project_view(project.id)
                 self._view_selector.blockSignals(True)

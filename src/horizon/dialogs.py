@@ -794,3 +794,57 @@ class ImageViewerDialog(QDialog):
         layout.addWidget(content)
 
         QTimer.singleShot(0, lambda: self._view.fit(self._scene_rect))
+
+
+class SelectTemplatesDialog(QDialog):
+    """Dialog listing deliverable templates with checkboxes for multi-selection."""
+
+    def __init__(self, templates, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(400)
+        self._templates = sorted(templates, key=lambda t: t.title.lower())
+        self._checkboxes: list[QCheckBox] = []
+
+        self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.NoSelection)
+        for tmpl in self._templates:
+            item = QListWidgetItem(self._list)
+            cb = QCheckBox(tmpl.title)
+            item.setSizeHint(cb.sizeHint())
+            self._list.addItem(item)
+            self._list.setItemWidget(item, cb)
+            self._checkboxes.append(cb)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(16, 16, 16, 16)
+        cl.setSpacing(8)
+        cl.addWidget(self._list, stretch=1)
+        cl.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="Select Templates"))
+        layout.addWidget(content)
+
+    def selected_templates(self):
+        return [
+            tmpl
+            for tmpl, cb in zip(self._templates, self._checkboxes)
+            if cb.isChecked()
+        ]
+
+    @classmethod
+    def ask(cls, templates, parent=None):
+        dlg = cls(templates, parent)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg.selected_templates()
+        return []

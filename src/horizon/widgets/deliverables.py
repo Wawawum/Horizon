@@ -6,6 +6,8 @@ from PySide6.QtWidgets import (
     QHeaderView,
     QLabel,
     QLineEdit,
+    QListWidget,
+    QListWidgetItem,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -17,7 +19,8 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
-from horizon.dialogs import ConfirmDialog
+from horizon.dialogs import ConfirmDialog, SelectTemplatesDialog
+from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplate, DeliverableTemplateRepository
 from horizon.image import ImageRepository
 from horizon.widgets.markdown import (
@@ -29,6 +32,69 @@ from horizon.widgets.markdown import (
     MarkdownBridge,
     MarkdownEditor,
 )
+
+
+class ProjectDeliverablesPanel(QWidget):
+    """Panel displayed in the Deliverables tab of a project."""
+
+    def __init__(self, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._deliverable_repo = deliverable_repo
+        self._tmpl_repo = tmpl_repo
+        self._current_project_id: int | None = None
+
+        title = QLabel("Deliverables")
+        font = title.font()
+        font.setPointSize(font.pointSize() + 2)
+        font.setBold(True)
+        title.setFont(font)
+
+        self._new_btn = QPushButton("New")
+        self._new_btn.setIcon(_plus_icon())
+        self._new_btn.setIconSize(_PLUS_ICON_SIZE)
+        self._new_btn.clicked.connect(self._on_new)
+
+        header = QHBoxLayout()
+        header.addWidget(title)
+        header.addStretch()
+        header.addWidget(self._new_btn)
+
+        self._list = QListWidget()
+        self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(8, 4, 4, 8)
+        layout.setSpacing(4)
+        layout.addLayout(header)
+        layout.addWidget(self._list, stretch=1)
+
+    def load(self, project_id: int) -> None:
+        self._current_project_id = project_id
+        self._refresh()
+
+    def _refresh(self) -> None:
+        self._list.clear()
+        if self._current_project_id is None:
+            return
+        for deliverable in self._deliverable_repo.list_for_project(self._current_project_id):
+            item = QListWidgetItem(deliverable.title)
+            item.setData(Qt.ItemDataRole.UserRole, deliverable.id)
+            self._list.addItem(item)
+
+    def _on_new(self) -> None:
+        if self._current_project_id is None:
+            return
+        templates = self._tmpl_repo.list_all()
+        selected = SelectTemplatesDialog.ask(templates, self)
+        for tmpl in selected:
+            self._deliverable_repo.create(
+                project_id=self._current_project_id,
+                title=tmpl.title,
+                body=tmpl.template,
+                template_id=tmpl.id,
+            )
+        if selected:
+            self._refresh()
 
 
 class DeliverablesWidget(QWidget):
