@@ -21,6 +21,7 @@ from PySide6.QtWebChannel import QWebChannel
 from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog, SelectTemplatesDialog
 from horizon.deliverable import DeliverableRepository
+from horizon.project import ProjectRepository
 from horizon.deliverable_template import DeliverableTemplate, DeliverableTemplateRepository
 from horizon.image import ImageRepository
 from horizon.widgets.markdown import (
@@ -269,9 +270,12 @@ class DeliverableDetailWidget(QWidget):
 
 class DeliverablesWidget(QWidget):
     show_templates_requested = Signal()
+    deliverable_edit_requested = Signal(int)
 
-    def __init__(self, parent=None) -> None:
+    def __init__(self, deliverable_repo: DeliverableRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
+        self._deliverable_repo = deliverable_repo
+        self._project_repo = project_repo
 
         title = QLabel("Deliverables")
         font = title.font()
@@ -287,14 +291,41 @@ class DeliverablesWidget(QWidget):
         header_layout.addStretch()
         header_layout.addWidget(show_templates_btn)
 
-        placeholder = QLabel("Deliverables — coming soon")
-        placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._table = QTableWidget()
+        self._table.setColumnCount(3)
+        self._table.setHorizontalHeaderLabels(["Title", "Project", "Created"])
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.verticalHeader().setVisible(False)
+        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.cellDoubleClicked.connect(self._on_double_clicked)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         layout.addLayout(header_layout)
-        layout.addWidget(placeholder, stretch=1)
+        layout.addWidget(self._table, stretch=1)
+
+    def load(self) -> None:
+        project_names = {p.id: p.name for p in self._project_repo.list_all()}
+        deliverables = self._deliverable_repo.list_all()
+        self._table.setRowCount(len(deliverables))
+        for row, d in enumerate(deliverables):
+            title_item = QTableWidgetItem(d.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, d.id)
+            self._table.setItem(row, 0, title_item)
+            project_item = QTableWidgetItem(project_names.get(d.project_id, ""))
+            self._table.setItem(row, 1, project_item)
+            date_item = QTableWidgetItem(d.created_at.strftime("%Y-%m-%d %H:%M"))
+            self._table.setItem(row, 2, date_item)
+
+    def _on_double_clicked(self, row: int, _col: int) -> None:
+        item = self._table.item(row, 0)
+        if item is not None:
+            self.deliverable_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
 
 
 class DeliverableTemplatesListWidget(QWidget):

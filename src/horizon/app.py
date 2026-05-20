@@ -106,7 +106,7 @@ class MainWindow(QMainWindow):
         self._tags_widget = TagsWidget(self._tag_repo, self._note_repo, self._proj_repo, self._folder_repo)
         self._right_stack.addWidget(self._tags_widget)     # index 5
 
-        self._deliverables_widget = DeliverablesWidget()
+        self._deliverables_widget = DeliverablesWidget(self._deliverable_repo, self._proj_repo)
         self._right_stack.addWidget(self._deliverables_widget)   # index 6
 
         self._templates_list = DeliverableTemplatesListWidget(self._tmpl_repo)
@@ -145,6 +145,7 @@ class MainWindow(QMainWindow):
         self._note_detail.back_requested.connect(self._go_back_from_note)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
+        self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)
         self._templates_list.back_requested.connect(self._show_deliverables)
         self._templates_list.template_edit_requested.connect(self._open_template)
         self._template_detail.back_requested.connect(self._show_templates_list)
@@ -218,6 +219,7 @@ class MainWindow(QMainWindow):
 
     def _show_deliverables(self) -> None:
         self._project_list.clear_selection()
+        self._deliverables_widget.load()
         self._right_stack.setCurrentIndex(6)
 
     def _show_templates_list(self) -> None:
@@ -261,6 +263,15 @@ class MainWindow(QMainWindow):
         self._right_stack.setCurrentIndex(3)
 
     def _open_deliverable_from_project(self, deliverable_id: int) -> None:
+        self._deliverable_source = "project"
+        deliverable = self._deliverable_repo.get(deliverable_id)
+        if deliverable is None:
+            return
+        self._deliverable_detail.load_deliverable(deliverable)
+        self._right_stack.setCurrentIndex(9)
+
+    def _open_deliverable_from_list(self, deliverable_id: int) -> None:
+        self._deliverable_source = "list"
         deliverable = self._deliverable_repo.get(deliverable_id)
         if deliverable is None:
             return
@@ -268,7 +279,9 @@ class MainWindow(QMainWindow):
         self._right_stack.setCurrentIndex(9)
 
     def _go_back_from_deliverable(self) -> None:
-        if self._current_project is not None:
+        if getattr(self, "_deliverable_source", "project") == "list":
+            self._show_deliverables()
+        elif self._current_project is not None:
             self._show_project(self._current_project)
 
     def changeEvent(self, event) -> None:
