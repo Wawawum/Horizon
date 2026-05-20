@@ -37,6 +37,8 @@ from horizon.widgets.markdown import (
 class ProjectDeliverablesPanel(QWidget):
     """Panel displayed in the Deliverables tab of a project."""
 
+    deliverable_edit_requested = Signal(int)  # emits deliverable_id
+
     def __init__(self, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, parent=None) -> None:
         super().__init__(parent)
         self._deliverable_repo = deliverable_repo
@@ -61,6 +63,7 @@ class ProjectDeliverablesPanel(QWidget):
 
         self._list = QListWidget()
         self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
+        self._list.itemDoubleClicked.connect(self._on_double_clicked)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 4, 8)
@@ -81,6 +84,11 @@ class ProjectDeliverablesPanel(QWidget):
             item.setData(Qt.ItemDataRole.UserRole, deliverable.id)
             self._list.addItem(item)
 
+    def _on_double_clicked(self, item: QListWidgetItem) -> None:
+        deliverable_id = item.data(Qt.ItemDataRole.UserRole)
+        if deliverable_id is not None:
+            self.deliverable_edit_requested.emit(deliverable_id)
+
     def _on_new(self) -> None:
         if self._current_project_id is None:
             return
@@ -95,6 +103,160 @@ class ProjectDeliverablesPanel(QWidget):
             )
         if selected:
             self._refresh()
+
+
+class DeliverableDetailWidget(QWidget):
+    """Full-screen editor for a single project deliverable."""
+
+    back_requested = Signal()
+
+    def __init__(
+        self,
+        deliverable_repo: DeliverableRepository,
+        image_repo: ImageRepository,
+        parent=None,
+    ) -> None:
+        super().__init__(parent)
+        self._deliverable_repo = deliverable_repo
+        self._image_repo = image_repo
+        self._current: "Deliverable | None" = None  # type: ignore[name-defined]
+        self._body_raw: str = ""
+
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setSingleShot(True)
+        self._autosave_timer.setInterval(5000)
+        self._autosave_timer.timeout.connect(self._autosave)
+
+        self._status_clear_timer = QTimer(self)
+        self._status_clear_timer.setSingleShot(True)
+        self._status_clear_timer.setInterval(2000)
+        self._status_clear_timer.timeout.connect(self._clear_status)
+
+        # ── Header ────────────────────────────────────────────────────────
+        back_btn = QPushButton("← Back")
+        back_btn.clicked.connect(self._on_back)
+
+        self._title_edit = QLineEdit()
+        self._title_edit.setMaxLength(255)
+        font = self._title_edit.font()
+        font.setPointSize(font.pointSize() + 4)
+        font.setBold(True)
+        self._title_edit.setFont(font)
+        self._title_edit.setFrame(False)
+        self._title_edit.editingFinished.connect(self._save_title)
+
+        _t = _theme.current()
+        self._delete_btn = QPushButton("Delete")
+        self._delete_btn.setStyleSheet(
+            f"color: {_t.delete_btn_text}; background-color: {_t.delete_btn_bg};"
+        )
+        self._delete_btn.clicked.connect(self._on_delete)
+
+        header_layout = QHBoxLayout()
+        header_layout.addWidget(back_btn)
+        header_layout.addWidget(self._title_edit, stretch=1)
+        header_layout.addWidget(self._delete_btn)
+
+        sep = QFrame()
+        sep.setFrameShape(QFrame.Shape.HLine)
+        sep.setFrameShadow(QFrame.Shadow.Sunken)
+
+        # ── Editor + Preview ──────────────────────────────────────────────
+        self._editor = MarkdownEditor(image_repo)
+        self._editor.setPlaceholderText("Write deliverable content here…")
+        self._editor.textChanged.connect(self._on_text_changed)
+
+        self._bridge = MarkdownBridge(self)
+        self._channel = QWebChannel(self)
+        self._channel.registerObject("bridge", self._bridge)
+
+        self._preview = QWebEngineView()
+        self._preview.page().setWebChannel(self._channel)
+        self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
+
+        self._splitter = QSplitter(Qt.Orientation.Horizontal)
+        self._splitter.addWidget(self._editor)
+        self._splitter.addWidget(self._preview)
+        self._splitter.setStretchFactor(0, 1)
+        self._splitter.setStretchFactor(1, 1)
+
+        self._status_label = QLabel("")
+        self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self._status_label.setStyleSheet("color: gray; font-size: 11px;")
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(16, 16, 16, 16)
+        layout.setSpacing(8)
+        layout.addLayout(header_layout)
+        layout.addWidget(sep)
+        layout.addWidget(self._splitter, stretch=1)
+        layout.addWidget(self._status_label)
+
+    def load_deliverable(self, deliverable) -> None:
+        self._autosave_timer.stop()
+        self._status_label.setText("")
+        self._current = deliverable
+        self._body_raw = deliverable.body
+
+        self._title_edit.setText(deliverable.title)
+
+        self._editor.blockSignals(True)
+        self._editor.setPlainText(self._body_raw)
+        self._editor.blockSignals(False)
+
+        self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+
+    def _on_text_changed(self) -> None:
+        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+        if self._current is not None:
+            self._autosave_timer.start()
+
+    def _autosave(self) -> None:
+        self._save_body(show_status=True)
+
+    def _clear_status(self) -> None:
+        self._status_label.setText("")
+
+    def _save_body(self, show_status: bool = False) -> None:
+        if self._current is None:
+            return
+        new_body = self._editor.toPlainText()
+        if new_body == self._body_raw:
+            return
+        self._autosave_timer.stop()
+        self._body_raw = new_body
+        self._current.body = self._body_raw
+        self._deliverable_repo.update(self._current)
+        if show_status:
+            self._status_label.setText("Saving…")
+            self._status_clear_timer.start()
+
+    def _save_title(self) -> None:
+        if self._current is None:
+            return
+        new_title = self._title_edit.text().strip()
+        if new_title:
+            self._current.title = new_title
+        self._title_edit.setText(self._current.title)
+        self._deliverable_repo.update(self._current)
+
+    def _on_delete(self) -> None:
+        if self._current is None:
+            return
+        from horizon.dialogs import ConfirmDialog
+        if ConfirmDialog.ask(
+            "Delete Deliverable",
+            f"Permanently delete \"{self._current.title}\"?\nThis cannot be undone.",
+            self,
+        ):
+            self._deliverable_repo.delete(self._current.id)
+            self._current = None
+            self.back_requested.emit()
+
+    def _on_back(self) -> None:
+        self._autosave_timer.stop()
+        self._save_body()
+        self.back_requested.emit()
 
 
 class DeliverablesWidget(QWidget):

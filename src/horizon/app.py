@@ -22,6 +22,7 @@ from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
 from horizon.widgets.deliverables import (
     DeliverablesWidget,
+    DeliverableDetailWidget,
     DeliverableTemplatesListWidget,
     DeliverableTemplateDetailWidget,
 )
@@ -114,6 +115,9 @@ class MainWindow(QMainWindow):
         self._template_detail = DeliverableTemplateDetailWidget(self._tmpl_repo, image_repo)
         self._right_stack.addWidget(self._template_detail)        # index 8
 
+        self._deliverable_detail = DeliverableDetailWidget(self._deliverable_repo, image_repo)
+        self._right_stack.addWidget(self._deliverable_detail)     # index 9
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -136,8 +140,10 @@ class MainWindow(QMainWindow):
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._tags_widget.note_edit_requested.connect(self._open_note_from_tags)
         self._project_detail.note_edit_requested.connect(self._open_note_from_project)
+        self._project_detail.deliverable_edit_requested.connect(self._open_deliverable_from_project)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._go_back_from_note)
+        self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._templates_list.back_requested.connect(self._show_deliverables)
         self._templates_list.template_edit_requested.connect(self._open_template)
@@ -253,6 +259,17 @@ class MainWindow(QMainWindow):
         projects = self._proj_repo.list_all()
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
+
+    def _open_deliverable_from_project(self, deliverable_id: int) -> None:
+        deliverable = self._deliverable_repo.get(deliverable_id)
+        if deliverable is None:
+            return
+        self._deliverable_detail.load_deliverable(deliverable)
+        self._right_stack.setCurrentIndex(9)
+
+    def _go_back_from_deliverable(self) -> None:
+        if self._current_project is not None:
+            self._show_project(self._current_project)
 
     def changeEvent(self, event) -> None:
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_title_bar"):

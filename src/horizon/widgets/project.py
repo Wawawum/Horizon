@@ -858,7 +858,8 @@ class _FolderTree(QTreeWidget):
 
 
 class ProjectDetailWidget(QWidget):
-    note_edit_requested = Signal(int)  # emits note_id
+    note_edit_requested = Signal(int)        # emits note_id
+    deliverable_edit_requested = Signal(int) # emits deliverable_id
     project_renamed = Signal()
 
     def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, prefs=None, parent=None) -> None:
@@ -1045,6 +1046,7 @@ class ProjectDetailWidget(QWidget):
 
         # Deliverables panel
         self._deliverables_panel = ProjectDeliverablesPanel(self._deliverable_repo, self._tmpl_repo)
+        self._deliverables_panel.deliverable_edit_requested.connect(self.deliverable_edit_requested)
 
         # Placeholder
         documents_placeholder = QLabel("Documents — coming soon")

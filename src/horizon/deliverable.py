@@ -43,6 +43,13 @@ class DeliverableRepository:
             for r in rows
         ]
 
+    def update(self, deliverable: "Deliverable") -> None:
+        self._db.conn.execute(
+            "UPDATE deliverables SET title = ?, body = ? WHERE id = ?",
+            (deliverable.title, deliverable.body, deliverable.id),
+        )
+        self._db.conn.commit()
+
     def delete(self, deliverable_id: int) -> None:
         self._db.conn.execute("DELETE FROM deliverables WHERE id = ?", (deliverable_id,))
         self._db.conn.commit()
