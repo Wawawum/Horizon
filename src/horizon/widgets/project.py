@@ -670,6 +670,65 @@ class HomeWidget(QWidget):
         self._task_repo.set_order_for_bucket(bucket, task_ids)
 
 
+class _VerticalTabButton(QPushButton):
+    """Bouton d'onglet vertical : même style que _NavButton, texte pivoté à 90°."""
+
+    def __init__(self, text: str, parent=None):
+        super().__init__(parent)
+        self._label = text
+        self.setCheckable(True)
+        self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setProperty("nav_btn", True)
+
+    def sizeHint(self) -> QSize:
+        fm = self.fontMetrics()
+        text_w = fm.horizontalAdvance(self._label)
+        text_h = fm.height()
+        return QSize(text_h + 16, text_w + 24)
+
+    def paintEvent(self, event):
+        super().paintEvent(event)  # background/border/radius via stylesheet
+        t = _theme.current()
+        color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
+        painter = QPainter(self)
+        painter.setPen(color)
+        painter.translate(self.width(), 0)
+        painter.rotate(90)
+        painter.drawText(
+            QRect(0, 0, self.height(), self.width()),
+            Qt.AlignmentFlag.AlignCenter,
+            self._label,
+        )
+        painter.end()
+
+
+class _VerticalTabBar(QWidget):
+    """Barre d'onglets verticale à droite du contenu."""
+
+    tab_changed = Signal(int)
+
+    def __init__(self, labels: list[str], parent=None):
+        super().__init__(parent)
+        self._buttons: list[_VerticalTabButton] = []
+        self._group = QButtonGroup(self)
+        self._group.setExclusive(True)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(4)
+
+        for i, label in enumerate(labels):
+            btn = _VerticalTabButton(label)
+            self._group.addButton(btn, i)
+            layout.addWidget(btn)
+            self._buttons.append(btn)
+
+        layout.addStretch()
+        self._buttons[0].setChecked(True)
+        self._group.idClicked.connect(self.tab_changed)
+
+
 # QTreeWidget item data roles for the notes panel folder tree
 _NOTE_NODE_DATA_ROLE   = Qt.ItemDataRole.UserRole        # folder_id or note_id
 _NOTE_NODE_TYPE_ROLE   = Qt.ItemDataRole.UserRole + 1   # "folder" | "note"
@@ -929,11 +988,12 @@ class ProjectDetailWidget(QWidget):
         self._task_view_stack.addWidget(self._kanban_board)
         tasks_panel_layout.addWidget(self._task_view_stack, stretch=1)
 
-        # ── Notes panel (right side of splitter) ─────────────────────────
-        notes_panel = QGroupBox("Notes")
-        notes_panel_layout = QVBoxLayout(notes_panel)
-        notes_panel_layout.setContentsMargins(8, 4, 8, 8)
-        notes_panel_layout.setSpacing(4)
+        # ── Right panel: Notes / Deliverables / Documents ─────────────────
+        # Notes content
+        notes_content = QWidget()
+        notes_content_layout = QVBoxLayout(notes_content)
+        notes_content_layout.setContentsMargins(8, 4, 4, 8)
+        notes_content_layout.setSpacing(4)
 
         notes_header = QHBoxLayout()
         notes_header.addStretch()
@@ -947,7 +1007,7 @@ class ProjectDetailWidget(QWidget):
         new_note_btn.setIconSize(_PLUS_ICON_SIZE)
         new_note_btn.clicked.connect(self._on_new_note)
         notes_header.addWidget(new_note_btn)
-        notes_panel_layout.addLayout(notes_header)
+        notes_content_layout.addLayout(notes_header)
 
         self._note_tree = _FolderTree()
         self._note_tree.setColumnCount(1)
@@ -960,12 +1020,34 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
         self._note_tree.folder_moved.connect(self._on_folder_moved)
         self._note_tree.note_moved.connect(self._on_note_moved)
-        notes_panel_layout.addWidget(self._note_tree, stretch=1)
+        notes_content_layout.addWidget(self._note_tree, stretch=1)
+
+        # Placeholders
+        deliverables_placeholder = QLabel("Deliverables — coming soon")
+        deliverables_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        documents_placeholder = QLabel("Documents — coming soon")
+        documents_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
+
+        # Stacked content + vertical tab bar
+        self._right_stack = QStackedWidget()
+        self._right_stack.addWidget(notes_content)           # index 0
+        self._right_stack.addWidget(deliverables_placeholder) # index 1
+        self._right_stack.addWidget(documents_placeholder)    # index 2
+
+        right_tab_bar = _VerticalTabBar(["Notes", "Deliverables", "Documents"])
+        right_tab_bar.tab_changed.connect(self._right_stack.setCurrentIndex)
+
+        right_panel = QWidget()
+        right_panel_layout = QHBoxLayout(right_panel)
+        right_panel_layout.setContentsMargins(0, 0, 0, 0)
+        right_panel_layout.setSpacing(0)
+        right_panel_layout.addWidget(self._right_stack, stretch=1)
+        right_panel_layout.addWidget(right_tab_bar)
 
         # ── Horizontal splitter holding both panels ───────────────────────
         h_splitter = QSplitter(Qt.Orientation.Horizontal)
         h_splitter.addWidget(tasks_panel)
-        h_splitter.addWidget(notes_panel)
+        h_splitter.addWidget(right_panel)
         h_splitter.setStretchFactor(0, 3)
         h_splitter.setStretchFactor(1, 2)
         h_splitter.setHandleWidth(16)
