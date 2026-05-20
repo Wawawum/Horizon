@@ -18,6 +18,12 @@ from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
 from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 from horizon.widgets.tags import TagsWidget
+from horizon.deliverable_template import DeliverableTemplateRepository
+from horizon.widgets.deliverables import (
+    DeliverablesWidget,
+    DeliverableTemplatesListWidget,
+    DeliverableTemplateDetailWidget,
+)
 
 
 def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
@@ -96,6 +102,17 @@ class MainWindow(QMainWindow):
         self._tags_widget = TagsWidget(self._tag_repo, self._note_repo, self._proj_repo, self._folder_repo)
         self._right_stack.addWidget(self._tags_widget)     # index 5
 
+        self._tmpl_repo = DeliverableTemplateRepository(db)
+
+        self._deliverables_widget = DeliverablesWidget()
+        self._right_stack.addWidget(self._deliverables_widget)   # index 6
+
+        self._templates_list = DeliverableTemplatesListWidget(self._tmpl_repo)
+        self._right_stack.addWidget(self._templates_list)         # index 7
+
+        self._template_detail = DeliverableTemplateDetailWidget(self._tmpl_repo, image_repo)
+        self._right_stack.addWidget(self._template_detail)        # index 8
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -114,11 +131,16 @@ class MainWindow(QMainWindow):
         self._project_list.project_selected.connect(self._show_project)
         self._project_list.notes_requested.connect(self._show_notes)
         self._project_list.tags_requested.connect(self._show_tags)
+        self._project_list.deliverables_requested.connect(self._show_deliverables)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._tags_widget.note_edit_requested.connect(self._open_note_from_tags)
         self._project_detail.note_edit_requested.connect(self._open_note_from_project)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._go_back_from_note)
+        self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
+        self._templates_list.back_requested.connect(self._show_deliverables)
+        self._templates_list.template_edit_requested.connect(self._open_template)
+        self._template_detail.back_requested.connect(self._show_templates_list)
 
         self._show_home()  # default view on startup
 
@@ -186,6 +208,22 @@ class MainWindow(QMainWindow):
         self._project_list.clear_selection()
         self._tags_widget.load()
         self._right_stack.setCurrentIndex(5)
+
+    def _show_deliverables(self) -> None:
+        self._project_list.clear_selection()
+        self._right_stack.setCurrentIndex(6)
+
+    def _show_templates_list(self) -> None:
+        self._project_list.clear_selection()
+        self._templates_list.load()
+        self._right_stack.setCurrentIndex(7)
+
+    def _open_template(self, template_id: int) -> None:
+        tmpl = self._tmpl_repo.get(template_id)
+        if tmpl is None:
+            return
+        self._template_detail.load_template(tmpl)
+        self._right_stack.setCurrentIndex(8)
 
     def _open_note_from_notes(self, note_id: int) -> None:
         self._note_source = "notes"
