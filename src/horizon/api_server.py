@@ -8,6 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from horizon.database import open_connection
+from horizon.deliverable import Deliverable, DeliverableRepository
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.search import SearchRepository
 from horizon.task import (
@@ -21,6 +22,7 @@ _NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
 _NOTES_VERSIONS_RE = re.compile(r"^/notes/(\d+)/versions$")
 _PROJECTS_ID_RE = re.compile(r"^/projects/(\d+)$")
 _TASKS_ID_RE = re.compile(r"^/tasks/(\d+)$")
+_DELIVERABLES_ID_RE = re.compile(r"^/deliverables/(\d+)$")
 
 
 def _port_file() -> Path:
@@ -50,6 +52,11 @@ def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
     if include_body:
         d["body"] = note.body
     return d
+
+
+def _deliverable_to_dict(d: Deliverable) -> dict:
+    return {"id": d.id, "project_id": d.project_id,
+            "template_id": d.template_id, "title": d.title, "body": d.body}
 
 
 def _task_to_dict(task: Task, subtasks: list) -> dict:
@@ -243,6 +250,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_update_note(int(m.group(1)))
         elif m := _TASKS_ID_RE.match(self.path):
             self._handle_update_task(int(m.group(1)))
+        elif m := _DELIVERABLES_ID_RE.match(self.path):
+            self._handle_update_deliverable(int(m.group(1)))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -480,6 +489,31 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to update task %d", task_id)
             self._send_json(500, {"error": "failed to update task"})
+        finally:
+            conn.close()
+
+    def _handle_update_deliverable(self, deliverable_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            repo = DeliverableRepository(_Db(conn))
+            deliverable = repo.get(deliverable_id)
+            if deliverable is None:
+                self._send_json(404, {"error": "deliverable not found"})
+                return
+            try:
+                body = self._read_json_body()
+            except (json.JSONDecodeError, ValueError):
+                self._send_json(400, {"error": "invalid JSON body"})
+                return
+            if "title" in body:
+                deliverable.title = body["title"]
+            if "body" in body:
+                deliverable.body = body["body"]
+            repo.update(deliverable)
+            self._send_json(200, _deliverable_to_dict(deliverable))
+        except Exception:
+            logger.exception("Failed to update deliverable %d", deliverable_id)
+            self._send_json(500, {"error": "failed to update deliverable"})
         finally:
             conn.close()
 

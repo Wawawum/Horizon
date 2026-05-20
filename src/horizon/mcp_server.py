@@ -140,6 +140,19 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="update_deliverable",
+            description="Update the title and/or body of a Horizon deliverable instance. Only provided fields are changed.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "deliverable_id": {"type": "integer", "description": "ID of the deliverable to update"},
+                    "title":          {"type": "string",  "description": "New title"},
+                    "body":           {"type": "string",  "description": "New body content (Markdown)"},
+                },
+                "required": ["deliverable_id"],
+            },
+        ),
+        types.Tool(
             name="update_task",
             description=(
                 "Update an existing Horizon task. Only provided fields are changed. "
@@ -307,6 +320,20 @@ async def _tool_list_note_versions(client: httpx.AsyncClient, arguments: dict) -
     return [types.TextContent(type="text", text=json.dumps(versions, ensure_ascii=False, indent=2))]
 
 
+async def _tool_update_deliverable(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    deliverable_id = arguments.get("deliverable_id")
+    if not isinstance(deliverable_id, int):
+        return [types.TextContent(type="text", text="Error: deliverable_id is required and must be an integer")]
+    payload = {k: v for k, v in arguments.items() if k in ("title", "body")}
+    put_resp = await client.put(f"/deliverables/{deliverable_id}", json=payload)
+    data = put_resp.json()
+    if put_resp.status_code == 404:
+        return [types.TextContent(type="text", text="Deliverable not found.")]
+    if put_resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
 async def _tool_create_task(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
     project_id = arguments.get("project_id")
     if not isinstance(project_id, int):
@@ -363,6 +390,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_update_note(client, arguments)
         elif name == "list_note_versions":
             return await _tool_list_note_versions(client, arguments)
+        elif name == "update_deliverable":
+            return await _tool_update_deliverable(client, arguments)
         elif name == "create_task":
             return await _tool_create_task(client, arguments)
         elif name == "update_task":

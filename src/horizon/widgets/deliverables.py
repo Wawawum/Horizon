@@ -136,6 +136,12 @@ class DeliverableDetailWidget(QWidget):
         back_btn = QPushButton("← Back")
         back_btn.clicked.connect(self._on_back)
 
+        self._id_label = QLabel()
+        id_font = self._id_label.font()
+        id_font.setPointSize(id_font.pointSize() + 4)
+        id_font.setBold(True)
+        self._id_label.setFont(id_font)
+
         self._title_edit = QLineEdit()
         self._title_edit.setMaxLength(255)
         font = self._title_edit.font()
@@ -154,6 +160,7 @@ class DeliverableDetailWidget(QWidget):
 
         header_layout = QHBoxLayout()
         header_layout.addWidget(back_btn)
+        header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._delete_btn)
 
@@ -198,6 +205,7 @@ class DeliverableDetailWidget(QWidget):
         self._current = deliverable
         self._body_raw = deliverable.body
 
+        self._id_label.setText(f"#{deliverable.id}" if deliverable.id is not None else "")
         self._title_edit.setText(deliverable.title)
 
         self._editor.blockSignals(True)
