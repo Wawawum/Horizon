@@ -145,6 +145,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_project_detail(int(m.group(1)))
         elif m := _TASKS_ID_RE.match(path):
             self._handle_task_detail(int(m.group(1)))
+        elif m := _DELIVERABLES_ID_RE.match(path):
+            self._handle_deliverable_detail(int(m.group(1)))
         else:
             self._send_json(404, {"error": "not found"})
 
@@ -489,6 +491,20 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to update task %d", task_id)
             self._send_json(500, {"error": "failed to update task"})
+        finally:
+            conn.close()
+
+    def _handle_deliverable_detail(self, deliverable_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            deliverable = DeliverableRepository(_Db(conn)).get(deliverable_id)
+            if deliverable is None:
+                self._send_json(404, {"error": "deliverable not found"})
+                return
+            self._send_json(200, _deliverable_to_dict(deliverable))
+        except Exception:
+            logger.exception("Failed to get deliverable %d", deliverable_id)
+            self._send_json(500, {"error": "failed to get deliverable"})
         finally:
             conn.close()
 

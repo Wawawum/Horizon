@@ -140,6 +140,17 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="get_deliverable",
+            description="Get the full content of a Horizon deliverable by its ID.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "deliverable_id": {"type": "integer", "description": "The deliverable ID"},
+                },
+                "required": ["deliverable_id"],
+            },
+        ),
+        types.Tool(
             name="update_deliverable",
             description="Update the title and/or body of a Horizon deliverable instance. Only provided fields are changed.",
             inputSchema={
@@ -320,6 +331,19 @@ async def _tool_list_note_versions(client: httpx.AsyncClient, arguments: dict) -
     return [types.TextContent(type="text", text=json.dumps(versions, ensure_ascii=False, indent=2))]
 
 
+async def _tool_get_deliverable(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    deliverable_id = arguments.get("deliverable_id")
+    if not isinstance(deliverable_id, int):
+        return [types.TextContent(type="text", text="Error: deliverable_id is required and must be an integer")]
+    resp = await client.get(f"/deliverables/{deliverable_id}")
+    data = resp.json()
+    if resp.status_code == 404:
+        return [types.TextContent(type="text", text="Deliverable not found.")]
+    if resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
+
+
 async def _tool_update_deliverable(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
     deliverable_id = arguments.get("deliverable_id")
     if not isinstance(deliverable_id, int):
@@ -390,6 +414,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_update_note(client, arguments)
         elif name == "list_note_versions":
             return await _tool_list_note_versions(client, arguments)
+        elif name == "get_deliverable":
+            return await _tool_get_deliverable(client, arguments)
         elif name == "update_deliverable":
             return await _tool_update_deliverable(client, arguments)
         elif name == "create_task":
