@@ -113,6 +113,7 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS deliverable_templates (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL CHECK(length(title) <= 255), template TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS deliverables (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, template_id INTEGER REFERENCES deliverable_templates(id) ON DELETE SET NULL, title TEXT NOT NULL CHECK(length(title) <= 255), body TEXT NOT NULL DEFAULT '')",
     "ALTER TABLE deliverables ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
+    "ALTER TABLE deliverables ADD COLUMN state TEXT NOT NULL DEFAULT 'New'",
 ]
 
 

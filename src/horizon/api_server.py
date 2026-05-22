@@ -8,7 +8,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 from horizon.database import open_connection
-from horizon.deliverable import Deliverable, DeliverableRepository
+from horizon.deliverable import Deliverable, DeliverableRepository, DeliverableState
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.search import SearchRepository
 from horizon.task import (
@@ -56,7 +56,8 @@ def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
 
 def _deliverable_to_dict(d: Deliverable) -> dict:
     return {"id": d.id, "project_id": d.project_id,
-            "template_id": d.template_id, "title": d.title, "body": d.body}
+            "template_id": d.template_id, "title": d.title, "body": d.body,
+            "state": d.state.value}
 
 
 def _task_to_dict(task: Task, subtasks: list) -> dict:
@@ -525,6 +526,12 @@ class _Handler(BaseHTTPRequestHandler):
                 deliverable.title = body["title"]
             if "body" in body:
                 deliverable.body = body["body"]
+            if "state" in body:
+                try:
+                    deliverable.state = DeliverableState(body["state"])
+                except ValueError:
+                    self._send_json(400, {"error": f"invalid state: {body['state']!r}"})
+                    return
             repo.update(deliverable)
             self._send_json(200, _deliverable_to_dict(deliverable))
         except Exception:

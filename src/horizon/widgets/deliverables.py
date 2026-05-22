@@ -1,13 +1,12 @@
 from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QComboBox,
     QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
     QLineEdit,
-    QListWidget,
-    QListWidgetItem,
     QPushButton,
     QSplitter,
     QTableWidget,
@@ -20,7 +19,7 @@ from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog, SelectTemplatesDialog
-from horizon.deliverable import DeliverableRepository
+from horizon.deliverable import DeliverableRepository, DeliverableState
 from horizon.project import ProjectRepository
 from horizon.deliverable_template import DeliverableTemplate, DeliverableTemplateRepository
 from horizon.image import ImageRepository
@@ -62,33 +61,43 @@ class ProjectDeliverablesPanel(QWidget):
         header.addStretch()
         header.addWidget(self._new_btn)
 
-        self._list = QListWidget()
-        self._list.setSelectionMode(QAbstractItemView.SelectionMode.SingleSelection)
-        self._list.itemDoubleClicked.connect(self._on_double_clicked)
+        self._table = QTableWidget()
+        self._table.setColumnCount(2)
+        self._table.setHorizontalHeaderLabels(["Title", "Status"])
+        self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._table.verticalHeader().setVisible(False)
+        self._table.horizontalHeader().setStretchLastSection(False)
+        self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
+        self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.cellDoubleClicked.connect(self._on_double_clicked)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(8, 4, 4, 8)
         layout.setSpacing(4)
         layout.addLayout(header)
-        layout.addWidget(self._list, stretch=1)
+        layout.addWidget(self._table, stretch=1)
 
     def load(self, project_id: int) -> None:
         self._current_project_id = project_id
         self._refresh()
 
     def _refresh(self) -> None:
-        self._list.clear()
+        self._table.setRowCount(0)
         if self._current_project_id is None:
             return
-        for deliverable in self._deliverable_repo.list_for_project(self._current_project_id):
-            item = QListWidgetItem(deliverable.title)
-            item.setData(Qt.ItemDataRole.UserRole, deliverable.id)
-            self._list.addItem(item)
+        deliverables = self._deliverable_repo.list_for_project(self._current_project_id)
+        self._table.setRowCount(len(deliverables))
+        for row, d in enumerate(deliverables):
+            title_item = QTableWidgetItem(d.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, d.id)
+            self._table.setItem(row, 0, title_item)
+            self._table.setItem(row, 1, QTableWidgetItem(d.state.value))
 
-    def _on_double_clicked(self, item: QListWidgetItem) -> None:
-        deliverable_id = item.data(Qt.ItemDataRole.UserRole)
-        if deliverable_id is not None:
-            self.deliverable_edit_requested.emit(deliverable_id)
+    def _on_double_clicked(self, row: int, _col: int) -> None:
+        item = self._table.item(row, 0)
+        if item is not None:
+            self.deliverable_edit_requested.emit(item.data(Qt.ItemDataRole.UserRole))
 
     def _on_new(self) -> None:
         if self._current_project_id is None:
@@ -152,6 +161,11 @@ class DeliverableDetailWidget(QWidget):
         self._title_edit.setFrame(False)
         self._title_edit.editingFinished.connect(self._save_title)
 
+        self._state_combo = QComboBox()
+        for s in DeliverableState:
+            self._state_combo.addItem(s.value, s)
+        self._state_combo.currentIndexChanged.connect(self._on_state_changed)
+
         _t = _theme.current()
         self._delete_btn = QPushButton("Delete")
         self._delete_btn.setStyleSheet(
@@ -163,6 +177,7 @@ class DeliverableDetailWidget(QWidget):
         header_layout.addWidget(back_btn)
         header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
+        header_layout.addWidget(self._state_combo)
         header_layout.addWidget(self._delete_btn)
 
         sep = QFrame()
@@ -209,11 +224,24 @@ class DeliverableDetailWidget(QWidget):
         self._id_label.setText(f"#{deliverable.id}" if deliverable.id is not None else "")
         self._title_edit.setText(deliverable.title)
 
+        self._state_combo.blockSignals(True)
+        for i in range(self._state_combo.count()):
+            if self._state_combo.itemData(i) == deliverable.state:
+                self._state_combo.setCurrentIndex(i)
+                break
+        self._state_combo.blockSignals(False)
+
         self._editor.blockSignals(True)
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
 
         self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+
+    def _on_state_changed(self, _index: int) -> None:
+        if self._current is None:
+            return
+        self._current.state = self._state_combo.currentData()
+        self._deliverable_repo.update(self._current)
 
     def _on_text_changed(self) -> None:
         self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
@@ -292,8 +320,8 @@ class DeliverablesWidget(QWidget):
         header_layout.addWidget(show_templates_btn)
 
         self._table = QTableWidget()
-        self._table.setColumnCount(3)
-        self._table.setHorizontalHeaderLabels(["Title", "Project", "Created"])
+        self._table.setColumnCount(4)
+        self._table.setHorizontalHeaderLabels(["Title", "Project", "Status", "Created"])
         self._table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._table.verticalHeader().setVisible(False)
@@ -301,6 +329,7 @@ class DeliverablesWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
+        self._table.horizontalHeader().setSectionResizeMode(3, QHeaderView.ResizeMode.ResizeToContents)
         self._table.cellDoubleClicked.connect(self._on_double_clicked)
 
         layout = QVBoxLayout(self)
@@ -319,8 +348,10 @@ class DeliverablesWidget(QWidget):
             self._table.setItem(row, 0, title_item)
             project_item = QTableWidgetItem(project_names.get(d.project_id, ""))
             self._table.setItem(row, 1, project_item)
+            state_item = QTableWidgetItem(d.state.value)
+            self._table.setItem(row, 2, state_item)
             date_item = QTableWidgetItem(d.created_at.strftime("%Y-%m-%d %H:%M"))
-            self._table.setItem(row, 2, date_item)
+            self._table.setItem(row, 3, date_item)
 
     def _on_double_clicked(self, row: int, _col: int) -> None:
         item = self._table.item(row, 0)

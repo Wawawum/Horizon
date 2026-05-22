@@ -152,13 +152,14 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="update_deliverable",
-            description="Update the title and/or body of a Horizon deliverable instance. Only provided fields are changed.",
+            description="Update the title, body and/or state of a Horizon deliverable instance. Only provided fields are changed.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "deliverable_id": {"type": "integer", "description": "ID of the deliverable to update"},
                     "title":          {"type": "string",  "description": "New title"},
                     "body":           {"type": "string",  "description": "New body content (Markdown)"},
+                    "state":          {"type": "string",  "description": "New state", "enum": ["New", "In-Progress", "On hold", "Completed", "Cancelled"]},
                 },
                 "required": ["deliverable_id"],
             },
@@ -348,7 +349,7 @@ async def _tool_update_deliverable(client: httpx.AsyncClient, arguments: dict) -
     deliverable_id = arguments.get("deliverable_id")
     if not isinstance(deliverable_id, int):
         return [types.TextContent(type="text", text="Error: deliverable_id is required and must be an integer")]
-    payload = {k: v for k, v in arguments.items() if k in ("title", "body")}
+    payload = {k: v for k, v in arguments.items() if k in ("title", "body", "state")}
     put_resp = await client.put(f"/deliverables/{deliverable_id}", json=payload)
     data = put_resp.json()
     if put_resp.status_code == 404:
