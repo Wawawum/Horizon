@@ -143,6 +143,7 @@ class MainWindow(QMainWindow):
         self._project_detail.deliverable_edit_requested.connect(self._open_deliverable_from_project)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._go_back_from_note)
+        self._note_detail.note_link_clicked.connect(self._show_note_detail)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)

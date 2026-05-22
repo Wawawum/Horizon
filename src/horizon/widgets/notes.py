@@ -116,6 +116,7 @@ class NotesListWidget(QWidget):
 
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
+    note_link_clicked = Signal(int)  # emits note_id
 
     def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, parent=None) -> None:
         super().__init__(parent)
@@ -319,7 +320,7 @@ class NoteDetailWidget(QWidget):
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
 
-        self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+        self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
 
     def _populate_folder_combo(self, project_id: int, selected_folder_id: int | None) -> None:
         self._folder_combo.clear()
@@ -370,7 +371,7 @@ class NoteDetailWidget(QWidget):
             self._status_clear_timer.start()
 
     def _on_editor_text_changed(self) -> None:
-        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo, self._note_repo))
         if self._current_note is not None and self._viewing_version is None:
             self._autosave_timer.start()
 
@@ -380,9 +381,17 @@ class NoteDetailWidget(QWidget):
         dlg.exec()
 
     def _on_link_clicked(self, url: str) -> None:
-        from PySide6.QtGui import QDesktopServices
         from PySide6.QtCore import QUrl
-        QDesktopServices.openUrl(QUrl(url))
+        parsed = QUrl(url)
+        if parsed.scheme() == "horizon" and parsed.host() == "note":
+            try:
+                note_id = int(parsed.path().lstrip("/"))
+            except ValueError:
+                return
+            self.note_link_clicked.emit(note_id)
+            return
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(parsed)
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self._prefs is not None:
@@ -454,7 +463,7 @@ class NoteDetailWidget(QWidget):
             self._editor.blockSignals(True)
             self._editor.setPlainText(self._body_raw)
             self._editor.blockSignals(False)
-            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
             self._history_list.blockSignals(True)
             if self._history_list.count() > 0:
                 self._history_list.setCurrentRow(0)
@@ -504,7 +513,7 @@ class NoteDetailWidget(QWidget):
             self._editor.blockSignals(True)
             self._editor.setPlainText(self._body_raw)
             self._editor.blockSignals(False)
-            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
+            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
         else:
             self._viewing_version = version
             self._readonly_banner.setVisible(True)
@@ -513,4 +522,4 @@ class NoteDetailWidget(QWidget):
             self._editor.blockSignals(True)
             self._editor.setPlainText(version.body)
             self._editor.blockSignals(False)
-            self._bridge.push_html(_markdown_to_html(version.body, self._image_repo))
+            self._bridge.push_html(_markdown_to_html(version.body, self._image_repo, self._note_repo))

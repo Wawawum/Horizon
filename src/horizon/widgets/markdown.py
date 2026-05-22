@@ -49,6 +49,13 @@ _CODE_PH_RE = re.compile(r'HORIZONCODEBLOCK(\d+)END')
 _MD_IMG_RE  = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
 _HTML_PH_RE = re.compile(r'HORIZONIMG(\d+)END')
 
+_WIKILINK_RE = re.compile(
+    r'\[\[(\d+)\|([^\]]+)\]\]'   # [[42|Texte]] : group 1=id, group 2=label
+    r'|\[\[(\d+)\]\]'             # [[42]]       : group 3=id
+    r'|\[\[([^\]]+)\]\]'          # [[Titre]]    : group 4=title
+)
+_WIKILINK_PH_RE = re.compile(r'HORIZONWIKILINK(\d+)END')
+
 # Blockquote extraction: one or more "> …" lines + optional {.is-TYPE} annotation
 _BQ_EXTRACT_RE   = re.compile(
     r'((?:^[ \t]*>[ \t]?[^\n]*\n?)+)(?:\{\.is-(info|success|warning|danger)\}[ \t]*\n?)?',
@@ -106,6 +113,9 @@ def _make_preview_html() -> str:
   .mermaid {{ margin-bottom: 0.8em; overflow-x: auto; text-align: center; }}
   .mermaid svg {{ max-width: 100%; height: auto; }}
   .tag {{ display: inline-block; background-color: {t.accent_color}22; border: 1px solid {t.accent_color}; border-radius: 4px; padding: 1px 7px; color: {t.accent_color}; font-size: 0.85em; font-weight: 500; white-space: nowrap; }}
+  a.note-link {{ color: {t.accent_color}; text-decoration: none; border-bottom: 1px dashed {t.accent_color}; }}
+  a.note-link:hover {{ border-bottom-style: solid; }}
+  .note-link-broken {{ color: {t.preview_text}; opacity: 0.45; text-decoration: line-through; cursor: default; font-style: italic; }}
 </style>
 <link rel="stylesheet" href="{_HIGHLIGHT_CSS_LIGHT_URL if t.name == 'light' else _HIGHLIGHT_CSS_DARK_URL}">
 <style>
@@ -235,6 +245,47 @@ def _inject_tags(html: str, tags: list[str]) -> str:
     return html
 
 
+def _extract_wikilinks(
+    md: str,
+    title_to_id: dict[str, int],
+    id_exists: set[int],
+) -> tuple[str, list[str]]:
+    links: list[str] = []
+
+    def replace(m: re.Match) -> str:
+        idx = len(links)
+        if m.group(1) is not None:        # [[42|Texte]]
+            note_id = int(m.group(1))
+            label = m.group(2).strip()
+        elif m.group(3) is not None:      # [[42]]
+            note_id = int(m.group(3))
+            label = f"#{note_id}"
+        else:                             # [[Titre]]
+            title = m.group(4)
+            label = title
+            # If multiple notes share the same title, the most recently inserted wins
+            note_id = title_to_id.get(title.lower(), -1)
+
+        if note_id > 0 and note_id in id_exists:
+            html = (
+                f'<a href="horizon://note/{note_id}" '
+                f'class="note-link">{_html_mod.escape(label)}</a>'
+            )
+        else:
+            html = f'<span class="note-link-broken">{_html_mod.escape(label)}</span>'
+
+        links.append(html)
+        return f'HORIZONWIKILINK{idx}END'
+
+    return _WIKILINK_RE.sub(replace, md), links
+
+
+def _inject_wikilinks(html: str, links: list[str]) -> str:
+    def replace(m: re.Match) -> str:
+        return links[int(m.group(1))]
+    return _WIKILINK_PH_RE.sub(replace, html)
+
+
 def _extract_blockquotes(md: str) -> tuple[str, list[tuple[list[str], str | None]]]:
     bq_list: list[tuple[list[str], str | None]] = []
 
@@ -339,8 +390,19 @@ def _inject_mermaid(html: str, diagrams: list[str]) -> str:
     return html
 
 
-def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) -> str:
+def _markdown_to_html(
+    markdown: str,
+    image_repo: ImageRepository | None = None,
+    note_repo=None,   # NoteRepository | None
+) -> str:
     images: dict[int, bytes | None] = {}
+
+    _title_to_id: dict[str, int] = {}
+    _id_exists: set[int] = set()
+    if note_repo is not None:
+        for _note in note_repo.list_all():
+            _title_to_id[_note.title.lower()] = _note.id
+            _id_exists.add(_note.id)
 
     if image_repo is not None:
         def _extract(m: re.Match) -> str:
@@ -354,6 +416,7 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     markdown, inline_tags = _extract_tags(markdown)
     markdown, diagrams = _extract_mermaid(markdown)
     markdown, code_blocks = _extract_code_blocks(markdown)
+    markdown, wikilinks = _extract_wikilinks(markdown, _title_to_id, _id_exists)
     markdown, bq_list = _extract_blockquotes(markdown)
     markdown = _add_hard_breaks(markdown)
 
@@ -367,6 +430,7 @@ def _markdown_to_html(markdown: str, image_repo: ImageRepository | None = None) 
     html = _inject_mermaid(html, diagrams)
     html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
     html = _inject_tags(html, inline_tags)
+    html = _inject_wikilinks(html, wikilinks)
 
     if images:
         def _inject(m: re.Match) -> str:
