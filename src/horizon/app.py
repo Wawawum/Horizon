@@ -1,7 +1,7 @@
 import ctypes
 import ctypes.wintypes
 
-from PySide6.QtCore import QEvent, QPoint, Qt
+from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
@@ -26,6 +26,31 @@ from horizon.widgets.deliverables import (
     DeliverableTemplatesListWidget,
     DeliverableTemplateDetailWidget,
 )
+from horizon.toast import ToastNotification
+
+# ── Pin-window hotkey Win32 constants ─────────────────────────────────────────
+_WM_HOTKEY      = 0x0312
+_MOD_ALT        = 0x0001
+_MOD_CONTROL    = 0x0002
+_MOD_SHIFT      = 0x0004
+_MOD_WIN        = 0x0008
+_GWL_EXSTYLE    = -20
+_WS_EX_TOPMOST  = 0x00000008
+_HWND_TOPMOST   = ctypes.c_void_p(-1)
+_HWND_NOTOPMOST = ctypes.c_void_p(-2)
+_SWP_NOSIZE     = 0x0001
+_SWP_NOMOVE     = 0x0002
+_SWP_NOACTIVATE = 0x0010
+_PIN_HOTKEY_ID  = 1
+
+_MOD_MAP = {"alt": _MOD_ALT, "ctrl": _MOD_CONTROL, "shift": _MOD_SHIFT, "win": _MOD_WIN}
+
+
+def _modifiers_to_flags(modifiers: list[str]) -> int:
+    result = 0
+    for m in modifiers:
+        result |= _MOD_MAP.get(m.lower(), 0)
+    return result
 
 
 def _build_meeting_note_body(meeting: CalendarMeeting) -> str:
@@ -168,6 +193,44 @@ class MainWindow(QMainWindow):
         if saved:
             self._splitter.setSizes(saved)
 
+        self._pin_toast: ToastNotification | None = None
+        self._register_pin_hotkey()
+
+    def _register_pin_hotkey(self) -> None:
+        hk = self._prefs.pin_hotkey
+        mods = _modifiers_to_flags(hk["modifiers"])
+        vk = hk["vk"]
+        hwnd = int(self.winId())
+        ctypes.windll.user32.UnregisterHotKey(hwnd, _PIN_HOTKEY_ID)
+        ok = ctypes.windll.user32.RegisterHotKey(hwnd, _PIN_HOTKEY_ID, mods, vk)
+        if not ok:
+            import sys
+            print(
+                f"[Horizon] Avertissement : impossible d'enregistrer le raccourci "
+                f"(modifiers={mods:#x}, vk={vk}). Un autre programme utilise peut-être cette combinaison.",
+                file=sys.stderr,
+            )
+
+    def _on_pin_hotkey(self) -> None:
+        user32 = ctypes.windll.user32
+        target = user32.GetForegroundWindow()
+        if not target:
+            return
+        ex_style = user32.GetWindowLongW(target, _GWL_EXSTYLE)
+        if ex_style & _WS_EX_TOPMOST:
+            insert_after = _HWND_NOTOPMOST
+            label = "Désépinglé"
+        else:
+            insert_after = _HWND_TOPMOST
+            label = "Épinglé"
+        user32.SetWindowPos(target, insert_after, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+        if self._pin_toast is not None:
+            try:
+                self._pin_toast.close()
+            except RuntimeError:
+                pass
+        self._pin_toast = ToastNotification(label)
+
     def _on_search(self, query: str, mode: str = "all") -> None:
         results = self._search_repo.search(query, mode)
         self._search_results.load_results(query, results)
@@ -294,6 +357,9 @@ class MainWindow(QMainWindow):
     def nativeEvent(self, event_type, message):
         if event_type == b"windows_generic_MSG":
             msg = ctypes.wintypes.MSG.from_address(int(message))
+            if msg.message == _WM_HOTKEY and msg.wParam == _PIN_HOTKEY_ID:
+                self._on_pin_hotkey()
+                return True, 0
             if msg.message == 0x0083 and msg.wParam:  # WM_NCCALCSIZE — hide native frame
                 if self.isMaximized():
                     # When maximized with WS_THICKFRAME, Windows offsets the window by the
@@ -339,6 +405,7 @@ class MainWindow(QMainWindow):
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:
+        ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
         self._prefs.window_maximized = self.isMaximized()
         if not self.isMaximized():
             self._prefs.window_size = (self.width(), self.height())

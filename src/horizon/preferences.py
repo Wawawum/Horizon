@@ -77,3 +77,12 @@ class Preferences:
     def api_port(self, value: int) -> None:
         self._data.setdefault("api", {})
         self._data["api"]["port"] = value
+
+    @property
+    def pin_hotkey(self) -> dict:
+        default = {"modifiers": ["win", "ctrl"], "vk": 84}  # Win+Ctrl+T
+        return self._data.get("pin_hotkey", default)
+
+    @pin_hotkey.setter
+    def pin_hotkey(self, value: dict) -> None:
+        self._data["pin_hotkey"] = value
