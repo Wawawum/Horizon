@@ -1042,6 +1042,8 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
         self._note_tree.folder_moved.connect(self._on_folder_moved)
         self._note_tree.note_moved.connect(self._on_note_moved)
+        self._note_tree.itemExpanded.connect(self._on_folder_expanded)
+        self._note_tree.itemCollapsed.connect(self._on_folder_collapsed)
         notes_content_layout.addWidget(self._note_tree, stretch=1)
 
         # Deliverables panel
@@ -1305,7 +1307,6 @@ class ProjectDetailWidget(QWidget):
         all_folders = self._folder_repo.list_for_project(project_id)
         notes_by_folder = self._index_notes_by_folder(notes)
         self._build_note_folder_subtree(None, all_folders, None, notes_by_folder)
-        self._note_tree.expandAll()
 
     def _index_notes_by_folder(self, notes) -> dict:
         index: dict = {}
@@ -1327,7 +1328,10 @@ class ProjectDetailWidget(QWidget):
             folder_item.setIcon(0, _folder_icon())
             folder_item.setData(0, _NOTE_NODE_DATA_ROLE, folder.id)
             folder_item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_FOLDER)
-            folder_item.setExpanded(True)
+            if self._prefs is not None and self._current_project_id is not None:
+                folder_item.setExpanded(self._prefs.get_folder_expanded(self._current_project_id, folder.id))
+            else:
+                folder_item.setExpanded(True)
 
             self._build_note_folder_subtree(folder_item, all_folders, folder.id, notes_by_folder)
 
@@ -1348,6 +1352,18 @@ class ProjectDetailWidget(QWidget):
         item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_NOTE)
         item.setData(0, _NOTE_NODE_FOLDER_ROLE, note.folder_id)
         return item
+
+    def _on_folder_expanded(self, item) -> None:
+        if item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+            return
+        if self._prefs is not None and self._current_project_id is not None:
+            self._prefs.set_folder_expanded(self._current_project_id, item.data(0, _NOTE_NODE_DATA_ROLE), True)
+
+    def _on_folder_collapsed(self, item) -> None:
+        if item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+            return
+        if self._prefs is not None and self._current_project_id is not None:
+            self._prefs.set_folder_expanded(self._current_project_id, item.data(0, _NOTE_NODE_DATA_ROLE), False)
 
     def _on_note_selection_changed(self, current, _previous) -> None:
         if current is None:

@@ -45,6 +45,18 @@ class Preferences:
         self._data.setdefault("project_views", {})
         self._data["project_views"][str(project_id)] = index
 
+    def get_folder_expanded(self, project_id: int, folder_id: int) -> bool:
+        return (
+            self._data
+            .get("folder_states", {})
+            .get(str(project_id), {})
+            .get(str(folder_id), True)
+        )
+
+    def set_folder_expanded(self, project_id: int, folder_id: int, expanded: bool) -> None:
+        self._data.setdefault("folder_states", {}).setdefault(str(project_id), {})[str(folder_id)] = expanded
+        self.save()
+
     @property
     def splitter_sizes(self) -> list[int] | None:
         return self._data.get("splitter_sizes")
