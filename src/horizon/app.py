@@ -28,6 +28,7 @@ from horizon.widgets.deliverables import (
 )
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
+from horizon.note_window import NoteWindow
 
 # ── Pin-window hotkey Win32 constants ─────────────────────────────────────────
 _WM_HOTKEY      = 0x0312
@@ -97,7 +98,9 @@ class MainWindow(QMainWindow):
         self._folder_repo = FolderRepository(db)
         self._tag_repo = TagRepository(db)
         image_repo = ImageRepository(db)
+        self._image_repo = image_repo
         self._search_repo = SearchRepository(db)
+        self._note_windows: dict[int, NoteWindow] = {}
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
         self._note_source: str = "notes"
@@ -164,12 +167,14 @@ class MainWindow(QMainWindow):
         self._project_list.tags_requested.connect(self._show_tags)
         self._project_list.deliverables_requested.connect(self._show_deliverables)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
+        self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
         self._tags_widget.note_edit_requested.connect(self._open_note_from_tags)
         self._project_detail.note_edit_requested.connect(self._open_note_from_project)
         self._project_detail.deliverable_edit_requested.connect(self._open_deliverable_from_project)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._go_back_from_note)
         self._note_detail.note_link_clicked.connect(self._show_note_detail)
+        self._note_detail.open_in_window_requested.connect(self._open_note_in_window)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)
@@ -342,6 +347,22 @@ class MainWindow(QMainWindow):
         projects = self._proj_repo.list_all()
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
+
+    def _open_note_in_window(self, note_id: int) -> None:
+        if note_id in self._note_windows:
+            win = self._note_windows[note_id]
+            win.raise_()
+            win.activateWindow()
+            return
+        win = NoteWindow(
+            self._note_repo, self._proj_repo, self._folder_repo,
+            self._image_repo, self._note_version_repo, self._prefs,
+        )
+        win.load_note(note_id)
+        win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        win.destroyed.connect(lambda _, nid=note_id: self._note_windows.pop(nid, None))
+        self._note_windows[note_id] = win
+        win.show()
 
     def _open_deliverable_from_project(self, deliverable_id: int) -> None:
         self._deliverable_source = "project"

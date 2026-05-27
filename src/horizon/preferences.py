@@ -91,6 +91,17 @@ class Preferences:
         self._data["api"]["port"] = value
 
     @property
+    def note_window_size(self) -> tuple[int, int]:
+        w = self._data.get("note_window", {})
+        return w.get("width", 900), w.get("height", 700)
+
+    @note_window_size.setter
+    def note_window_size(self, value: tuple[int, int]) -> None:
+        self._data.setdefault("note_window", {})
+        self._data["note_window"]["width"] = value[0]
+        self._data["note_window"]["height"] = value[1]
+
+    @property
     def pin_hotkey(self) -> dict:
         default = {"modifiers": ["win", "ctrl"], "vk": 84}  # Win+Ctrl+T
         return self._data.get("pin_hotkey", default)

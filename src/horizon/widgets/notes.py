@@ -43,6 +43,7 @@ from horizon.widgets.markdown import (
 
 class NotesListWidget(QWidget):
     note_edit_requested = Signal(int)  # emits note_id
+    note_open_in_window_requested = Signal(int)  # emits note_id
 
     def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
@@ -80,6 +81,8 @@ class NotesListWidget(QWidget):
         self._table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.ResizeToContents)
         self._table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.ResizeToContents)
         self._table.cellDoubleClicked.connect(self._on_double_clicked)
+        self._table.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self._table.customContextMenuRequested.connect(self._on_context_menu)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
@@ -113,12 +116,32 @@ class NotesListWidget(QWidget):
         self.load()
         self.note_edit_requested.emit(note.id)
 
+    def _on_context_menu(self, pos) -> None:
+        from PySide6.QtWidgets import QMenu
+        item = self._table.itemAt(pos)
+        if item is None:
+            return
+        row = self._table.row(item)
+        note_id = self._table.item(row, 0).data(Qt.ItemDataRole.UserRole)
+        if note_id is None:
+            return
+        menu = QMenu(self)
+        open_action = menu.addAction("Ouvrir")
+        window_action = menu.addAction("Ouvrir dans une fenêtre")
+        action = menu.exec(self._table.viewport().mapToGlobal(pos))
+        if action == open_action:
+            self.note_edit_requested.emit(note_id)
+        elif action == window_action:
+            self.note_open_in_window_requested.emit(note_id)
+
 
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
     note_link_clicked = Signal(int)  # emits note_id
+    open_in_window_requested = Signal(int)  # emits note_id
+    title_changed = Signal(str)  # emits new title after save
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, windowed: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
@@ -143,9 +166,16 @@ class NoteDetailWidget(QWidget):
         self._status_clear_timer.setInterval(2000)
         self._status_clear_timer.timeout.connect(self._clear_status)
 
+        self._windowed = windowed
+
         back_btn = QPushButton("← Back")
         self._back_btn = back_btn
         self._back_btn.clicked.connect(self._on_back_clicked)
+
+        self._window_btn = QPushButton("⧉ Fenêtre")
+        self._window_btn.setToolTip("Ouvrir dans une fenêtre séparée")
+        self._window_btn.clicked.connect(self._on_open_in_window)
+        self._window_btn.setVisible(not windowed)
 
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
@@ -190,6 +220,7 @@ class NoteDetailWidget(QWidget):
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._archive_cb)
         header_layout.addWidget(self._delete_btn)
+        header_layout.addWidget(self._window_btn)
         header_layout.addWidget(back_btn)
 
         project_row = QHBoxLayout()
@@ -403,12 +434,17 @@ class NoteDetailWidget(QWidget):
             if saved:
                 self._body_splitter.setSizes(saved)
 
+    def _on_open_in_window(self) -> None:
+        if self._current_note is not None:
+            self.open_in_window_requested.emit(self._current_note.id)
+
     def _save_title(self) -> None:
         if self._current_note is None:
             return
         self._current_note.title = self._title_edit.text().strip() or self._current_note.title
         self._title_edit.setText(self._current_note.title)
         self._note_repo.update(self._current_note)
+        self.title_changed.emit(self._current_note.title)
 
     def _on_archive_changed(self) -> None:
         if self._current_note is None:
