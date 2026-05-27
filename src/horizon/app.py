@@ -27,6 +27,7 @@ from horizon.widgets.deliverables import (
     DeliverableTemplateDetailWidget,
 )
 from horizon.toast import ToastNotification
+from horizon.pin_border import PinBorderOverlay
 
 # ── Pin-window hotkey Win32 constants ─────────────────────────────────────────
 _WM_HOTKEY      = 0x0312
@@ -194,6 +195,7 @@ class MainWindow(QMainWindow):
             self._splitter.setSizes(saved)
 
         self._pin_toast: ToastNotification | None = None
+        self._pin_borders: dict[int, PinBorderOverlay] = {}
         self._register_pin_hotkey()
 
     def _register_pin_hotkey(self) -> None:
@@ -218,12 +220,27 @@ class MainWindow(QMainWindow):
             return
         ex_style = user32.GetWindowLongW(target, _GWL_EXSTYLE)
         if ex_style & _WS_EX_TOPMOST:
-            insert_after = _HWND_NOTOPMOST
+            # Unpin: remove topmost and destroy the border overlay
+            user32.SetWindowPos(target, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+            overlay = self._pin_borders.pop(target, None)
+            if overlay is not None:
+                try:
+                    overlay.close()
+                except RuntimeError:
+                    pass
             label = "Désépinglé"
         else:
-            insert_after = _HWND_TOPMOST
+            # Pin: set topmost and create the border overlay
+            user32.SetWindowPos(target, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+            # Replace any stale overlay for this HWND
+            old = self._pin_borders.pop(target, None)
+            if old is not None:
+                try:
+                    old.close()
+                except RuntimeError:
+                    pass
+            self._pin_borders[target] = PinBorderOverlay(target)
             label = "Épinglé"
-        user32.SetWindowPos(target, insert_after, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
         if self._pin_toast is not None:
             try:
                 self._pin_toast.close()
@@ -406,6 +423,12 @@ class MainWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
+        for overlay in list(self._pin_borders.values()):
+            try:
+                overlay.close()
+            except RuntimeError:
+                pass
+        self._pin_borders.clear()
         self._prefs.window_maximized = self.isMaximized()
         if not self.isMaximized():
             self._prefs.window_size = (self.width(), self.height())
