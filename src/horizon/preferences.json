@@ -1,8 +1,8 @@
 {
   "window": {
     "maximized": false,
-    "width": 1664,
-    "height": 989
+    "width": 1680,
+    "height": 1028
   },
   "project_views": {
     "1": 1,
@@ -11,7 +11,7 @@
   "theme": "light",
   "splitter_sizes": [
     256,
-    1206,
+    1222,
     200
   ]
 }

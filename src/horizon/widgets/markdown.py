@@ -110,7 +110,10 @@ def _make_preview_html() -> str:
   a {{ color: {t.preview_link}; }}
   table {{ border-collapse: collapse; margin-bottom: 0.8em; width: 100%; }}
   td {{ border: 1px solid {t.preview_border}; padding: 6px 12px; }}
-  .mermaid {{ margin-bottom: 0.8em; overflow-x: auto; text-align: center; }}
+  .mermaid-wrapper {{ margin-bottom: 0.8em; }}
+  .mermaid-open-btn {{ display: inline-block; margin-bottom: 4px; cursor: pointer; background: {t.accent_color}22; border: 1px solid {t.accent_color}; color: {t.accent_color}; border-radius: 4px; padding: 2px 8px; font-size: 0.82em; font-family: inherit; }}
+  .mermaid-open-btn:hover {{ background: {t.accent_color}44; }}
+  .mermaid {{ overflow-x: auto; text-align: center; }}
   .mermaid svg {{ max-width: 100%; height: auto; }}
   .tag {{ display: inline-block; background-color: {t.accent_color}22; border: 1px solid {t.accent_color}; border-radius: 4px; padding: 1px 7px; color: {t.accent_color}; font-size: 0.85em; font-weight: 500; white-space: nowrap; }}
   a.note-link {{ color: {t.accent_color}; text-decoration: none; border-bottom: 1px dashed {t.accent_color}; }}
@@ -176,9 +179,29 @@ def _make_preview_html() -> str:
     document.querySelectorAll('#content pre code').forEach(function(el) {{
       hljs.highlightElement(el);
     }});
+    function addMermaidButtons() {{
+      document.querySelectorAll('#content .mermaid').forEach(function(div) {{
+        if (div.dataset.btnBound) return;
+        div.dataset.btnBound = '1';
+        var source = div.dataset.mermaidSource || '';
+        var wrapper = document.createElement('div');
+        wrapper.className = 'mermaid-wrapper';
+        div.parentNode.insertBefore(wrapper, div);
+        wrapper.appendChild(div);
+        var btn = document.createElement('button');
+        btn.textContent = '⛶ Plein écran';
+        btn.className = 'mermaid-open-btn';
+        btn.addEventListener('click', function() {{
+          window.bridge.open_mermaid(source);
+        }});
+        wrapper.insertBefore(btn, div);
+      }});
+    }}
     var nodes = document.getElementById('content').querySelectorAll('.mermaid');
     if (nodes.length > 0) {{
-      mermaid.run({{ nodes: nodes }}).catch(function(err) {{
+      mermaid.run({{ nodes: nodes }}).then(function() {{
+        addMermaidButtons();
+      }}).catch(function(err) {{
         console.warn('Mermaid render error:', err);
       }});
     }}
@@ -379,7 +402,7 @@ def _inject_mermaid(html: str, diagrams: list[str]) -> str:
             replacement = ''
         else:
             escaped = _html_mod.escape(stripped)
-            replacement = f'<div class="mermaid">{escaped}</div>'
+            replacement = f'<div class="mermaid" data-mermaid-source="{escaped}">{escaped}</div>'
         html = re.sub(
             r'<p[^>]*>\s*' + re.escape(placeholder) + r'\s*</p>',
             replacement,
@@ -446,9 +469,10 @@ def _markdown_to_html(
 
 
 class MarkdownBridge(QObject):
-    html_changed  = Signal(str)
-    image_clicked = Signal(str)
-    link_clicked  = Signal(str)
+    html_changed           = Signal(str)
+    image_clicked          = Signal(str)
+    link_clicked           = Signal(str)
+    mermaid_open_requested = Signal(str)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -469,6 +493,10 @@ class MarkdownBridge(QObject):
     @Slot(str)
     def open_link(self, url: str) -> None:
         self.link_clicked.emit(url)
+
+    @Slot(str)
+    def open_mermaid(self, source: str) -> None:
+        self.mermaid_open_requested.emit(source)
 
 
 class MarkdownEditor(QPlainTextEdit):

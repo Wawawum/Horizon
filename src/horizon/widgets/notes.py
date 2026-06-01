@@ -250,6 +250,7 @@ class NoteDetailWidget(QWidget):
         self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
         self._bridge.image_clicked.connect(self._on_image_clicked)
         self._bridge.link_clicked.connect(self._on_link_clicked)
+        self._bridge.mermaid_open_requested.connect(self._on_open_mermaid)
 
         self._editor.textChanged.connect(self._on_editor_text_changed)
 
@@ -410,6 +411,11 @@ class NoteDetailWidget(QWidget):
         from horizon.dialogs import ImageViewerDialog
         dlg = ImageViewerDialog(data_uri, parent=self)
         dlg.exec()
+
+    def _on_open_mermaid(self, source: str) -> None:
+        from horizon.dialogs import MermaidViewerDialog
+        dlg = MermaidViewerDialog(source, parent=self)
+        dlg.show()
 
     def _on_link_clicked(self, url: str) -> None:
         from PySide6.QtCore import QUrl

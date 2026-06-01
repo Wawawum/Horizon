@@ -1,6 +1,8 @@
 import re as _re
+from pathlib import Path
 
-from PySide6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, QTimer, Qt
+from PySide6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, QTimer, QUrl, Qt
+from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -848,3 +850,135 @@ class SelectTemplatesDialog(QDialog):
         if dlg.exec() == QDialog.DialogCode.Accepted:
             return dlg.selected_templates()
         return []
+
+
+_MERMAID_JS_PATH = Path(__file__).parent / "resources" / "mermaid.min.js"
+
+
+class MermaidViewerDialog(QDialog):
+    _ZOOM_IN  = 1.2
+    _ZOOM_OUT = 1.0 / 1.2
+
+    def __init__(self, source: str, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.resize(900, 700)
+
+        self._view = QWebEngineView(self)
+        self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
+
+        zoom_in_btn  = QPushButton("+")
+        zoom_out_btn = QPushButton("−")
+        fit_btn      = QPushButton("Fit")
+        for btn in (zoom_in_btn, zoom_out_btn, fit_btn):
+            btn.setFixedWidth(40)
+
+        zoom_in_btn.clicked.connect(lambda: self._run_js("zoomIn()"))
+        zoom_out_btn.clicked.connect(lambda: self._run_js("zoomOut()"))
+        fit_btn.clicked.connect(lambda: self._run_js("resetView()"))
+
+        toolbar = QHBoxLayout()
+        toolbar.setContentsMargins(8, 6, 8, 6)
+        toolbar.addWidget(zoom_out_btn)
+        toolbar.addWidget(zoom_in_btn)
+        toolbar.addWidget(fit_btn)
+        toolbar.addStretch()
+
+        content = QWidget()
+        cl = QVBoxLayout(content)
+        cl.setContentsMargins(0, 0, 0, 0)
+        cl.setSpacing(0)
+        cl.addLayout(toolbar)
+        cl.addWidget(self._view, stretch=1)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="Diagramme", show_min_max=True))
+        layout.addWidget(content)
+
+        html = self._build_html(source)
+        self._view.setHtml(html, QUrl(_MERMAID_JS_PATH.parent.as_uri() + "/"))
+
+    def _run_js(self, code: str) -> None:
+        self._view.page().runJavaScript(code)
+
+    @staticmethod
+    def _build_html(source: str) -> str:
+        import html as _h
+        from horizon import theme as _t_mod
+        t = _t_mod.current()
+        mermaid_theme = "default" if t.name == "light" else "dark"
+        mermaid_js_url = _MERMAID_JS_PATH.as_uri()
+        escaped_source = _h.escape(source)
+        return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  * {{ box-sizing: border-box; margin: 0; padding: 0; }}
+  body {{ background: {t.preview_bg}; overflow: hidden; width: 100vw; height: 100vh; }}
+  #viewport {{ width: 100%; height: 100%; overflow: hidden; position: relative; cursor: grab; user-select: none; }}
+  #viewport.grabbing {{ cursor: grabbing; }}
+  #canvas {{
+    position: absolute;
+    top: 50%; left: 50%;
+    transform-origin: center center;
+    transform: translate(-50%, -50%) scale(1);
+  }}
+  .mermaid svg {{ display: block; }}
+</style>
+</head>
+<body>
+<div id="viewport">
+  <div id="canvas">
+    <div class="mermaid">{escaped_source}</div>
+  </div>
+</div>
+<script src="{mermaid_js_url}"></script>
+<script>
+  mermaid.initialize({{ startOnLoad: false, theme: '{mermaid_theme}', securityLevel: 'loose' }});
+
+  var scale = 1, tx = 0, ty = 0;
+  var canvas = document.getElementById('canvas');
+  var viewport = document.getElementById('viewport');
+
+  function applyTransform() {{
+    canvas.style.transform =
+      'translate(calc(-50% + ' + tx + 'px), calc(-50% + ' + ty + 'px)) scale(' + scale + ')';
+  }}
+
+  function zoomIn()    {{ scale = Math.min(scale * 1.2, 20); applyTransform(); }}
+  function zoomOut()   {{ scale = Math.max(scale / 1.2, 0.05); applyTransform(); }}
+  function resetView() {{ scale = 1; tx = 0; ty = 0; applyTransform(); }}
+
+  viewport.addEventListener('wheel', function(e) {{
+    e.preventDefault();
+    var factor = e.deltaY < 0 ? 1.1 : 1 / 1.1;
+    scale = Math.min(Math.max(scale * factor, 0.05), 20);
+    applyTransform();
+  }}, {{ passive: false }});
+
+  var dragging = false, lastX = 0, lastY = 0;
+  viewport.addEventListener('mousedown', function(e) {{
+    if (e.button !== 0) return;
+    dragging = true; lastX = e.clientX; lastY = e.clientY;
+    viewport.classList.add('grabbing');
+  }});
+  window.addEventListener('mousemove', function(e) {{
+    if (!dragging) return;
+    tx += e.clientX - lastX; ty += e.clientY - lastY;
+    lastX = e.clientX; lastY = e.clientY;
+    applyTransform();
+  }});
+  window.addEventListener('mouseup', function() {{
+    dragging = false; viewport.classList.remove('grabbing');
+  }});
+  viewport.addEventListener('dblclick', function() {{ resetView(); }});
+
+  mermaid.run({{ nodes: [document.querySelector('.mermaid')] }}).catch(function(e) {{
+    console.warn('Mermaid:', e);
+  }});
+</script>
+</body>
+</html>"""
