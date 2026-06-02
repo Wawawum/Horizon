@@ -161,6 +161,15 @@ class NoteDetailWidget(QWidget):
         self._autosave_timer.setInterval(5000)
         self._autosave_timer.timeout.connect(self._autosave)
 
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.setInterval(300)
+        self._render_timer.timeout.connect(self._do_render)
+
+        self._note_title_to_id: dict[str, int] = {}
+        self._note_id_exists: set[int] = set()
+        self._image_cache: dict[int, bytes | None] = {}
+
         self._status_clear_timer = QTimer(self)
         self._status_clear_timer.setSingleShot(True)
         self._status_clear_timer.setInterval(2000)
@@ -352,7 +361,16 @@ class NoteDetailWidget(QWidget):
         self._editor.setPlainText(self._body_raw)
         self._editor.blockSignals(False)
 
-        self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
+        self._image_cache = {}
+        self._refresh_note_cache()
+        self._bridge.push_html(_markdown_to_html(
+            self._body_raw,
+            self._image_repo,
+            self._note_repo,
+            title_to_id=self._note_title_to_id,
+            id_exists=self._note_id_exists,
+            image_cache=self._image_cache,
+        ))
 
     def _populate_folder_combo(self, project_id: int, selected_folder_id: int | None) -> None:
         self._folder_combo.clear()
@@ -402,10 +420,26 @@ class NoteDetailWidget(QWidget):
             self._status_label.setText("Saving...")
             self._status_clear_timer.start()
 
+    def _refresh_note_cache(self) -> None:
+        if self._note_repo is not None:
+            notes = self._note_repo.list_all()
+            self._note_title_to_id = {n.title.lower(): n.id for n in notes}
+            self._note_id_exists = {n.id for n in notes}
+
     def _on_editor_text_changed(self) -> None:
-        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo, self._note_repo))
+        self._render_timer.start()
         if self._current_note is not None and self._viewing_version is None:
             self._autosave_timer.start()
+
+    def _do_render(self) -> None:
+        self._bridge.push_html(_markdown_to_html(
+            self._editor.toPlainText(),
+            self._image_repo,
+            self._note_repo,
+            title_to_id=self._note_title_to_id,
+            id_exists=self._note_id_exists,
+            image_cache=self._image_cache,
+        ))
 
     def _on_image_clicked(self, data_uri: str) -> None:
         from horizon.dialogs import ImageViewerDialog
@@ -450,6 +484,7 @@ class NoteDetailWidget(QWidget):
         self._current_note.title = self._title_edit.text().strip() or self._current_note.title
         self._title_edit.setText(self._current_note.title)
         self._note_repo.update(self._current_note)
+        self._refresh_note_cache()
         self.title_changed.emit(self._current_note.title)
 
     def _on_archive_changed(self) -> None:

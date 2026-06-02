@@ -171,6 +171,7 @@ def _make_preview_html() -> str:
     }});
   }}
   function applyHtml(html) {{
+    var scrollY = window.scrollY;
     var doc = new DOMParser().parseFromString(html, 'text/html');
     document.getElementById('content').innerHTML = doc.body ? doc.body.innerHTML : html;
     styleTableHeaders();
@@ -205,6 +206,9 @@ def _make_preview_html() -> str:
         console.warn('Mermaid render error:', err);
       }});
     }}
+    requestAnimationFrame(function() {{
+      window.scrollTo(0, scrollY);
+    }});
   }}
   new QWebChannel(qt.webChannelTransport, function(channel) {{
     window.bridge = channel.objects.bridge;
@@ -417,15 +421,24 @@ def _markdown_to_html(
     markdown: str,
     image_repo: ImageRepository | None = None,
     note_repo=None,   # NoteRepository | None
+    title_to_id: dict[str, int] | None = None,
+    id_exists: set[int] | None = None,
+    image_cache: dict[int, bytes | None] | None = None,
 ) -> str:
-    images: dict[int, bytes | None] = {}
+    # Use pre-computed note maps when provided to avoid hitting the DB on every render
+    if title_to_id is not None and id_exists is not None:
+        _title_to_id = title_to_id
+        _id_exists = id_exists
+    else:
+        _title_to_id = {}
+        _id_exists = set()
+        if note_repo is not None:
+            for _note in note_repo.list_all():
+                _title_to_id[_note.title.lower()] = _note.id
+                _id_exists.add(_note.id)
 
-    _title_to_id: dict[str, int] = {}
-    _id_exists: set[int] = set()
-    if note_repo is not None:
-        for _note in note_repo.list_all():
-            _title_to_id[_note.title.lower()] = _note.id
-            _id_exists.add(_note.id)
+    # image_cache is mutated in-place so the caller accumulates loaded images across renders
+    images: dict[int, bytes | None] = image_cache if image_cache is not None else {}
 
     if image_repo is not None:
         def _extract(m: re.Match) -> str:
