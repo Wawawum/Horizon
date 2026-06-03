@@ -224,6 +224,11 @@ class NoteDetailWidget(QWidget):
         self._view_source_btn = QPushButton("View source")
         self._view_source_btn.clicked.connect(self._on_view_source)
 
+        self._presentation_btn = QPushButton("⊞ Présentation")
+        self._presentation_btn.setCheckable(True)
+        self._presentation_btn.setToolTip("Cacher l'éditeur pour la présentation")
+        self._presentation_btn.clicked.connect(self._on_toggle_presentation)
+
         header_layout = QHBoxLayout()
         header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
@@ -241,6 +246,7 @@ class NoteDetailWidget(QWidget):
         project_row.addStretch()
         project_row.addWidget(self._history_btn)
         project_row.addWidget(self._view_source_btn)
+        project_row.addWidget(self._presentation_btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
@@ -561,6 +567,9 @@ class NoteDetailWidget(QWidget):
         self._history_panel.setVisible(checked)
         if checked and self._current_note is not None:
             self._load_history()
+
+    def _on_toggle_presentation(self, checked: bool) -> None:
+        self._editor.setVisible(not checked)
 
     def _load_history(self) -> None:
         if self._version_repo is None or self._current_note is None:
