@@ -71,6 +71,15 @@ _BLOCK_LINE_RE   = re.compile(r'^(#{1,6} |> ?|[-*+] |\d+\. |    |\t|```|~~~|\|)'
 # Detect standalone horizontal-rule lines (---, ***, ___, with optional spaces)
 _HR_LINE_RE      = re.compile(r'^[-*_](\s*[-*_]){2,}\s*$')
 
+# HTML block extraction: tag opening at the start of a line
+_HTML_BLOCK_OPEN_RE = re.compile(r'^[ \t]*<([A-Za-z][A-Za-z0-9\-]*)', re.MULTILINE)
+_HTML_BLOCK_PH_RE   = re.compile(r'HORIZONHTMLBLOCK(\d+)END')
+
+_HTML_VOID_ELEMENTS = frozenset({
+    'area', 'base', 'br', 'col', 'embed', 'hr', 'img', 'input',
+    'link', 'meta', 'param', 'source', 'track', 'wbr',
+})
+
 
 def _make_preview_html() -> str:
     t = _theme.current()
@@ -417,6 +426,76 @@ def _inject_mermaid(html: str, diagrams: list[str]) -> str:
     return html
 
 
+def _extract_html_blocks(md: str) -> tuple[str, list[str]]:
+    blocks: list[str] = []
+    result_parts: list[str] = []
+    pos = 0
+
+    while pos < len(md):
+        m = _HTML_BLOCK_OPEN_RE.search(md, pos)
+        if m is None:
+            result_parts.append(md[pos:])
+            break
+
+        tag_name    = m.group(1).lower()
+        block_start = m.start()
+        result_parts.append(md[pos:block_start])
+
+        if tag_name in _HTML_VOID_ELEMENTS:
+            line_end = md.find('\n', block_start)
+            line_end = (line_end + 1) if line_end != -1 else len(md)
+            idx = len(blocks)
+            blocks.append(md[block_start:line_end])
+            result_parts.append(f'\nHORIZONHTMLBLOCK{idx}END\n\n')
+            pos = line_end
+            continue
+
+        open_re    = re.compile(r'<' + re.escape(tag_name) + r'(?=[>\s/])', re.IGNORECASE)
+        close_re   = re.compile(r'</' + re.escape(tag_name) + r'\s*>', re.IGNORECASE)
+        depth      = 0
+        search_pos = block_start
+        block_end  = None
+
+        while search_pos < len(md):
+            mo = open_re.search(md, search_pos)
+            mc = close_re.search(md, search_pos)
+            if mo is None and mc is None:
+                block_end = len(md)
+                break
+            elif mc is None or (mo is not None and mo.start() < mc.start()):
+                depth += 1
+                search_pos = mo.end()
+            else:
+                if depth <= 1:
+                    block_end = mc.end()
+                    break
+                depth -= 1
+                search_pos = mc.end()
+
+        if block_end is None:
+            block_end = len(md)
+
+        idx = len(blocks)
+        blocks.append(md[block_start:block_end])
+        result_parts.append(f'\nHORIZONHTMLBLOCK{idx}END\n\n')
+        pos = block_end
+
+    return ''.join(result_parts), blocks
+
+
+def _inject_html_blocks(html: str, blocks: list[str]) -> str:
+    for idx, raw_html in enumerate(blocks):
+        placeholder = f'HORIZONHTMLBLOCK{idx}END'
+        replaced = re.sub(
+            r'<p[^>]*>\s*' + re.escape(placeholder) + r'\s*</p>',
+            raw_html,
+            html,
+            flags=re.IGNORECASE,
+        )
+        html = replaced if replaced != html else html.replace(placeholder, raw_html)
+    return html
+
+
 def _markdown_to_html(
     markdown: str,
     image_repo: ImageRepository | None = None,
@@ -449,6 +528,7 @@ def _markdown_to_html(
 
         markdown = _MD_IMG_RE.sub(_extract, markdown)
 
+    markdown, html_blocks = _extract_html_blocks(markdown)
     markdown, inline_tags = _extract_tags(markdown)
     markdown, diagrams = _extract_mermaid(markdown)
     markdown, code_blocks = _extract_code_blocks(markdown)
@@ -477,6 +557,8 @@ def _markdown_to_html(
             return f'<img src="data:image/png;base64,{b64}" style="max-width:100%;">'
 
         html = _HTML_PH_RE.sub(_inject, html)
+
+    html = _inject_html_blocks(html, html_blocks)
 
     return html
 
