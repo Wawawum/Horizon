@@ -38,6 +38,7 @@ from horizon.widgets.markdown import (
     _markdown_to_html,
     MarkdownBridge,
     MarkdownEditor,
+    MarkdownToolbar,
 )
 
 
@@ -256,6 +257,8 @@ class NoteDetailWidget(QWidget):
         self._editor.setPlaceholderText("Write markdown here…")
         self._editor.installEventFilter(self)
 
+        self._toolbar = MarkdownToolbar(self._editor)
+
         self._bridge = MarkdownBridge(self)
         self._channel = QWebChannel(self)
 
@@ -280,8 +283,15 @@ class NoteDetailWidget(QWidget):
         _hp_layout.addWidget(self._history_list)
         self._history_panel.setVisible(False)
 
+        self._editor_container = QWidget()
+        editor_layout = QHBoxLayout(self._editor_container)
+        editor_layout.setContentsMargins(0, 0, 0, 0)
+        editor_layout.setSpacing(4)
+        editor_layout.addWidget(self._toolbar)
+        editor_layout.addWidget(self._editor, stretch=1)
+
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._body_splitter.addWidget(self._editor)
+        self._body_splitter.addWidget(self._editor_container)
         self._body_splitter.addWidget(self._preview)
         self._body_splitter.addWidget(self._history_panel)
         self._body_splitter.setStretchFactor(0, 1)
@@ -334,6 +344,7 @@ class NoteDetailWidget(QWidget):
         self._readonly_banner.setVisible(False)
         self._back_btn.setText("← Back")
         self._editor.setReadOnly(False)
+        self._toolbar.setEnabled(True)
         if self._history_btn.isChecked():
             self._history_btn.setChecked(False)
             self._history_panel.setVisible(False)
@@ -543,6 +554,7 @@ class NoteDetailWidget(QWidget):
             self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
             self._editor.setReadOnly(False)
+            self._toolbar.setEnabled(True)
             self._editor.blockSignals(True)
             self._editor.setPlainText(self._body_raw)
             self._editor.blockSignals(False)
@@ -569,7 +581,7 @@ class NoteDetailWidget(QWidget):
             self._load_history()
 
     def _on_toggle_presentation(self, checked: bool) -> None:
-        self._editor.setVisible(not checked)
+        self._editor_container.setVisible(not checked)
 
     def _load_history(self) -> None:
         if self._version_repo is None or self._current_note is None:
@@ -596,6 +608,7 @@ class NoteDetailWidget(QWidget):
             self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
             self._editor.setReadOnly(False)
+            self._toolbar.setEnabled(True)
             self._editor.blockSignals(True)
             self._editor.setPlainText(self._body_raw)
             self._editor.blockSignals(False)
@@ -605,6 +618,7 @@ class NoteDetailWidget(QWidget):
             self._readonly_banner.setVisible(True)
             self._back_btn.setText("← Return to current")
             self._editor.setReadOnly(True)
+            self._toolbar.setEnabled(False)
             self._editor.blockSignals(True)
             self._editor.setPlainText(version.body)
             self._editor.blockSignals(False)

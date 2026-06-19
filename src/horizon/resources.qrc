@@ -10,5 +10,19 @@
         <file alias="folder_cyan.svg">resources/folder_cyan.svg</file>
         <file alias="pencil_cyan.svg">resources/pencil_cyan.svg</file>
         <file alias="trash_cyan.svg">resources/trash_cyan.svg</file>
+        <file alias="heading1_cyan.svg">resources/heading1_cyan.svg</file>
+        <file alias="heading2_cyan.svg">resources/heading2_cyan.svg</file>
+        <file alias="heading3_cyan.svg">resources/heading3_cyan.svg</file>
+        <file alias="heading4_cyan.svg">resources/heading4_cyan.svg</file>
+        <file alias="bullet_list_cyan.svg">resources/bullet_list_cyan.svg</file>
+        <file alias="bold_cyan.svg">resources/bold_cyan.svg</file>
+        <file alias="italic_cyan.svg">resources/italic_cyan.svg</file>
+        <file alias="underline_cyan.svg">resources/underline_cyan.svg</file>
+        <file alias="strikethrough_cyan.svg">resources/strikethrough_cyan.svg</file>
+        <file alias="table_cyan.svg">resources/table_cyan.svg</file>
+        <file alias="link_external_cyan.svg">resources/link_external_cyan.svg</file>
+        <file alias="link_internal_cyan.svg">resources/link_internal_cyan.svg</file>
+        <file alias="mermaid_cyan.svg">resources/mermaid_cyan.svg</file>
+        <file alias="code_cyan.svg">resources/code_cyan.svg</file>
     </qresource>
 </RCC>
