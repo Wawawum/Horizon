@@ -142,6 +142,26 @@ class NoteRepository:
         TagRepository(self._db).set_for_note(note.id, _extract_tag_names(note.body))
         self._db.conn.commit()
 
+    def find_referencing_image(self, image_id: int) -> list["Note"]:
+        pattern = f"%horizon-image://{image_id})%"
+        rows = self._db.conn.execute(
+            "SELECT id, project_id, title, body, dt, archived, folder_id"
+            " FROM notes WHERE body LIKE ?",
+            (pattern,),
+        ).fetchall()
+        return [
+            Note(
+                id=row["id"],
+                project_id=row["project_id"],
+                title=row["title"],
+                body=row["body"],
+                dt=datetime.fromisoformat(row["dt"]),
+                archived=bool(row["archived"]),
+                folder_id=row["folder_id"],
+            )
+            for row in rows
+        ]
+
     def delete(self, note_id: int) -> None:
         self._db.conn.execute("DELETE FROM notes WHERE id = ?", (note_id,))
         self._db.conn.execute(

@@ -147,20 +147,12 @@ class MediaWidget(QWidget):
         if reply != QMessageBox.StandardButton.Yes:
             return
 
-        results = self._search_repo.search(f"horizon-image://{image_id}", mode="all")
-        for result in results:
-            if result.type != "note":
-                continue
-            note = self._note_repo.get(result.entity_id)
-            if note is None:
-                continue
-            new_body = _IMG_REF_RE.sub(
-                lambda m: "" if int(m.group(1)) == image_id else m.group(0),
+        for note in self._note_repo.find_referencing_image(image_id):
+            note.body = _IMG_REF_RE.sub(
+                lambda m, _id=image_id: "" if int(m.group(1)) == _id else m.group(0),
                 note.body,
             )
-            if new_body != note.body:
-                note.body = new_body
-                self._note_repo.update(note)
+            self._note_repo.update(note)
 
         self._image_repo.delete(image_id)
         self.load()

@@ -861,30 +861,26 @@ class ImageViewerDialog(QDialog):
 
     def _load_related_notes(self) -> None:
         self._notes_table.setRowCount(0)
-        results = self._search_repo.search(
-            f"horizon-image://{self._image_id}", mode="all"
-        )
-        notes = [r for r in results if r.type == "note"]
-        if not notes:
-            self._notes_table.setRowCount(1)
-            self._notes_table.setItem(0, 0, QTableWidgetItem(""))
-            self._notes_table.setItem(0, 1, QTableWidgetItem("No related notes found."))
+        if self._note_repo is None:
             return
 
         project_names: dict[int, str] = {}
         if self._proj_repo is not None:
             project_names = {p.id: p.name for p in self._proj_repo.list_all()}
 
+        notes = self._note_repo.find_referencing_image(self._image_id)
+        if not notes:
+            self._notes_table.setRowCount(1)
+            self._notes_table.setItem(0, 0, QTableWidgetItem(""))
+            self._notes_table.setItem(0, 1, QTableWidgetItem("No related notes found."))
+            return
+
         self._notes_table.setRowCount(len(notes))
-        for row, result in enumerate(notes):
-            project_name = ""
-            if self._note_repo is not None:
-                note = self._note_repo.get(result.entity_id)
-                if note is not None and note.project_id is not None:
-                    project_name = project_names.get(note.project_id, "")
+        for row, note in enumerate(notes):
+            project_name = project_names.get(note.project_id, "") if note.project_id else ""
             self._notes_table.setItem(row, 0, QTableWidgetItem(project_name))
-            title_item = QTableWidgetItem(result.title)
-            title_item.setData(Qt.ItemDataRole.UserRole, result.entity_id)
+            title_item = QTableWidgetItem(note.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, note.id)
             self._notes_table.setItem(row, 1, title_item)
 
 
