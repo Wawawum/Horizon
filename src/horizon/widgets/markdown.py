@@ -71,6 +71,14 @@ _BLOCK_LINE_RE   = re.compile(r'^(#{1,6} |> ?|[-*+] |\d+\. |    |\t|```|~~~|\|)'
 # Detect standalone horizontal-rule lines (---, ***, ___, with optional spaces)
 _HR_LINE_RE      = re.compile(r'^[-*_](\s*[-*_]){2,}\s*$')
 
+# Footnote inline reference: [^label] — but not [^label]: (definition)
+_FOOTNOTE_REF_RE = re.compile(r'\[\^([A-Za-z0-9_-]+)\](?!\:)')
+# Footnote definition: [^label]: text, with optional indented continuation lines
+_FOOTNOTE_DEF_RE = re.compile(
+    r'^\[\^([A-Za-z0-9_-]+)\]:\s*(.*(?:\n(?:    |\t)[^\n]*)*)',
+    re.MULTILINE,
+)
+
 # HTML block extraction: tag opening at the start of a line
 _HTML_BLOCK_OPEN_RE = re.compile(r'^[ \t]*<([A-Za-z][A-Za-z0-9\-]*)', re.MULTILINE)
 _HTML_BLOCK_PH_RE   = re.compile(r'HORIZONHTMLBLOCK(\d+)END')
@@ -128,6 +136,12 @@ def _make_preview_html() -> str:
   a.note-link {{ color: {t.accent_color}; text-decoration: none; border-bottom: 1px dashed {t.accent_color}; }}
   a.note-link:hover {{ border-bottom-style: solid; }}
   .note-link-broken {{ color: {t.preview_text}; opacity: 0.45; text-decoration: line-through; cursor: default; font-style: italic; }}
+  sup.footnote-ref a {{ color: {t.preview_link}; text-decoration: none; }}
+  .footnotes {{ margin-top: 2em; font-size: 0.9em; opacity: 0.8; }}
+  .footnotes hr.footnotes-sep {{ margin-bottom: 0.8em; }}
+  .footnotes-list {{ padding-left: 1.5em; }}
+  .footnotes-list li {{ margin-bottom: 0.4em; }}
+  .footnote-backref {{ color: {t.preview_link}; text-decoration: none; margin-left: 0.3em; }}
 </style>
 <link rel="stylesheet" href="{_HIGHLIGHT_CSS_LIGHT_URL if t.name == 'light' else _HIGHLIGHT_CSS_DARK_URL}">
 <style>
@@ -496,6 +510,75 @@ def _inject_html_blocks(html: str, blocks: list[str]) -> str:
     return html
 
 
+def _extract_footnotes(md: str) -> tuple[str, list[tuple[str, str]]]:
+    defs: dict[str, str] = {}
+
+    def collect_def(m: re.Match) -> str:
+        label = m.group(1)
+        raw = m.group(2)
+        # Strip continuation indent (4 spaces or tab)
+        content = re.sub(r'\n(?:    |\t)', '\n', raw).strip()
+        defs[label] = content
+        return ''
+
+    md = _FOOTNOTE_DEF_RE.sub(collect_def, md)
+
+    refs: list[tuple[str, str]] = []
+    label_to_num: dict[str, int] = {}
+
+    def replace_ref(m: re.Match) -> str:
+        label = m.group(1)
+        if label not in label_to_num:
+            label_to_num[label] = len(refs) + 1
+            refs.append((label, defs.get(label, '')))
+        return f'HORIZONFNREF{label_to_num[label]}END'
+
+    md = _FOOTNOTE_REF_RE.sub(replace_ref, md)
+    return md, refs
+
+
+def _inject_footnotes(html: str, refs: list[tuple[str, str]]) -> str:
+    if not refs:
+        return html
+
+    for i, (label, _) in enumerate(refs):
+        num = i + 1
+        escaped_label = _html_mod.escape(label)
+        sup = (
+            f'<sup class="footnote-ref">'
+            f'<a href="#fn-{escaped_label}" id="fnref-{escaped_label}">{num}</a>'
+            f'</sup>'
+        )
+        html = html.replace(f'HORIZONFNREF{num}END', sup)
+
+    items_html = ''
+    for i, (label, content) in enumerate(refs):
+        escaped_label = _html_mod.escape(label)
+        inner = _blockquote_inner_html([content]) if content else ''
+        backref = f'<a href="#fnref-{escaped_label}" class="footnote-backref">&#x21A9;</a>'
+        # Insert backref inside the last </p> so it stays inline with the text
+        last_p = inner.rfind('</p>')
+        if last_p != -1:
+            inner = inner[:last_p] + ' ' + backref + inner[last_p:]
+        else:
+            inner = inner + ' ' + backref
+        items_html += f'<li id="fn-{escaped_label}">{inner}</li>'
+
+    section = (
+        '<section class="footnotes">'
+        '<hr class="footnotes-sep">'
+        '<ol class="footnotes-list">' + items_html + '</ol>'
+        '</section>'
+    )
+
+    if '</body>' in html:
+        html = html.replace('</body>', section + '</body>', 1)
+    else:
+        html += section
+
+    return html
+
+
 def _markdown_to_html(
     markdown: str,
     image_repo: ImageRepository | None = None,
@@ -532,6 +615,7 @@ def _markdown_to_html(
     markdown, inline_tags = _extract_tags(markdown)
     markdown, diagrams = _extract_mermaid(markdown)
     markdown, code_blocks = _extract_code_blocks(markdown)
+    markdown, footnotes = _extract_footnotes(markdown)
     markdown, wikilinks = _extract_wikilinks(markdown, _title_to_id, _id_exists)
     markdown, bq_list = _extract_blockquotes(markdown)
     markdown = _add_hard_breaks(markdown)
@@ -547,6 +631,7 @@ def _markdown_to_html(
     html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
     html = _inject_tags(html, inline_tags)
     html = _inject_wikilinks(html, wikilinks)
+    html = _inject_footnotes(html, footnotes)
 
     if images:
         def _inject(m: re.Match) -> str:
