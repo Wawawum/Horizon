@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from PySide6.QtCore import Qt
+import base64
+
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import (
     QFrame,
@@ -19,10 +21,14 @@ _COLUMNS = 4
 
 
 class _MediaTile(QFrame):
+    clicked = Signal(int)  # emits image_id
+
     def __init__(self, image_id: int, data: bytes, parent=None) -> None:
         super().__init__(parent)
+        self._image_id = image_id
         self.setFixedSize(_THUMB_SIZE + 16, _THUMB_SIZE + 32)
         self.setFrameShape(QFrame.Shape.StyledPanel)
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
 
         img_label = QLabel()
         img_label.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
@@ -46,6 +52,11 @@ class _MediaTile(QFrame):
         layout.setSpacing(4)
         layout.addWidget(img_label)
         layout.addWidget(id_label)
+
+    def mousePressEvent(self, event) -> None:
+        if event.button() == Qt.MouseButton.LeftButton:
+            self.clicked.emit(self._image_id)
+        super().mousePressEvent(event)
 
 
 class MediaWidget(QWidget):
@@ -86,5 +97,16 @@ class MediaWidget(QWidget):
             if data is None:
                 continue
             tile = _MediaTile(image_id, data)
+            tile.clicked.connect(self._on_tile_clicked)
             row, col = divmod(i, _COLUMNS)
             self._grid_layout.addWidget(tile, row, col)
+
+    def _on_tile_clicked(self, image_id: int) -> None:
+        from horizon.dialogs import ImageViewerDialog
+        data = self._image_repo.get(image_id)
+        if data is None:
+            return
+        b64 = base64.b64encode(data).decode("ascii")
+        data_uri = f"data:image/png;base64,{b64}"
+        dlg = ImageViewerDialog(data_uri, parent=self)
+        dlg.exec()
