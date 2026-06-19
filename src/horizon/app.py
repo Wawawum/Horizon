@@ -26,6 +26,7 @@ from horizon.widgets.deliverables import (
     DeliverableTemplatesListWidget,
     DeliverableTemplateDetailWidget,
 )
+from horizon.widgets.media import MediaWidget
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
 from horizon.note_window import NoteWindow
@@ -147,6 +148,9 @@ class MainWindow(QMainWindow):
         self._deliverable_detail = DeliverableDetailWidget(self._deliverable_repo, image_repo)
         self._right_stack.addWidget(self._deliverable_detail)     # index 9
 
+        self._media_widget = MediaWidget(image_repo)
+        self._right_stack.addWidget(self._media_widget)           # index 10
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -166,6 +170,7 @@ class MainWindow(QMainWindow):
         self._project_list.notes_requested.connect(self._show_notes)
         self._project_list.tags_requested.connect(self._show_tags)
         self._project_list.deliverables_requested.connect(self._show_deliverables)
+        self._project_list.media_requested.connect(self._show_media)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
         self._tags_widget.note_edit_requested.connect(self._open_note_from_tags)
@@ -307,6 +312,11 @@ class MainWindow(QMainWindow):
         self._project_list.clear_selection()
         self._deliverables_widget.load()
         self._right_stack.setCurrentIndex(6)
+
+    def _show_media(self) -> None:
+        self._project_list.clear_selection()
+        self._media_widget.load()
+        self._right_stack.setCurrentIndex(10)
 
     def _show_templates_list(self) -> None:
         self._project_list.clear_selection()

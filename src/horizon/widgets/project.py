@@ -156,6 +156,7 @@ class ProjectListWidget(QWidget):
     notes_requested = Signal()
     tags_requested = Signal()
     deliverables_requested = Signal()
+    media_requested = Signal()
 
     def __init__(self, repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
@@ -175,12 +176,16 @@ class ProjectListWidget(QWidget):
         self._deliverables_btn = _NavButton("Deliverables", "04")
         self._deliverables_btn.clicked.connect(self.deliverables_requested)
 
+        self._media_btn = _NavButton("Media", "05")
+        self._media_btn.clicked.connect(self.media_requested)
+
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
         self._nav_group.addButton(self._board_btn)
         self._nav_group.addButton(self._notes_btn)
         self._nav_group.addButton(self._tags_btn)
         self._nav_group.addButton(self._deliverables_btn)
+        self._nav_group.addButton(self._media_btn)
 
         nav_row1 = QHBoxLayout()
         nav_row1.setContentsMargins(0, 0, 0, 0)
@@ -193,6 +198,7 @@ class ProjectListWidget(QWidget):
         nav_row2.setContentsMargins(0, 0, 0, 0)
         nav_row2.setSpacing(6)
         nav_row2.addWidget(self._deliverables_btn)
+        nav_row2.addWidget(self._media_btn)
 
         nav_layout = QVBoxLayout()
         nav_layout.setContentsMargins(6, 6, 6, 4)

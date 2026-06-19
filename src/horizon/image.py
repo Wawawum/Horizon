@@ -17,3 +17,9 @@ class ImageRepository:
             "SELECT data FROM images WHERE id = ?", (image_id,)
         ).fetchone()
         return bytes(row["data"]) if row else None
+
+    def list_all_ids(self) -> list[int]:
+        rows = self._conn.execute(
+            "SELECT id FROM images ORDER BY id DESC"
+        ).fetchall()
+        return [row["id"] for row in rows]
