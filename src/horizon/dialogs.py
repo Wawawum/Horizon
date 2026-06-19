@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
     QGraphicsScene,
     QGraphicsView,
     QHBoxLayout,
+    QHeaderView,
     QLabel,
     QLineEdit,
     QListWidget,
@@ -23,6 +24,8 @@ from PySide6.QtWidgets import (
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
+    QTableWidget,
+    QTableWidgetItem,
     QStackedWidget,
     QTextEdit,
     QVBoxLayout,
@@ -748,7 +751,7 @@ class ImageViewerDialog(QDialog):
     _ZOOM_IN  = 1.2
     _ZOOM_OUT = 1.0 / 1.2
 
-    def __init__(self, data_uri: str, parent=None) -> None:
+    def __init__(self, data_uri: str, parent=None, image_id: int | None = None, search_repo=None, note_repo=None, proj_repo=None) -> None:
         super().__init__(parent)
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.resize(860, 640)
@@ -782,12 +785,49 @@ class ImageViewerDialog(QDialog):
         toolbar.addWidget(fit_btn)
         toolbar.addStretch()
 
+        if image_id is not None and search_repo is not None:
+            self._related_btn = QPushButton("Related notes")
+            self._related_btn.clicked.connect(self._toggle_related)
+            toolbar.addWidget(self._related_btn)
+            self._image_id = image_id
+            self._search_repo = search_repo
+            self._note_repo = note_repo
+            self._proj_repo = proj_repo
+        else:
+            self._related_btn = None
+            self._image_id = None
+            self._search_repo = None
+            self._note_repo = None
+            self._proj_repo = None
+
+        image_page = QWidget()
+        ip = QVBoxLayout(image_page)
+        ip.setContentsMargins(0, 0, 0, 0)
+        ip.setSpacing(0)
+        ip.addWidget(self._view, stretch=1)
+
+        self._notes_table = QTableWidget()
+        self._notes_table.setColumnCount(2)
+        self._notes_table.setHorizontalHeaderLabels(["Project", "Note"])
+        self._notes_table.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
+        self._notes_table.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
+        self._notes_table.verticalHeader().setVisible(False)
+        self._notes_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.ResizeToContents)
+        self._notes_table.horizontalHeader().setSectionResizeMode(1, QHeaderView.ResizeMode.Stretch)
+
+        self._selected_note_id: int | None = None
+        self._notes_table.cellDoubleClicked.connect(self._on_note_double_clicked)
+
+        self._stack = QStackedWidget()
+        self._stack.addWidget(image_page)        # index 0 — image
+        self._stack.addWidget(self._notes_table) # index 1 — related notes
+
         content = QWidget()
         cl = QVBoxLayout(content)
         cl.setContentsMargins(0, 0, 0, 0)
         cl.setSpacing(0)
         cl.addLayout(toolbar)
-        cl.addWidget(self._view, stretch=1)
+        cl.addWidget(self._stack, stretch=1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -796,6 +836,56 @@ class ImageViewerDialog(QDialog):
         layout.addWidget(content)
 
         QTimer.singleShot(0, lambda: self._view.fit(self._scene_rect))
+
+    def _toggle_related(self) -> None:
+        if self._stack.currentIndex() == 0:
+            self._load_related_notes()
+            self._stack.setCurrentIndex(1)
+            self._related_btn.setText("← Image")
+        else:
+            self._stack.setCurrentIndex(0)
+            self._related_btn.setText("Related notes")
+
+    @property
+    def selected_note_id(self) -> int | None:
+        return self._selected_note_id
+
+    def _on_note_double_clicked(self, row: int, _col: int) -> None:
+        item = self._notes_table.item(row, 1)
+        if item is None:
+            return
+        note_id = item.data(Qt.ItemDataRole.UserRole)
+        if note_id is not None:
+            self._selected_note_id = note_id
+            self.accept()
+
+    def _load_related_notes(self) -> None:
+        self._notes_table.setRowCount(0)
+        results = self._search_repo.search(
+            f"horizon-image://{self._image_id}", mode="all"
+        )
+        notes = [r for r in results if r.type == "note"]
+        if not notes:
+            self._notes_table.setRowCount(1)
+            self._notes_table.setItem(0, 0, QTableWidgetItem(""))
+            self._notes_table.setItem(0, 1, QTableWidgetItem("No related notes found."))
+            return
+
+        project_names: dict[int, str] = {}
+        if self._proj_repo is not None:
+            project_names = {p.id: p.name for p in self._proj_repo.list_all()}
+
+        self._notes_table.setRowCount(len(notes))
+        for row, result in enumerate(notes):
+            project_name = ""
+            if self._note_repo is not None:
+                note = self._note_repo.get(result.entity_id)
+                if note is not None and note.project_id is not None:
+                    project_name = project_names.get(note.project_id, "")
+            self._notes_table.setItem(row, 0, QTableWidgetItem(project_name))
+            title_item = QTableWidgetItem(result.title)
+            title_item.setData(Qt.ItemDataRole.UserRole, result.entity_id)
+            self._notes_table.setItem(row, 1, title_item)
 
 
 class SelectTemplatesDialog(QDialog):

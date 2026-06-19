@@ -1,13 +1,16 @@
 from __future__ import annotations
 
 import base64
+import re
 
 from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QPixmap
+from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (
     QFrame,
     QGridLayout,
     QLabel,
+    QMenu,
+    QMessageBox,
     QScrollArea,
     QSizePolicy,
     QVBoxLayout,
@@ -15,13 +18,18 @@ from PySide6.QtWidgets import (
 )
 
 from horizon.image import ImageRepository
+from horizon.note import NoteRepository
+from horizon.project import ProjectRepository
+from horizon.search import SearchRepository
 
 _THUMB_SIZE = 128
 _COLUMNS = 4
+_IMG_REF_RE = re.compile(r'!\[[^\]]*\]\(horizon-image://(\d+)\)')
 
 
 class _MediaTile(QFrame):
-    clicked = Signal(int)  # emits image_id
+    clicked = Signal(int)         # emits image_id on left click
+    delete_requested = Signal(int)  # emits image_id on context menu Delete
 
     def __init__(self, image_id: int, data: bytes, parent=None) -> None:
         super().__init__(parent)
@@ -29,6 +37,8 @@ class _MediaTile(QFrame):
         self.setFixedSize(_THUMB_SIZE + 16, _THUMB_SIZE + 32)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.customContextMenuRequested.connect(self._show_context_menu)
 
         img_label = QLabel()
         img_label.setFixedSize(_THUMB_SIZE, _THUMB_SIZE)
@@ -58,11 +68,23 @@ class _MediaTile(QFrame):
             self.clicked.emit(self._image_id)
         super().mousePressEvent(event)
 
+    def _show_context_menu(self, pos) -> None:
+        menu = QMenu(self)
+        delete_action = QAction("Delete", self)
+        delete_action.triggered.connect(lambda: self.delete_requested.emit(self._image_id))
+        menu.addAction(delete_action)
+        menu.exec(self.mapToGlobal(pos))
+
 
 class MediaWidget(QWidget):
-    def __init__(self, image_repo: ImageRepository, parent=None) -> None:
+    note_open_requested = Signal(int)
+
+    def __init__(self, image_repo: ImageRepository, search_repo: SearchRepository, note_repo: NoteRepository, proj_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self._image_repo = image_repo
+        self._search_repo = search_repo
+        self._note_repo = note_repo
+        self._proj_repo = proj_repo
 
         title = QLabel("Media")
         font = title.font()
@@ -98,6 +120,7 @@ class MediaWidget(QWidget):
                 continue
             tile = _MediaTile(image_id, data)
             tile.clicked.connect(self._on_tile_clicked)
+            tile.delete_requested.connect(self._on_delete_requested)
             row, col = divmod(i, _COLUMNS)
             self._grid_layout.addWidget(tile, row, col)
 
@@ -108,5 +131,36 @@ class MediaWidget(QWidget):
             return
         b64 = base64.b64encode(data).decode("ascii")
         data_uri = f"data:image/png;base64,{b64}"
-        dlg = ImageViewerDialog(data_uri, parent=self)
+        dlg = ImageViewerDialog(data_uri, parent=self, image_id=image_id, search_repo=self._search_repo, note_repo=self._note_repo, proj_repo=self._proj_repo)
         dlg.exec()
+        if dlg.selected_note_id is not None:
+            self.note_open_requested.emit(dlg.selected_note_id)
+
+    def _on_delete_requested(self, image_id: int) -> None:
+        reply = QMessageBox.question(
+            self,
+            "Delete image",
+            f"Delete image #{image_id}?\n\nAll references in notes will be removed.",
+            QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.Cancel,
+            QMessageBox.StandardButton.Cancel,
+        )
+        if reply != QMessageBox.StandardButton.Yes:
+            return
+
+        results = self._search_repo.search(f"horizon-image://{image_id}", mode="all")
+        for result in results:
+            if result.type != "note":
+                continue
+            note = self._note_repo.get(result.entity_id)
+            if note is None:
+                continue
+            new_body = _IMG_REF_RE.sub(
+                lambda m: "" if int(m.group(1)) == image_id else m.group(0),
+                note.body,
+            )
+            if new_body != note.body:
+                note.body = new_body
+                self._note_repo.update(note)
+
+        self._image_repo.delete(image_id)
+        self.load()

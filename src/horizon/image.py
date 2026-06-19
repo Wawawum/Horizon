@@ -23,3 +23,7 @@ class ImageRepository:
             "SELECT id FROM images ORDER BY id DESC"
         ).fetchall()
         return [row["id"] for row in rows]
+
+    def delete(self, image_id: int) -> None:
+        self._conn.execute("DELETE FROM images WHERE id = ?", (image_id,))
+        self._conn.commit()
