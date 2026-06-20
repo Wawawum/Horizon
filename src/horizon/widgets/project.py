@@ -50,7 +50,6 @@ from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
 
 
-_PROJECT_COLOR_ROLE = Qt.ItemDataRole.UserRole + 1
 _KANBAN_MIME        = "application/x-horizon-task-id"
 _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
@@ -100,25 +99,27 @@ class ProjectListDelegate(QStyledItemDelegate):
         # palette which can produce white-on-white when Qt picks up an OS theme);
         # let the system style handle hover/normal states.
         if is_selected:
-            painter.fillRect(option.rect, QColor(t.list_selected_bg))
+            painter.fillRect(option.rect, QColor(t.project_list_selected_bg))
         else:
             bg_opt = QStyleOptionViewItem(opt)
             bg_opt.text = ""
             style = opt.widget.style() if opt.widget else QApplication.style()
             style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
 
-        # Draw color band on the left edge
-        color_str = index.data(_PROJECT_COLOR_ROLE)
-        if color_str:
+        # Draw the accent band on the left edge for the selected item only
+        if is_selected:
             painter.fillRect(
                 QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height()),
-                QColor(color_str),
+                QColor(t.list_selected_accent),
             )
 
         # Draw text indented past the band
         text_x = option.rect.x() + _BAND_WIDTH + 4
         text_rect = QRect(text_x, option.rect.y(), option.rect.right() - text_x, option.rect.height())
         text_color = QColor(t.list_selected_text) if is_selected else opt.palette.text().color()
+        font = QFont(opt.font)
+        font.setBold(is_selected)
+        painter.setFont(font)
         painter.setPen(text_color)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, opt.text)
 
@@ -241,7 +242,6 @@ class ProjectListWidget(QWidget):
                 continue
             item = QListWidgetItem(project.name)
             item.setData(Qt.ItemDataRole.UserRole, project.id)
-            item.setData(_PROJECT_COLOR_ROLE, project.color)
             self._list.addItem(item)
 
     def _on_selection_changed(

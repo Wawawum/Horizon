@@ -91,6 +91,9 @@ class Theme:
     titlebar_accent: str      = field(default="#4fc3f7")
     titlebar_input_bg: str    = field(default="#101a2c")
     clock_live_dot: str       = field(default="#34d399")
+    # ── Liste de projets : item sélectionné ─────────────────────────────────
+    list_selected_accent: str       = field(default="#2dd4bf")
+    project_list_selected_bg: str   = field(default="#d8e6fb")
 
 
 _current: Theme | None = None

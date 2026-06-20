@@ -1,8 +1,8 @@
 {
   "window": {
     "maximized": false,
-    "width": 1696,
-    "height": 1067
+    "width": 1712,
+    "height": 1106
   },
   "project_views": {
     "1": 1,
@@ -10,7 +10,15 @@
   },
   "splitter_sizes": [
     256,
-    1224,
+    1240,
     214
-  ]
+  ],
+  "folder_states": {
+    "1": {
+      "6": true,
+      "1": true,
+      "4": true,
+      "3": true
+    }
+  }
 }
