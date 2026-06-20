@@ -1,0 +1,77 @@
+{
+  "name": "terminal",
+  "font_family": "JetBrains Mono",
+  "accent_color": "#2f6fed",
+
+  "app_bg":              "#eef1f5",
+  "surface_bg":          "#ffffff",
+  "surface_alt_bg":      "#f3f5f8",
+  "text":                "#1a2233",
+  "border":              "#dde3ea",
+
+  "input_bg":            "#ffffff",
+  "button_bg":           "#ffffff",
+  "button_hover":        "#f0f3f7",
+  "button_pressed":      "#e4e8ee",
+
+  "scrollbar_bg":        "transparent",
+  "scrollbar_handle":    "#c7ccd4",
+  "scrollbar_handle_hover": "#9aa3ad",
+
+  "list_selected_bg":    "#e8f0fe",
+  "list_selected_text":  "#1a2233",
+
+  "tile_bg":                      "#ffffff",
+  "tile_border":                  "#dde3ea",
+  "tile_text":                    "#1a2233",
+  "tile_checkbox_border":         "#c7ccd4",
+  "tile_checkbox_checked_bg":     "#2f6fed",
+  "tile_checkbox_checked_border": "#2f6fed",
+  "tile_project_label":           "#7b8794",
+
+  "priority_low":    "#9aa3ad",
+  "priority_medium": "#2f6fed",
+  "priority_high":   "#ef4444",
+
+  "calendar_bg":             "#ffffff",
+  "calendar_label":          "#9aa3ad",
+  "calendar_hour_line":      "#eef1f5",
+  "calendar_half_hour_line": "#f7f9fb",
+  "calendar_event_bg":       "#eaf1ff",
+  "calendar_event_text":     "#1a2233",
+  "calendar_now_line":       "#ef4444",
+
+  "clock_face":        "#10151f",
+  "clock_ring":        "#1f2733",
+  "clock_tick_hour":   "#2dd4bf",
+  "clock_tick_minute": "#1f2733",
+  "clock_hand":        "#e2e8f0",
+  "clock_second":      "#2dd4bf",
+
+  "gshock_case":        "#10151f",
+  "gshock_case_shadow": "#05070b",
+  "gshock_bezel":       "#1f2733",
+  "gshock_lcd_bg":      "#06110f",
+  "gshock_lcd_fg":      "#2dd4bf",
+  "gshock_lcd_dim":     "#0a1814",
+  "gshock_lcd_label":   "#1f8a78",
+  "gshock_lcd_alarm":   "#ef9f4a",
+  "gshock_screw":       "#222b38",
+
+  "nav_btn_gradient_from": "rgba(47,111,237,18)",
+  "nav_btn_gradient_to":   "rgba(45,212,191,18)",
+
+  "color_btn_border":  "#c7ccd4",
+  "delete_btn_text":   "#ffffff",
+  "delete_btn_bg":     "#ef4444",
+
+  "preview_text":               "#1a2233",
+  "preview_bg":                 "#ffffff",
+  "preview_border":             "#dde3ea",
+  "preview_code_bg":            "#f3f5f8",
+  "preview_blockquote_border":  "#2f6fed",
+  "preview_blockquote_bg":      "#f7f9fb",
+  "preview_blockquote_text":    "#5b6675",
+  "preview_link":               "#2f6fed",
+  "preview_table_header_bg":    "#eef1f5"
+}

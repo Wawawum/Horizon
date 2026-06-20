@@ -73,7 +73,7 @@ class MainWindow(QMainWindow):
     def __init__(self, db: Database) -> None:
         self._db = db
         self._prefs = Preferences()
-        _theme.init(self._prefs.theme)
+        _theme.init()
         QApplication.instance().setStyleSheet(_theme.make_stylesheet(_theme.current()))
         QFontDatabase.addApplicationFont(":/fonts/JetBrainsMono-Regular.ttf")
         app_font = QFont(_theme.current().font_family)
@@ -195,7 +195,7 @@ class MainWindow(QMainWindow):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
-        self._title_bar = TitleBar(self, show_search=True)
+        self._title_bar = TitleBar(self, subtitle="workspace", show_search=True)
         self._title_bar.search_requested.connect(self._on_search)
         container_layout.addWidget(self._title_bar)
         container_layout.addWidget(self._splitter)

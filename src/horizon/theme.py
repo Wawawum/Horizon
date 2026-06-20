@@ -82,6 +82,14 @@ class Theme:
     gshock_lcd_label: str   = field(default="#3ab89a")
     gshock_lcd_alarm: str   = field(default="#c87820")
     gshock_screw: str       = field(default="#383838")
+    # ── Barre de titre (indépendante du thème clair/sombre général) ────────
+    titlebar_bg: str          = field(default="#0d1421")
+    titlebar_border: str      = field(default="#1c2940")
+    titlebar_text: str        = field(default="#e8edf5")
+    titlebar_muted: str       = field(default="#5b6b85")
+    titlebar_muted_hover: str = field(default="#8fa3c0")
+    titlebar_accent: str      = field(default="#4fc3f7")
+    titlebar_input_bg: str    = field(default="#101a2c")
 
 
 _current: Theme | None = None
@@ -89,17 +97,15 @@ _THEME_DIR = Path(__file__).parent / "themes"
 _FIELD_NAMES = {f.name for f in fields(Theme)}
 
 
-def load(name: str) -> Theme:
-    path = _THEME_DIR / f"{name}.json"
-    if not path.exists():
-        path = _THEME_DIR / "dark.json"
+def load() -> Theme:
+    path = _THEME_DIR / "terminal.json"
     data = json.loads(path.read_text(encoding="utf-8"))
     return Theme(**{k: v for k, v in data.items() if k in _FIELD_NAMES})
 
 
-def init(name: str) -> None:
+def init() -> None:
     global _current
-    _current = load(name)
+    _current = load()
 
 
 def current() -> Theme:
@@ -175,18 +181,18 @@ QMainWindow, QDialog {{
 /* ── Group boxes (Tasks / Notes panels) ─────────────────────────── */
 QGroupBox {{
     border: 1px solid {t.border};
-    border-radius: 4px;
+    border-radius: 2px;
     margin-top: 10px;
     padding-top: 4px;
     font-weight: bold;
-    background-color: transparent;
+    background-color: {t.surface_bg};
 }}
 QGroupBox::title {{
     subcontrol-origin: margin;
     subcontrol-position: top left;
     left: 10px;
     padding: 0 4px;
-    background-color: {t.app_bg};
+    background-color: {t.surface_bg};
     color: {t.text};
 }}
 
@@ -325,6 +331,7 @@ QListWidget::item {{
 QListWidget::item:selected, QListView::item:selected {{
     background-color: {t.list_selected_bg};
     color: {t.list_selected_text};
+    border-left: 3px solid {t.accent_color};
 }}
 QListWidget::item:hover:!selected, QListView::item:hover:!selected {{
     background-color: {t.button_hover};
@@ -341,6 +348,7 @@ QTableWidget, QTableView {{
 QTableWidget::item:selected, QTableView::item:selected {{
     background-color: {t.list_selected_bg};
     color: {t.list_selected_text};
+    border-left: 3px solid {t.accent_color};
 }}
 QHeaderView {{
     background-color: {t.surface_alt_bg};
@@ -479,10 +487,10 @@ QMessageBox QLabel {{
     background-color: transparent;
 }}
 
-/* ── Barre de titre personnalisée ───────────────────────────────────── */
+/* ── Barre de titre personnalisée (toujours sombre) ─────────────────── */
 QWidget[titlebar="true"] {{
-    background-color: {t.surface_bg};
-    border-bottom: 1px solid {t.border};
+    background-color: {t.titlebar_bg};
+    border-bottom: 1px solid {t.titlebar_border};
 }}
 
 QPushButton[title_btn="min"],
@@ -491,7 +499,7 @@ QPushButton[title_btn="close"] {{
     background-color: transparent;
     border: none;
     border-radius: 0;
-    color: {t.scrollbar_handle};
+    color: {t.titlebar_muted};
     font-size: 14px;
     min-width: 46px;
     max-width: 46px;
@@ -501,8 +509,8 @@ QPushButton[title_btn="close"] {{
 }}
 QPushButton[title_btn="min"]:hover,
 QPushButton[title_btn="max"]:hover {{
-    background-color: {_hex_to_rgba(t.accent_color, 25)};
-    color: {t.accent_color};
+    background-color: {_hex_to_rgba(t.titlebar_accent, 25)};
+    color: {t.titlebar_accent};
 }}
 QPushButton[title_btn="close"]:hover {{
     background-color: {_hex_to_rgba(t.priority_high, 30)};
@@ -510,7 +518,7 @@ QPushButton[title_btn="close"]:hover {{
 }}
 QPushButton[title_btn="min"]:pressed,
 QPushButton[title_btn="max"]:pressed {{
-    background-color: {_hex_to_rgba(t.accent_color, 50)};
+    background-color: {_hex_to_rgba(t.titlebar_accent, 50)};
 }}
 QPushButton[title_btn="close"]:pressed {{
     background-color: {_hex_to_rgba(t.priority_high, 60)};
