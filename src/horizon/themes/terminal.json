@@ -73,5 +73,7 @@
   "preview_blockquote_bg":      "#f7f9fb",
   "preview_blockquote_text":    "#5b6675",
   "preview_link":               "#2f6fed",
-  "preview_table_header_bg":    "#eef1f5"
+  "preview_table_header_bg":    "#eef1f5",
+
+  "clock_live_dot": "#34d399"
 }

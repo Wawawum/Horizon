@@ -90,6 +90,7 @@ class Theme:
     titlebar_muted_hover: str = field(default="#8fa3c0")
     titlebar_accent: str      = field(default="#4fc3f7")
     titlebar_input_bg: str    = field(default="#101a2c")
+    clock_live_dot: str       = field(default="#34d399")
 
 
 _current: Theme | None = None
