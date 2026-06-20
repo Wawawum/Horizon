@@ -4,7 +4,6 @@ from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSi
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
@@ -85,6 +84,14 @@ def _arrow_icon(direction: str) -> QIcon:
     return QIcon(str(_RESOURCES_DIR / f"arrow_{direction}.svg"))
 
 
+_PROJECT_ITEM_MARGIN_X = 5
+_PROJECT_ITEM_MARGIN_Y = 4
+_PROJECT_ACCENT_WIDTH = 4       # thicker turquoise bar on the left edge
+_PROJECT_ACCENT_TEXT_GAP = 12   # margin between the turquoise bar and the text
+_PROJECT_TEXT_INDENT = 14       # left padding for unselected items
+_PROJECT_GLOW_LAYERS = [(1, 70), (2, 40), (3, 18)]  # (offset, alpha) for the glow
+
+
 class ProjectListDelegate(QStyledItemDelegate):
     def paint(self, painter, option, index) -> None:
         t = _theme.current()
@@ -95,27 +102,52 @@ class ProjectListDelegate(QStyledItemDelegate):
 
         painter.save()
 
-        # Background: own rendering for selection (avoids relying on the system
-        # palette which can produce white-on-white when Qt picks up an OS theme);
-        # let the system style handle hover/normal states.
         if is_selected:
-            painter.fillRect(option.rect, QColor(t.project_list_selected_bg))
-        else:
-            bg_opt = QStyleOptionViewItem(opt)
-            bg_opt.text = ""
-            style = opt.widget.style() if opt.widget else QApplication.style()
-            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
+            # Sharp-cornered card; integer rect for crisp 1px edges.
+            card_rect = option.rect.adjusted(
+                _PROJECT_ITEM_MARGIN_X, _PROJECT_ITEM_MARGIN_Y,
+                -_PROJECT_ITEM_MARGIN_X, -_PROJECT_ITEM_MARGIN_Y,
+            )
 
-        # Draw the accent band on the left edge for the selected item only
-        if is_selected:
+            # Glow: concentric outlines around the card with decreasing alpha.
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for offset, alpha in _PROJECT_GLOW_LAYERS:
+                glow = QColor(t.list_selected_accent)
+                glow.setAlpha(alpha)
+                painter.setPen(QPen(glow, 1))
+                painter.drawRect(card_rect.adjusted(-offset, -offset, offset, offset))
+
+            # White background.
+            painter.fillRect(card_rect, QColor(t.surface_bg))
+
+            # Turquoise border around the card.
+            painter.setPen(QPen(QColor(t.list_selected_accent), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(card_rect)
+
+            # Thicker turquoise bar on the left edge.
             painter.fillRect(
-                QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height()),
+                QRect(card_rect.x(), card_rect.y(), _PROJECT_ACCENT_WIDTH, card_rect.height()),
                 QColor(t.list_selected_accent),
             )
 
-        # Draw text indented past the band
-        text_x = option.rect.x() + _BAND_WIDTH + 4
-        text_rect = QRect(text_x, option.rect.y(), option.rect.right() - text_x, option.rect.height())
+            text_x = card_rect.x() + _PROJECT_ACCENT_WIDTH + _PROJECT_ACCENT_TEXT_GAP
+            text_right = card_rect.right()
+        else:
+            # Unselected: white rectangle with a light grey border.
+            card_rect = option.rect.adjusted(
+                _PROJECT_ITEM_MARGIN_X, _PROJECT_ITEM_MARGIN_Y,
+                -_PROJECT_ITEM_MARGIN_X, -_PROJECT_ITEM_MARGIN_Y,
+            )
+            painter.fillRect(card_rect, QColor(t.surface_bg))
+            painter.setPen(QPen(QColor(t.border), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(card_rect)
+
+            text_x = card_rect.x() + _PROJECT_TEXT_INDENT
+            text_right = card_rect.right()
+
+        text_rect = QRect(text_x, option.rect.y(), text_right - text_x, option.rect.height())
         text_color = QColor(t.list_selected_text) if is_selected else opt.palette.text().color()
         font = QFont(opt.font)
         font.setBold(is_selected)
@@ -124,6 +156,11 @@ class ProjectListDelegate(QStyledItemDelegate):
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, opt.text)
 
         painter.restore()
+
+    def sizeHint(self, option, index) -> QSize:
+        size = super().sizeHint(option, index)
+        size.setHeight(size.height() + 14)
+        return size
 
 
 class _NavButton(QPushButton):
@@ -142,11 +179,17 @@ class _NavButton(QPushButton):
         super().paintEvent(event)
         t = _theme.current()
         painter = QPainter(self)
-        text_color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
+        if self.isChecked():
+            text_color = QColor(t.surface_bg)
+            number_color = QColor(t.surface_bg)
+            number_color.setAlpha(140)
+        else:
+            text_color = QColor(t.text) if self.underMouse() else QColor(t.tile_project_label)
+            number_color = QColor(t.color_btn_border)
         r = self.rect().adjusted(12, 0, -12, 0)
         painter.setPen(text_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
-        painter.setPen(QColor(t.color_btn_border))
+        painter.setPen(number_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._number)
         painter.end()
 
@@ -207,16 +250,24 @@ class ProjectListWidget(QWidget):
         nav_layout.addLayout(nav_row1)
         nav_layout.addLayout(nav_row2)
 
+        t = _theme.current()
+
         self._list = QListWidget()
+        self._list.setFrameShape(QFrame.Shape.NoFrame)
+        self._list.setStyleSheet("QListWidget { background: transparent; border: none; }")
         self._list.setItemDelegate(ProjectListDelegate(self._list))
         self._list.currentItemChanged.connect(self._on_selection_changed)
 
-        self._show_archived_cb = QCheckBox("Show archived")
+        self._show_archived_cb = QCheckBox("archived")
         self._show_archived_cb.stateChanged.connect(self._load_projects)
 
-        self._new_btn = QPushButton("New Project")
-        self._new_btn.setIcon(_plus_icon())
-        self._new_btn.setIconSize(_PLUS_ICON_SIZE)
+        accent_hover = QColor(t.accent_color).darker(115).name()
+        self._new_btn = QPushButton("+ NEW")
+        self._new_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t.accent_color}; color: white; "
+            f"border: none; border-radius: 6px; padding: 4px 14px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {accent_hover}; }}"
+        )
         self._new_btn.clicked.connect(self._on_new_project)
 
         bottom_layout = QHBoxLayout()
@@ -225,10 +276,18 @@ class ProjectListWidget(QWidget):
         bottom_layout.addStretch()
         bottom_layout.addWidget(self._new_btn)
 
+        nav_separator = QFrame()
+        nav_separator.setFrameShape(QFrame.Shape.HLine)
+        nav_separator.setFrameShadow(QFrame.Shadow.Plain)
+        separator_row = QHBoxLayout()
+        separator_row.setContentsMargins(6, 4, 6, 6)
+        separator_row.addWidget(nav_separator)
+
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
         layout.addLayout(nav_layout)                 # Board + Notes buttons at top
+        layout.addLayout(separator_row)              # separator between nav and list
         layout.addWidget(self._list, stretch=1)      # fills all available vertical space
         layout.addLayout(bottom_layout)              # archived checkbox + new project button
 

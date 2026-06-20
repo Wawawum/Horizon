@@ -234,7 +234,7 @@ QStackedWidget {{
 QPushButton[nav_btn="true"] {{
     background-color: {t.button_bg};
     border: 1px solid {t.border};
-    border-radius: 6px;
+    border-radius: 8px;
     min-height: 38px;
     color: transparent;
 }}
@@ -244,9 +244,8 @@ QPushButton[nav_btn="true"]:hover {{
     border-color: {t.scrollbar_handle_hover};
 }}
 QPushButton[nav_btn="true"]:checked {{
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:0,
-        stop:0 {t.nav_btn_gradient_from}, stop:1 {t.nav_btn_gradient_to});
-    border-color: {t.priority_medium};
+    background-color: {t.text};
+    border-color: {t.text};
 }}
 
 /* ── Boutons ────────────────────────────────────────────────────────── */
