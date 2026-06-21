@@ -55,6 +55,7 @@ _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG          = ":/icons/check_black.svg"
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE     = QSize(12, 12)
+_PLUS_ICON_WHITE: QIcon | None = None
 _FOLDER_ICON: QIcon | None = None
 _FOLDER_ICON_SIZE   = QSize(14, 14)
 
@@ -64,10 +65,16 @@ def _plus_icon() -> QIcon:
         _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
     return _PLUS_ICON
 
+def _plus_icon_white() -> QIcon:
+    global _PLUS_ICON_WHITE
+    if _PLUS_ICON_WHITE is None:
+        _PLUS_ICON_WHITE = QIcon(str(_RESOURCES_DIR / "plus_white.svg"))
+    return _PLUS_ICON_WHITE
+
 def _folder_icon() -> QIcon:
     global _FOLDER_ICON
     if _FOLDER_ICON is None:
-        _FOLDER_ICON = _theme.make_icon(":/icons/folder_cyan.svg", _FOLDER_ICON_SIZE)
+        _FOLDER_ICON = QIcon(str(_RESOURCES_DIR / "folder_square.svg"))
     return _FOLDER_ICON
 _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
@@ -89,6 +96,11 @@ _BRACKET_WIDTH      = 2
 _BOARD_FRAME_MARGIN = 12   # marge intérieure du cadre à équerres
 _BOARD_FRAME_BG     = "#fbfcfd"          # fond du panneau TASKS
 _BOARD_ACCENT_BLUE  = "rgb(10, 92, 255)" # `// TASKS` + libellés de colonnes actives
+
+# ── Panneau Notes (maquette) ─────────────────────────────────────────────────
+_NOTES_PANEL_BG     = "#eef2f8"
+_NOTES_FOLDER_TEXT  = "#0f1729"
+_NOTES_NOTE_TEXT    = "#56627a"
 
 # Libellés des colonnes Kanban (affichage uniquement — l'enum reste inchangé)
 _BUCKET_LABELS = {
@@ -1277,27 +1289,47 @@ class ProjectDetailWidget(QWidget):
         # ── Right panel: Notes / Deliverables / Documents ─────────────────
         # Notes content
         notes_content = QWidget()
+        notes_content.setStyleSheet(f"background-color: {_NOTES_PANEL_BG};")
         notes_content_layout = QVBoxLayout(notes_content)
-        notes_content_layout.setContentsMargins(8, 4, 4, 8)
-        notes_content_layout.setSpacing(4)
+        notes_content_layout.setContentsMargins(8, 8, 8, 8)
+        notes_content_layout.setSpacing(8)
+
+        t_notes = _theme.current()
+        notes_accent_hover = QColor(t_notes.accent_color).darker(115).name()
 
         notes_header = QHBoxLayout()
-        notes_header.addStretch()
+        notes_header.setContentsMargins(0, 0, 0, 0)
+        notes_header.setSpacing(8)
         self._new_folder_btn = QPushButton("New Folder")
         self._new_folder_btn.setIcon(_plus_icon())
         self._new_folder_btn.setIconSize(_PLUS_ICON_SIZE)
+        self._new_folder_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t_notes.button_bg}; color: {t_notes.text}; "
+            f"border: 1px solid {t_notes.border}; border-radius: 0; padding: 4px 12px; }}"
+            f"QPushButton:hover {{ background-color: {t_notes.button_hover}; }}"
+            f"QPushButton:pressed {{ background-color: {t_notes.button_pressed}; }}"
+        )
         self._new_folder_btn.clicked.connect(self._on_new_folder)
-        notes_header.addWidget(self._new_folder_btn)
+        notes_header.addWidget(self._new_folder_btn, stretch=1)
         new_note_btn = QPushButton("New Note")
-        new_note_btn.setIcon(_plus_icon())
+        new_note_btn.setIcon(_plus_icon_white())
         new_note_btn.setIconSize(_PLUS_ICON_SIZE)
+        new_note_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t_notes.accent_color}; color: white; "
+            f"border: none; border-radius: 0; padding: 4px 12px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {notes_accent_hover}; }}"
+        )
         new_note_btn.clicked.connect(self._on_new_note)
-        notes_header.addWidget(new_note_btn)
+        notes_header.addWidget(new_note_btn, stretch=1)
         notes_content_layout.addLayout(notes_header)
 
         self._note_tree = _FolderTree()
         self._note_tree.setColumnCount(1)
         self._note_tree.setHeaderHidden(True)
+        self._note_tree.setFrameShape(QFrame.Shape.NoFrame)
+        self._note_tree.setStyleSheet(
+            f"QTreeWidget {{ background-color: {_NOTES_PANEL_BG}; border: none; }}"
+        )
         self._note_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._note_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._note_tree.itemDoubleClicked.connect(self._on_note_item_double_clicked)
@@ -1590,6 +1622,7 @@ class ProjectDetailWidget(QWidget):
                 folder_item = QTreeWidgetItem(parent_item)
             folder_item.setText(0, folder.name)
             folder_item.setIcon(0, _folder_icon())
+            folder_item.setForeground(0, QBrush(QColor(_NOTES_FOLDER_TEXT)))
             folder_item.setData(0, _NOTE_NODE_DATA_ROLE, folder.id)
             folder_item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_FOLDER)
             if self._prefs is not None and self._current_project_id is not None:
@@ -1612,6 +1645,7 @@ class ProjectDetailWidget(QWidget):
         else:
             item = QTreeWidgetItem(parent)
         item.setText(0, note.title)
+        item.setForeground(0, QBrush(QColor(_NOTES_NOTE_TEXT)))
         item.setData(0, _NOTE_NODE_DATA_ROLE, note.id)
         item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_NOTE)
         item.setData(0, _NOTE_NODE_FOLDER_ROLE, note.folder_id)
