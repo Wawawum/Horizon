@@ -566,7 +566,7 @@ class KanbanCardWidget(QWidget):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(_BAND_WIDTH + 6, 4, 6, 4)
+        layout.setContentsMargins(_BAND_WIDTH + 6, 10, 6, 10)
         layout.setSpacing(2)
 
         title = QLabel(task.title)
