@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -317,8 +317,14 @@ class ProjectListDelegate(QStyledItemDelegate):
         return size
 
 
+_NAV_CHAMFER = 9  # taille du biseau du coin inférieur droit (style maquette)
+
+
 class _NavButton(QPushButton):
-    """Sidebar nav button: label on the left, dim ordinal on the right."""
+    """Sidebar nav button: label on the left, dim ordinal on the right.
+
+    Peint entièrement à la main : rectangle (sans arrondi) dont le coin
+    inférieur droit est biseauté, comme d'autres éléments de la maquette."""
 
     def __init__(self, label: str, number: str, parent=None) -> None:
         super().__init__(parent)
@@ -327,31 +333,64 @@ class _NavButton(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setProperty("nav_btn", True)
 
     def sizeHint(self) -> QSize:
         # Le texte est peint manuellement (pas via setText) : calculer la largeur
         # nécessaire pour le libellé + l'ordinal, plus les marges latérales (12 px
-        # de chaque côté) et un espace de séparation.
+        # de chaque côté) et un espace de séparation. La hauteur reprend celle des
+        # autres boutons (New Folder / New Note) : min-height 22 + padding 4/4.
         fm = self.fontMetrics()
         width = (
             fm.horizontalAdvance(self._label)
             + fm.horizontalAdvance(self._number)
             + 12 + 12 + 16
         )
-        return QSize(width, max(fm.height() + 10, 30))
+        return QSize(width, max(fm.height(), 22) + 8)
+
+    def _shape_path(self) -> QPainterPath:
+        """Rectangle au coin inférieur droit biseauté."""
+        inset = 0.5
+        w, h = self.width(), self.height()
+        ch = _NAV_CHAMFER
+        path = QPainterPath()
+        path.moveTo(inset, inset)
+        path.lineTo(w - inset, inset)
+        path.lineTo(w - inset, h - ch)
+        path.lineTo(w - ch, h - inset)
+        path.lineTo(inset, h - inset)
+        path.closeSubpath()
+        return path
 
     def paintEvent(self, event) -> None:
-        super().paintEvent(event)
         t = _theme.current()
         painter = QPainter(self)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
         if self.isChecked():
+            bg = QBrush(QColor(t.text))
+            border = QColor(t.text)
             text_color = QColor(t.surface_bg)
             number_color = QColor(t.surface_bg)
             number_color.setAlpha(140)
-        else:
-            text_color = QColor(t.text) if self.underMouse() else QColor(t.tile_project_label)
+        elif self.underMouse():
+            gradient = QLinearGradient(0, 0, self.width(), 0)
+            gradient.setColorAt(0, QColor(t.nav_btn_gradient_from))
+            gradient.setColorAt(1, QColor(t.nav_btn_gradient_to))
+            bg = QBrush(gradient)
+            border = QColor(t.scrollbar_handle_hover)
+            text_color = QColor(t.text)
             number_color = QColor(t.color_btn_border)
+        else:
+            bg = QBrush(QColor(t.button_bg))
+            border = QColor(t.border)
+            text_color = QColor(t.tile_project_label)
+            number_color = QColor(t.color_btn_border)
+
+        path = self._shape_path()
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(bg)
+        painter.drawPath(path)
+
         r = self.rect().adjusted(12, 0, -12, 0)
         painter.setPen(text_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
@@ -372,6 +411,7 @@ class CommandBar(QWidget):
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setProperty("command_bar", True)
         self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 

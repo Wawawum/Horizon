@@ -232,7 +232,7 @@ QStackedWidget {{
 
 /* ── Barre de commandes (sous la barre de titre) ───────────────────── */
 QWidget[command_bar="true"] {{
-    background-color: {t.surface_bg};
+    background-color: #dde5f1;
     border-bottom: 1px solid {t.border};
 }}
 
