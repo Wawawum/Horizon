@@ -16,7 +16,7 @@ from horizon.search import SearchRepository
 from horizon.tag import TagRepository
 from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
-from horizon.widgets import CalendarMeeting, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
+from horizon.widgets import CalendarMeeting, CommandBar, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 from horizon.widgets.tags import TagsWidget
 from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
@@ -160,17 +160,19 @@ class MainWindow(QMainWindow):
         self._splitter.setStretchFactor(1, 1)  # center panel absorbs extra space
         self._splitter.setStretchFactor(2, 0)  # right panel keeps its natural width
 
+        self._command_bar = CommandBar()
+
         self._right_panel.create_note_requested.connect(self._on_create_note_from_meeting)
         self._search_results.note_requested.connect(self._open_note_from_notes)
         self._search_results.task_requested.connect(self._on_task_from_search)
         self._search_results.project_requested.connect(self._on_project_from_search)
 
-        self._project_list.home_requested.connect(self._show_home)
+        self._command_bar.home_requested.connect(self._show_home)
         self._project_list.project_selected.connect(self._show_project)
-        self._project_list.notes_requested.connect(self._show_notes)
-        self._project_list.tags_requested.connect(self._show_tags)
-        self._project_list.deliverables_requested.connect(self._show_deliverables)
-        self._project_list.media_requested.connect(self._show_media)
+        self._command_bar.notes_requested.connect(self._show_notes)
+        self._command_bar.tags_requested.connect(self._show_tags)
+        self._command_bar.deliverables_requested.connect(self._show_deliverables)
+        self._command_bar.media_requested.connect(self._show_media)
         self._media_widget.note_open_requested.connect(self._open_note_from_media)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
@@ -198,7 +200,8 @@ class MainWindow(QMainWindow):
         self._title_bar = TitleBar(self, subtitle="workspace", show_search=True)
         self._title_bar.search_requested.connect(self._on_search)
         container_layout.addWidget(self._title_bar)
-        container_layout.addWidget(self._splitter)
+        container_layout.addWidget(self._command_bar)
+        container_layout.addWidget(self._splitter, stretch=1)
 
         self.setCentralWidget(container)
         saved = self._prefs.splitter_sizes
@@ -288,6 +291,7 @@ class MainWindow(QMainWindow):
 
     def _show_home(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("board")
         self._home_widget.load()
         self._right_stack.setCurrentIndex(0)
 
@@ -296,26 +300,31 @@ class MainWindow(QMainWindow):
             self._show_home()
             return
         self._current_project = project
+        self._command_bar.clear_active()
         self._project_detail.load_project(project)
         self._right_stack.setCurrentIndex(1)
 
     def _show_notes(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("notes")
         self._notes_list.load()
         self._right_stack.setCurrentIndex(2)
 
     def _show_tags(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("tags")
         self._tags_widget.load()
         self._right_stack.setCurrentIndex(5)
 
     def _show_deliverables(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("deliverables")
         self._deliverables_widget.load()
         self._right_stack.setCurrentIndex(6)
 
     def _show_media(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("media")
         self._media_widget.load()
         self._right_stack.setCurrentIndex(10)
 
@@ -325,6 +334,7 @@ class MainWindow(QMainWindow):
 
     def _show_templates_list(self) -> None:
         self._project_list.clear_selection()
+        self._command_bar.set_active("deliverables")
         self._templates_list.load()
         self._right_stack.setCurrentIndex(7)
 

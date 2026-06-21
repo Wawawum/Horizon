@@ -329,6 +329,18 @@ class _NavButton(QPushButton):
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setProperty("nav_btn", True)
 
+    def sizeHint(self) -> QSize:
+        # Le texte est peint manuellement (pas via setText) : calculer la largeur
+        # nécessaire pour le libellé + l'ordinal, plus les marges latérales (12 px
+        # de chaque côté) et un espace de séparation.
+        fm = self.fontMetrics()
+        width = (
+            fm.horizontalAdvance(self._label)
+            + fm.horizontalAdvance(self._number)
+            + 12 + 12 + 16
+        )
+        return QSize(width, max(fm.height() + 10, 30))
+
     def paintEvent(self, event) -> None:
         super().paintEvent(event)
         t = _theme.current()
@@ -348,18 +360,20 @@ class _NavButton(QPushButton):
         painter.end()
 
 
-class ProjectListWidget(QWidget):
-    project_selected = Signal(object)  # emits Project | None
+class CommandBar(QWidget):
+    """Barre de commandes horizontale (sous la barre de titre) regroupant la
+    navigation principale : Board, Notes, Tags, Deliverables, Media."""
+
     home_requested = Signal()
     notes_requested = Signal()
     tags_requested = Signal()
     deliverables_requested = Signal()
     media_requested = Signal()
 
-    def __init__(self, repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._repo = repo
-        self.setMinimumWidth(200)
+        self.setProperty("command_bar", True)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self._board_btn = _NavButton("Board", "01")
         self._board_btn.setChecked(True)
@@ -377,32 +391,50 @@ class ProjectListWidget(QWidget):
         self._media_btn = _NavButton("Media", "05")
         self._media_btn.clicked.connect(self.media_requested)
 
+        self._buttons = {
+            "board": self._board_btn,
+            "notes": self._notes_btn,
+            "tags": self._tags_btn,
+            "deliverables": self._deliverables_btn,
+            "media": self._media_btn,
+        }
+
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
-        self._nav_group.addButton(self._board_btn)
-        self._nav_group.addButton(self._notes_btn)
-        self._nav_group.addButton(self._tags_btn)
-        self._nav_group.addButton(self._deliverables_btn)
-        self._nav_group.addButton(self._media_btn)
+        for btn in self._buttons.values():
+            # Largeur dictée par le contenu, hauteur fixe (barre horizontale).
+            btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            self._nav_group.addButton(btn)
 
-        nav_row1 = QHBoxLayout()
-        nav_row1.setContentsMargins(0, 0, 0, 0)
-        nav_row1.setSpacing(6)
-        nav_row1.addWidget(self._board_btn)
-        nav_row1.addWidget(self._notes_btn)
-        nav_row1.addWidget(self._tags_btn)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+        for btn in self._buttons.values():
+            layout.addWidget(btn)
+        layout.addStretch()
 
-        nav_row2 = QHBoxLayout()
-        nav_row2.setContentsMargins(0, 0, 0, 0)
-        nav_row2.setSpacing(6)
-        nav_row2.addWidget(self._deliverables_btn)
-        nav_row2.addWidget(self._media_btn)
+    def clear_active(self) -> None:
+        """Décoche tout bouton actif (ex. lorsqu'un projet est sélectionné)."""
+        self._nav_group.setExclusive(False)
+        checked = self._nav_group.checkedButton()
+        if checked:
+            checked.setChecked(False)
+        self._nav_group.setExclusive(True)
 
-        nav_layout = QVBoxLayout()
-        nav_layout.setContentsMargins(6, 6, 6, 4)
-        nav_layout.setSpacing(6)
-        nav_layout.addLayout(nav_row1)
-        nav_layout.addLayout(nav_row2)
+    def set_active(self, name: str) -> None:
+        """Coche le bouton correspondant à la vue courante (navigation programmatique)."""
+        btn = self._buttons.get(name)
+        if btn is not None:
+            btn.setChecked(True)
+
+
+class ProjectListWidget(QWidget):
+    project_selected = Signal(object)  # emits Project | None
+
+    def __init__(self, repo: ProjectRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._repo = repo
+        self.setMinimumWidth(200)
 
         t = _theme.current()
 
@@ -430,18 +462,9 @@ class ProjectListWidget(QWidget):
         bottom_layout.addStretch()
         bottom_layout.addWidget(self._new_btn)
 
-        nav_separator = QFrame()
-        nav_separator.setFrameShape(QFrame.Shape.HLine)
-        nav_separator.setFrameShadow(QFrame.Shadow.Plain)
-        separator_row = QHBoxLayout()
-        separator_row.setContentsMargins(6, 4, 6, 6)
-        separator_row.addWidget(nav_separator)
-
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addLayout(nav_layout)                 # Board + Notes buttons at top
-        layout.addLayout(separator_row)              # separator between nav and list
         layout.addWidget(self._list, stretch=1)      # fills all available vertical space
         layout.addLayout(bottom_layout)              # archived checkbox + new project button
 
@@ -463,11 +486,6 @@ class ProjectListWidget(QWidget):
         if current is None:
             self.project_selected.emit(None)
             return
-        self._nav_group.setExclusive(False)
-        checked = self._nav_group.checkedButton()
-        if checked:
-            checked.setChecked(False)
-        self._nav_group.setExclusive(True)
         project_id = current.data(Qt.ItemDataRole.UserRole)
         self.project_selected.emit(self._repo.get(project_id))
 

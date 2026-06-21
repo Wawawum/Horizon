@@ -230,6 +230,12 @@ QStackedWidget {{
     background-color: transparent;
 }}
 
+/* ── Barre de commandes (sous la barre de titre) ───────────────────── */
+QWidget[command_bar="true"] {{
+    background-color: {t.surface_bg};
+    border-bottom: 1px solid {t.border};
+}}
+
 /* ── Nav buttons (Board / Notes) ───────────────────────────────────── */
 QPushButton[nav_btn="true"] {{
     background-color: {t.button_bg};
