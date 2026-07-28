@@ -1,7 +1,7 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QLinearGradient, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -362,35 +362,52 @@ class _NavButton(QPushButton):
         return path
 
     def paintEvent(self, event) -> None:
+        # Style inspiré des cartes de sélection de projet (ProjectListDelegate) :
+        # fond clair, bordure turquoise + liseré d'accent à gauche à l'état
+        # sélectionné, texte foncé toujours lisible (pas de noir sur noir).
         t = _theme.current()
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
         if self.isChecked():
-            bg = QBrush(QColor(t.text))
-            border = QColor(t.text)
-            text_color = QColor(t.surface_bg)
-            number_color = QColor(t.surface_bg)
-            number_color.setAlpha(140)
+            bg = QColor(t.surface_bg)
+            border = QColor(t.list_selected_accent)
+            text_color = QColor(t.list_selected_text)
+            number_color = QColor(t.list_selected_accent)
+            bold = True
+            accent_bar = True
         elif self.underMouse():
-            gradient = QLinearGradient(0, 0, self.width(), 0)
-            gradient.setColorAt(0, QColor(t.nav_btn_gradient_from))
-            gradient.setColorAt(1, QColor(t.nav_btn_gradient_to))
-            bg = QBrush(gradient)
-            border = QColor(t.scrollbar_handle_hover)
+            bg = QColor(t.button_hover)
+            border = QColor(t.list_selected_accent)
             text_color = QColor(t.text)
             number_color = QColor(t.color_btn_border)
+            bold = False
+            accent_bar = False
         else:
-            bg = QBrush(QColor(t.button_bg))
+            bg = QColor(t.surface_bg)
             border = QColor(t.border)
             text_color = QColor(t.tile_project_label)
             number_color = QColor(t.color_btn_border)
+            bold = False
+            accent_bar = False
 
         path = self._shape_path()
         painter.setPen(QPen(border, 1))
-        painter.setBrush(bg)
+        painter.setBrush(QBrush(bg))
         painter.drawPath(path)
 
+        if accent_bar:
+            inset = 0.5
+            painter.setClipPath(path)
+            painter.fillRect(
+                QRectF(inset, inset, _PROJECT_ACCENT_WIDTH, self.height() - 2 * inset),
+                QColor(t.list_selected_accent),
+            )
+            painter.setClipping(False)
+
+        font = QFont(self.font())
+        font.setBold(bold)
+        painter.setFont(font)
         r = self.rect().adjusted(12, 0, -12, 0)
         painter.setPen(text_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
