@@ -320,6 +320,28 @@ class ProjectListDelegate(QStyledItemDelegate):
 _NAV_CHAMFER = 9  # taille du biseau du coin inférieur droit (style maquette)
 
 
+def _chamfered_rect_path(w: float, h: float, chamfer: float, inset: float = 0.5) -> QPainterPath:
+    """Rectangle dont le coin inférieur droit est biseauté (style maquette)."""
+    path = QPainterPath()
+    path.moveTo(inset, inset)
+    path.lineTo(w - inset, inset)
+    path.lineTo(w - inset, h - chamfer)
+    path.lineTo(w - chamfer, h - inset)
+    path.lineTo(inset, h - inset)
+    path.closeSubpath()
+    return path
+
+
+def _nav_state_colors(t, checked: bool, hover: bool):
+    """Couleurs (fond, bordure, texte, gras, liseré) partagées par les boutons de
+    navigation, inspirées des cartes de projet (ProjectListDelegate)."""
+    if checked:
+        return QColor(t.surface_bg), QColor(t.list_selected_accent), QColor(t.list_selected_text), True, True
+    if hover:
+        return QColor(t.button_hover), QColor(t.list_selected_accent), QColor(t.text), False, False
+    return QColor(t.surface_bg), QColor(t.border), QColor(t.tile_project_label), False, False
+
+
 class _NavButton(QPushButton):
     """Sidebar nav button: label on the left, dim ordinal on the right.
 
@@ -347,20 +369,6 @@ class _NavButton(QPushButton):
         )
         return QSize(width, max(fm.height(), 22) + 8)
 
-    def _shape_path(self) -> QPainterPath:
-        """Rectangle au coin inférieur droit biseauté."""
-        inset = 0.5
-        w, h = self.width(), self.height()
-        ch = _NAV_CHAMFER
-        path = QPainterPath()
-        path.moveTo(inset, inset)
-        path.lineTo(w - inset, inset)
-        path.lineTo(w - inset, h - ch)
-        path.lineTo(w - ch, h - inset)
-        path.lineTo(inset, h - inset)
-        path.closeSubpath()
-        return path
-
     def paintEvent(self, event) -> None:
         # Style inspiré des cartes de sélection de projet (ProjectListDelegate) :
         # fond clair, bordure turquoise + liseré d'accent à gauche à l'état
@@ -369,29 +377,12 @@ class _NavButton(QPushButton):
         painter = QPainter(self)
         painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
 
-        if self.isChecked():
-            bg = QColor(t.surface_bg)
-            border = QColor(t.list_selected_accent)
-            text_color = QColor(t.list_selected_text)
-            number_color = QColor(t.list_selected_accent)
-            bold = True
-            accent_bar = True
-        elif self.underMouse():
-            bg = QColor(t.button_hover)
-            border = QColor(t.list_selected_accent)
-            text_color = QColor(t.text)
-            number_color = QColor(t.color_btn_border)
-            bold = False
-            accent_bar = False
-        else:
-            bg = QColor(t.surface_bg)
-            border = QColor(t.border)
-            text_color = QColor(t.tile_project_label)
-            number_color = QColor(t.color_btn_border)
-            bold = False
-            accent_bar = False
+        bg, border, text_color, bold, accent_bar = _nav_state_colors(
+            t, self.isChecked(), self.underMouse()
+        )
+        number_color = QColor(t.list_selected_accent) if self.isChecked() else QColor(t.color_btn_border)
 
-        path = self._shape_path()
+        path = _chamfered_rect_path(self.width(), self.height(), _NAV_CHAMFER)
         painter.setPen(QPen(border, 1))
         painter.setBrush(QBrush(bg))
         painter.drawPath(path)
@@ -1017,7 +1008,8 @@ class HomeWidget(QWidget):
 
 
 class _VerticalTabButton(QPushButton):
-    """Bouton d'onglet vertical : même style que _NavButton, texte pivoté à 90°."""
+    """Bouton d'onglet vertical : même style que _NavButton (fond clair, bordure
+    turquoise + liseré à la sélection, coin biseauté), texte pivoté à 90°."""
 
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
@@ -1025,7 +1017,6 @@ class _VerticalTabButton(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setProperty("nav_btn", True)
 
     def sizeHint(self) -> QSize:
         fm = self.fontMetrics()
@@ -1034,11 +1025,33 @@ class _VerticalTabButton(QPushButton):
         return QSize(text_h + 16, text_w + 24)
 
     def paintEvent(self, event):
-        super().paintEvent(event)  # background/border/radius via stylesheet
         t = _theme.current()
-        color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
         painter = QPainter(self)
-        painter.setPen(color)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        bg, border, text_color, bold, accent_bar = _nav_state_colors(
+            t, self.isChecked(), self.underMouse()
+        )
+
+        path = _chamfered_rect_path(self.width(), self.height(), _NAV_CHAMFER)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(QBrush(bg))
+        painter.drawPath(path)
+
+        if accent_bar:
+            # Liseré d'accent sur le bord supérieur (bord « d'attaque » du texte pivoté).
+            inset = 0.5
+            painter.setClipPath(path)
+            painter.fillRect(
+                QRectF(inset, inset, self.width() - 2 * inset, _PROJECT_ACCENT_WIDTH),
+                QColor(t.list_selected_accent),
+            )
+            painter.setClipping(False)
+
+        font = QFont(self.font())
+        font.setBold(bold)
+        painter.setFont(font)
+        painter.setPen(text_color)
         painter.translate(self.width(), 0)
         painter.rotate(90)
         painter.drawText(
