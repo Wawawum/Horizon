@@ -24,6 +24,7 @@ class TitleBar(QWidget):
 
     def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True, show_search: bool = False) -> None:
         super().__init__(parent)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setProperty("titlebar", "true")
         self.setFixedHeight(36)
 
@@ -46,9 +47,10 @@ class TitleBar(QWidget):
         layout.addSpacing(8)
 
         # Nom de l'application
+        t = _theme.current()
         title_label = QLabel("HORIZON")
         title_label.setStyleSheet(
-            f"color: {_theme.current().accent_color};"
+            f"color: {t.titlebar_text};"
             "font-size: 11px;"
             "font-weight: bold;"
             "letter-spacing: 3px;"
@@ -57,10 +59,9 @@ class TitleBar(QWidget):
         layout.addWidget(title_label)
 
         # Séparateur décoratif
-        t = _theme.current()
         sep_label = QLabel("  //")
         sep_label.setStyleSheet(
-            f"color: {t.scrollbar_handle};"
+            f"color: {t.titlebar_muted};"
             "font-size: 10px;"
             "letter-spacing: 2px;"
             "background: transparent;"
@@ -72,7 +73,7 @@ class TitleBar(QWidget):
             layout.addSpacing(8)
             sub_label = QLabel(subtitle.upper())
             sub_label.setStyleSheet(
-                f"color: {t.scrollbar_handle_hover};"
+                f"color: {t.titlebar_muted_hover};"
                 "font-size: 10px;"
                 "font-weight: bold;"
                 "letter-spacing: 2px;"
@@ -92,9 +93,9 @@ class TitleBar(QWidget):
             self._search_edit.setFixedHeight(22)
             self._search_edit.setStyleSheet(
                 f"QLineEdit {{"
-                f"  background-color: {t.input_bg};"
-                f"  color: {t.text};"
-                f"  border: 1px solid {t.border};"
+                f"  background-color: {t.titlebar_input_bg};"
+                f"  color: {t.titlebar_text};"
+                f"  border: 1px solid {t.titlebar_border};"
                 f"  border-radius: 3px;"
                 f"  padding: 0 6px;"
                 f"  font-size: 11px;"
@@ -112,20 +113,20 @@ class TitleBar(QWidget):
             self._search_mode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
             self._search_mode.setStyleSheet(
                 f"QComboBox {{"
-                f"  background-color: {t.input_bg};"
-                f"  color: {t.text};"
-                f"  border: 1px solid {t.border};"
+                f"  background-color: {t.titlebar_input_bg};"
+                f"  color: {t.titlebar_text};"
+                f"  border: 1px solid {t.titlebar_border};"
                 f"  border-radius: 3px;"
                 f"  padding: 0 6px;"
                 f"  font-size: 11px;"
                 f"}}"
                 f"QComboBox::drop-down {{ border: none; width: 16px; }}"
                 f"QComboBox QAbstractItemView {{"
-                f"  background-color: {t.input_bg};"
-                f"  color: {t.text};"
-                f"  border: 1px solid {t.border};"
-                f"  selection-background-color: {t.accent_color};"
-                f"  selection-color: {t.app_bg};"
+                f"  background-color: {t.titlebar_input_bg};"
+                f"  color: {t.titlebar_text};"
+                f"  border: 1px solid {t.titlebar_border};"
+                f"  selection-background-color: {t.titlebar_accent};"
+                f"  selection-color: {t.titlebar_bg};"
                 f"}}"
             )
             layout.addWidget(self._search_mode)

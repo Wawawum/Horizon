@@ -4,14 +4,12 @@ from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSi
 from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush
 from PySide6.QtWidgets import (
     QAbstractItemView,
-    QApplication,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
     QComboBox,
     QDialog,
     QFrame,
-    QGroupBox,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -50,7 +48,6 @@ from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
 
 
-_PROJECT_COLOR_ROLE = Qt.ItemDataRole.UserRole + 1
 _KANBAN_MIME        = "application/x-horizon-task-id"
 _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
@@ -58,6 +55,7 @@ _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
 _CHECK_SVG          = ":/icons/check_black.svg"
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE     = QSize(12, 12)
+_PLUS_ICON_WHITE: QIcon | None = None
 _FOLDER_ICON: QIcon | None = None
 _FOLDER_ICON_SIZE   = QSize(14, 14)
 
@@ -67,14 +65,20 @@ def _plus_icon() -> QIcon:
         _PLUS_ICON = _theme.make_icon(":/icons/plus_cyan.svg", _PLUS_ICON_SIZE)
     return _PLUS_ICON
 
+def _plus_icon_white() -> QIcon:
+    global _PLUS_ICON_WHITE
+    if _PLUS_ICON_WHITE is None:
+        _PLUS_ICON_WHITE = QIcon(str(_RESOURCES_DIR / "plus_white.svg"))
+    return _PLUS_ICON_WHITE
+
 def _folder_icon() -> QIcon:
     global _FOLDER_ICON
     if _FOLDER_ICON is None:
-        _FOLDER_ICON = _theme.make_icon(":/icons/folder_cyan.svg", _FOLDER_ICON_SIZE)
+        _FOLDER_ICON = QIcon(str(_RESOURCES_DIR / "folder_square.svg"))
     return _FOLDER_ICON
 _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
-_TILE_RADIUS        = 4
+_TILE_RADIUS        = 0
 _TILE_MARGIN        = 2
 _PROJECT_COLOR_SQUARE = 10
 
@@ -84,6 +88,162 @@ _RESOURCES_DIR = Path(__file__).parent.parent / "resources"
 def _arrow_icon(direction: str) -> QIcon:
     """Charge l'icône de flèche (up/down) depuis le fichier SVG généré par le thème."""
     return QIcon(str(_RESOURCES_DIR / f"arrow_{direction}.svg"))
+
+
+# ── Style « terminal/HUD » du board (maquette) ───────────────────────────────
+_BRACKET_LEN        = 18   # longueur des équerres d'angle du cadre
+_BRACKET_WIDTH      = 2
+_BOARD_FRAME_MARGIN = 12   # marge intérieure du cadre à équerres
+_BOARD_FRAME_BG     = "#fbfcfd"          # fond du panneau TASKS
+_BOARD_ACCENT_BLUE  = "rgb(10, 92, 255)" # `// TASKS` + libellés de colonnes actives
+
+# ── Panneau Notes (maquette) ─────────────────────────────────────────────────
+_NOTES_PANEL_BG     = "#eef2f8"
+_NOTES_FOLDER_TEXT  = "#0f1729"
+_NOTES_NOTE_TEXT    = "#56627a"
+
+# Libellés des colonnes Kanban (affichage uniquement — l'enum reste inchangé)
+_BUCKET_LABELS = {
+    TaskBucket.Inbox:     "INBOX",
+    TaskBucket.Today:     "TODAY",
+    TaskBucket.On_Hold:   "ON HOLD",
+    TaskBucket.Completed: "DONE",
+}
+
+
+class _SlashTitle(QWidget):
+    """Titre au style maquette : `// <texte>` avec les slashes en couleur d'accent."""
+
+    def __init__(self, text: str, point_size_delta: int = 4, color: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        t = _theme.current()
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(6)
+
+        slash_color = color or t.list_selected_accent
+        text_color = color or t.text
+        slash = QLabel("//")
+        text_lbl = QLabel(text)
+        for lbl, color in ((slash, slash_color), (text_lbl, text_color)):
+            font = QFont(lbl.font())
+            font.setBold(True)
+            font.setPointSize(font.pointSize() + point_size_delta)
+            lbl.setFont(font)
+            lbl.setStyleSheet(f"color: {color}; background: transparent;")
+        self._text_lbl = text_lbl
+
+        layout.addWidget(slash)
+        layout.addWidget(text_lbl)
+
+    def set_text(self, text: str) -> None:
+        self._text_lbl.setText(text)
+
+
+class BoardFrame(QWidget):
+    """Conteneur qui peint quatre équerres d'angle en cyan autour de son contenu."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._layout = QVBoxLayout(self)
+        self._layout.setContentsMargins(
+            _BOARD_FRAME_MARGIN, _BOARD_FRAME_MARGIN, _BOARD_FRAME_MARGIN, _BOARD_FRAME_MARGIN
+        )
+        self._layout.setSpacing(6)
+
+    def content_layout(self) -> QVBoxLayout:
+        return self._layout
+
+    def paintEvent(self, event) -> None:
+        t = _theme.current()
+        painter = QPainter(self)
+        painter.fillRect(self.rect(), QColor(_BOARD_FRAME_BG))
+        pen = QPen(QColor(t.list_selected_accent), _BRACKET_WIDTH)
+        pen.setJoinStyle(Qt.PenJoinStyle.MiterJoin)
+        painter.setPen(pen)
+        off = _BRACKET_WIDTH // 2 + 1
+        L = _BRACKET_LEN
+        w, h = self.width(), self.height()
+        # Coin haut-gauche
+        painter.drawLine(off, off, off + L, off)
+        painter.drawLine(off, off, off, off + L)
+        # Coin haut-droit
+        painter.drawLine(w - off, off, w - off - L, off)
+        painter.drawLine(w - off, off, w - off, off + L)
+        # Coin bas-gauche
+        painter.drawLine(off, h - off, off + L, h - off)
+        painter.drawLine(off, h - off, off, h - off - L)
+        # Coin bas-droit
+        painter.drawLine(w - off, h - off, w - off - L, h - off)
+        painter.drawLine(w - off, h - off, w - off, h - off - L)
+        painter.end()
+
+
+class _ColumnHeader(QWidget):
+    """En-tête de colonne : `▸ INBOX` (MAJUSCULES) + badge compteur à droite."""
+
+    def __init__(self, label: str, color: str | None = None, parent=None) -> None:
+        super().__init__(parent)
+        t = _theme.current()
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setStyleSheet(f"background-color: {_BOARD_FRAME_BG};")
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(2, 0, 2, 0)
+        layout.setSpacing(6)
+
+        marker = QLabel("▸")
+        marker.setStyleSheet(f"color: {t.tile_project_label}; background: transparent;")
+
+        name = QLabel(label.upper())
+        name_font = QFont(name.font())
+        name_font.setBold(True)
+        name_font.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, 1.5)
+        name.setFont(name_font)
+        name.setStyleSheet(f"color: {color or t.text}; background: transparent;")
+
+        self._badge = QLabel("00")
+        self._badge.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        badge_font = QFont(self._badge.font())
+        badge_font.setBold(True)
+        self._badge.setFont(badge_font)
+        self._badge.setStyleSheet(
+            f"color: {t.tile_project_label}; background-color: {_BOARD_FRAME_BG};"
+            f" border-radius: 3px; padding: 1px 6px;"
+        )
+
+        layout.addWidget(marker)
+        layout.addWidget(name)
+        layout.addStretch()
+        layout.addWidget(self._badge)
+
+    def set_count(self, n: int) -> None:
+        self._badge.setText(f"{n:02d}")
+
+
+class _DashedVLine(QWidget):
+    """Fine ligne verticale pointillée pour séparer les colonnes Kanban."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setFixedWidth(1)
+        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
+
+    def paintEvent(self, event) -> None:
+        t = _theme.current()
+        painter = QPainter(self)
+        pen = QPen(QColor(t.border), 1)
+        pen.setStyle(Qt.PenStyle.DotLine)
+        painter.setPen(pen)
+        painter.drawLine(0, 4, 0, self.height() - 4)
+        painter.end()
+
+
+_PROJECT_ITEM_MARGIN_X = 5
+_PROJECT_ITEM_MARGIN_Y = 4
+_PROJECT_ACCENT_WIDTH = 4       # thicker turquoise bar on the left edge
+_PROJECT_ACCENT_TEXT_GAP = 12   # margin between the turquoise bar and the text
+_PROJECT_TEXT_INDENT = 14       # left padding for unselected items
+_PROJECT_GLOW_LAYERS = [(1, 70), (2, 40), (3, 18)]  # (offset, alpha) for the glow
 
 
 class ProjectListDelegate(QStyledItemDelegate):
@@ -96,37 +256,97 @@ class ProjectListDelegate(QStyledItemDelegate):
 
         painter.save()
 
-        # Background: own rendering for selection (avoids relying on the system
-        # palette which can produce white-on-white when Qt picks up an OS theme);
-        # let the system style handle hover/normal states.
         if is_selected:
-            painter.fillRect(option.rect, QColor(t.list_selected_bg))
-        else:
-            bg_opt = QStyleOptionViewItem(opt)
-            bg_opt.text = ""
-            style = opt.widget.style() if opt.widget else QApplication.style()
-            style.drawControl(QStyle.ControlElement.CE_ItemViewItem, bg_opt, painter, bg_opt.widget)
-
-        # Draw color band on the left edge
-        color_str = index.data(_PROJECT_COLOR_ROLE)
-        if color_str:
-            painter.fillRect(
-                QRect(option.rect.x(), option.rect.y(), _BAND_WIDTH, option.rect.height()),
-                QColor(color_str),
+            # Sharp-cornered card; integer rect for crisp 1px edges.
+            card_rect = option.rect.adjusted(
+                _PROJECT_ITEM_MARGIN_X, _PROJECT_ITEM_MARGIN_Y,
+                -_PROJECT_ITEM_MARGIN_X, -_PROJECT_ITEM_MARGIN_Y,
             )
 
-        # Draw text indented past the band
-        text_x = option.rect.x() + _BAND_WIDTH + 4
-        text_rect = QRect(text_x, option.rect.y(), option.rect.right() - text_x, option.rect.height())
+            # Glow: concentric outlines around the card with decreasing alpha.
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            for offset, alpha in _PROJECT_GLOW_LAYERS:
+                glow = QColor(t.list_selected_accent)
+                glow.setAlpha(alpha)
+                painter.setPen(QPen(glow, 1))
+                painter.drawRect(card_rect.adjusted(-offset, -offset, offset, offset))
+
+            # White background.
+            painter.fillRect(card_rect, QColor(t.surface_bg))
+
+            # Turquoise border around the card.
+            painter.setPen(QPen(QColor(t.list_selected_accent), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(card_rect)
+
+            # Thicker turquoise bar on the left edge.
+            painter.fillRect(
+                QRect(card_rect.x(), card_rect.y(), _PROJECT_ACCENT_WIDTH, card_rect.height()),
+                QColor(t.list_selected_accent),
+            )
+
+            text_x = card_rect.x() + _PROJECT_ACCENT_WIDTH + _PROJECT_ACCENT_TEXT_GAP
+            text_right = card_rect.right()
+        else:
+            # Unselected: white rectangle with a light grey border.
+            card_rect = option.rect.adjusted(
+                _PROJECT_ITEM_MARGIN_X, _PROJECT_ITEM_MARGIN_Y,
+                -_PROJECT_ITEM_MARGIN_X, -_PROJECT_ITEM_MARGIN_Y,
+            )
+            painter.fillRect(card_rect, QColor(t.surface_bg))
+            painter.setPen(QPen(QColor(t.border), 1))
+            painter.setBrush(Qt.BrushStyle.NoBrush)
+            painter.drawRect(card_rect)
+
+            text_x = card_rect.x() + _PROJECT_TEXT_INDENT
+            text_right = card_rect.right()
+
+        text_rect = QRect(text_x, option.rect.y(), text_right - text_x, option.rect.height())
         text_color = QColor(t.list_selected_text) if is_selected else opt.palette.text().color()
+        font = QFont(opt.font)
+        font.setBold(is_selected)
+        painter.setFont(font)
         painter.setPen(text_color)
         painter.drawText(text_rect, Qt.AlignmentFlag.AlignVCenter | Qt.AlignmentFlag.AlignLeft, opt.text)
 
         painter.restore()
 
+    def sizeHint(self, option, index) -> QSize:
+        size = super().sizeHint(option, index)
+        size.setHeight(size.height() + 14)
+        return size
+
+
+_NAV_CHAMFER = 9  # taille du biseau du coin inférieur droit (style maquette)
+
+
+def _chamfered_rect_path(w: float, h: float, chamfer: float, inset: float = 0.5) -> QPainterPath:
+    """Rectangle dont le coin inférieur droit est biseauté (style maquette)."""
+    path = QPainterPath()
+    path.moveTo(inset, inset)
+    path.lineTo(w - inset, inset)
+    path.lineTo(w - inset, h - chamfer)
+    path.lineTo(w - chamfer, h - inset)
+    path.lineTo(inset, h - inset)
+    path.closeSubpath()
+    return path
+
+
+def _nav_state_colors(t, checked: bool, hover: bool):
+    """Couleurs (fond, bordure, texte, gras, liseré) partagées par les boutons de
+    navigation, inspirées des cartes de projet (ProjectListDelegate)."""
+    if checked:
+        return QColor(t.surface_bg), QColor(t.list_selected_accent), QColor(t.list_selected_text), True, True
+    if hover:
+        return QColor(t.button_hover), QColor(t.list_selected_accent), QColor(t.text), False, False
+    return QColor(t.surface_bg), QColor(t.border), QColor(t.tile_project_label), False, False
+
 
 class _NavButton(QPushButton):
-    """Sidebar nav button: label on the left, dim ordinal on the right."""
+    """Sidebar nav button: label on the left, dim ordinal on the right.
+
+    Peint entièrement à la main : rectangle (sans arrondi) dont le coin
+    inférieur droit est biseauté, comme d'autres éléments de la maquette."""
 
     def __init__(self, label: str, number: str, parent=None) -> None:
         super().__init__(parent)
@@ -135,33 +355,73 @@ class _NavButton(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setProperty("nav_btn", True)
+
+    def sizeHint(self) -> QSize:
+        # Le texte est peint manuellement (pas via setText) : calculer la largeur
+        # nécessaire pour le libellé + l'ordinal, plus les marges latérales (12 px
+        # de chaque côté) et un espace de séparation. La hauteur reprend celle des
+        # autres boutons (New Folder / New Note) : min-height 22 + padding 4/4.
+        fm = self.fontMetrics()
+        width = (
+            fm.horizontalAdvance(self._label)
+            + fm.horizontalAdvance(self._number)
+            + 12 + 12 + 16
+        )
+        return QSize(width, max(fm.height(), 22) + 8)
 
     def paintEvent(self, event) -> None:
-        super().paintEvent(event)
+        # Style inspiré des cartes de sélection de projet (ProjectListDelegate) :
+        # fond clair, bordure turquoise + liseré d'accent à gauche à l'état
+        # sélectionné, texte foncé toujours lisible (pas de noir sur noir).
         t = _theme.current()
         painter = QPainter(self)
-        text_color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        bg, border, text_color, bold, accent_bar = _nav_state_colors(
+            t, self.isChecked(), self.underMouse()
+        )
+        number_color = QColor(t.list_selected_accent) if self.isChecked() else QColor(t.color_btn_border)
+
+        path = _chamfered_rect_path(self.width(), self.height(), _NAV_CHAMFER)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(QBrush(bg))
+        painter.drawPath(path)
+
+        if accent_bar:
+            inset = 0.5
+            painter.setClipPath(path)
+            painter.fillRect(
+                QRectF(inset, inset, _PROJECT_ACCENT_WIDTH, self.height() - 2 * inset),
+                QColor(t.list_selected_accent),
+            )
+            painter.setClipping(False)
+
+        font = QFont(self.font())
+        font.setBold(bold)
+        painter.setFont(font)
         r = self.rect().adjusted(12, 0, -12, 0)
         painter.setPen(text_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter, self._label)
-        painter.setPen(QColor(t.color_btn_border))
+        painter.setPen(number_color)
         painter.drawText(r, Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter, self._number)
         painter.end()
 
 
-class ProjectListWidget(QWidget):
-    project_selected = Signal(object)  # emits Project | None
+class CommandBar(QWidget):
+    """Barre de commandes horizontale (sous la barre de titre) regroupant la
+    navigation principale : Board, Notes, Tags, Deliverables, Media."""
+
     home_requested = Signal()
     notes_requested = Signal()
     tags_requested = Signal()
     deliverables_requested = Signal()
     media_requested = Signal()
 
-    def __init__(self, repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, parent=None) -> None:
         super().__init__(parent)
-        self._repo = repo
-        self.setMinimumWidth(200)
+        self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
+        self.setProperty("command_bar", True)
+        self.setSizePolicy(QSizePolicy.Policy.Preferred, QSizePolicy.Policy.Fixed)
 
         self._board_btn = _NavButton("Board", "01")
         self._board_btn.setChecked(True)
@@ -179,43 +439,69 @@ class ProjectListWidget(QWidget):
         self._media_btn = _NavButton("Media", "05")
         self._media_btn.clicked.connect(self.media_requested)
 
+        self._buttons = {
+            "board": self._board_btn,
+            "notes": self._notes_btn,
+            "tags": self._tags_btn,
+            "deliverables": self._deliverables_btn,
+            "media": self._media_btn,
+        }
+
         self._nav_group = QButtonGroup(self)
         self._nav_group.setExclusive(True)
-        self._nav_group.addButton(self._board_btn)
-        self._nav_group.addButton(self._notes_btn)
-        self._nav_group.addButton(self._tags_btn)
-        self._nav_group.addButton(self._deliverables_btn)
-        self._nav_group.addButton(self._media_btn)
+        for btn in self._buttons.values():
+            # Largeur dictée par le contenu, hauteur fixe (barre horizontale).
+            btn.setSizePolicy(QSizePolicy.Policy.Maximum, QSizePolicy.Policy.Fixed)
+            self._nav_group.addButton(btn)
 
-        nav_row1 = QHBoxLayout()
-        nav_row1.setContentsMargins(0, 0, 0, 0)
-        nav_row1.setSpacing(6)
-        nav_row1.addWidget(self._board_btn)
-        nav_row1.addWidget(self._notes_btn)
-        nav_row1.addWidget(self._tags_btn)
+        layout = QHBoxLayout(self)
+        layout.setContentsMargins(8, 4, 8, 4)
+        layout.setSpacing(6)
+        for btn in self._buttons.values():
+            layout.addWidget(btn)
+        layout.addStretch()
 
-        nav_row2 = QHBoxLayout()
-        nav_row2.setContentsMargins(0, 0, 0, 0)
-        nav_row2.setSpacing(6)
-        nav_row2.addWidget(self._deliverables_btn)
-        nav_row2.addWidget(self._media_btn)
+    def clear_active(self) -> None:
+        """Décoche tout bouton actif (ex. lorsqu'un projet est sélectionné)."""
+        self._nav_group.setExclusive(False)
+        checked = self._nav_group.checkedButton()
+        if checked:
+            checked.setChecked(False)
+        self._nav_group.setExclusive(True)
 
-        nav_layout = QVBoxLayout()
-        nav_layout.setContentsMargins(6, 6, 6, 4)
-        nav_layout.setSpacing(6)
-        nav_layout.addLayout(nav_row1)
-        nav_layout.addLayout(nav_row2)
+    def set_active(self, name: str) -> None:
+        """Coche le bouton correspondant à la vue courante (navigation programmatique)."""
+        btn = self._buttons.get(name)
+        if btn is not None:
+            btn.setChecked(True)
+
+
+class ProjectListWidget(QWidget):
+    project_selected = Signal(object)  # emits Project | None
+
+    def __init__(self, repo: ProjectRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._repo = repo
+        self.setMinimumWidth(200)
+
+        t = _theme.current()
 
         self._list = QListWidget()
+        self._list.setFrameShape(QFrame.Shape.NoFrame)
+        self._list.setStyleSheet("QListWidget { background: transparent; border: none; }")
         self._list.setItemDelegate(ProjectListDelegate(self._list))
         self._list.currentItemChanged.connect(self._on_selection_changed)
 
-        self._show_archived_cb = QCheckBox("Show archived")
+        self._show_archived_cb = QCheckBox("archived")
         self._show_archived_cb.stateChanged.connect(self._load_projects)
 
-        self._new_btn = QPushButton("New Project")
-        self._new_btn.setIcon(_plus_icon())
-        self._new_btn.setIconSize(_PLUS_ICON_SIZE)
+        accent_hover = QColor(t.accent_color).darker(115).name()
+        self._new_btn = QPushButton("+ NEW")
+        self._new_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t.accent_color}; color: white; "
+            f"border: none; border-radius: 6px; padding: 4px 14px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {accent_hover}; }}"
+        )
         self._new_btn.clicked.connect(self._on_new_project)
 
         bottom_layout = QHBoxLayout()
@@ -227,7 +513,6 @@ class ProjectListWidget(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(0)
-        layout.addLayout(nav_layout)                 # Board + Notes buttons at top
         layout.addWidget(self._list, stretch=1)      # fills all available vertical space
         layout.addLayout(bottom_layout)              # archived checkbox + new project button
 
@@ -241,7 +526,6 @@ class ProjectListWidget(QWidget):
                 continue
             item = QListWidgetItem(project.name)
             item.setData(Qt.ItemDataRole.UserRole, project.id)
-            item.setData(_PROJECT_COLOR_ROLE, project.color)
             self._list.addItem(item)
 
     def _on_selection_changed(
@@ -250,11 +534,6 @@ class ProjectListWidget(QWidget):
         if current is None:
             self.project_selected.emit(None)
             return
-        self._nav_group.setExclusive(False)
-        checked = self._nav_group.checkedButton()
-        if checked:
-            checked.setChecked(False)
-        self._nav_group.setExclusive(True)
         project_id = current.data(Qt.ItemDataRole.UserRole)
         self.project_selected.emit(self._repo.get(project_id))
 
@@ -335,7 +614,7 @@ class KanbanCardWidget(QWidget):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(_BAND_WIDTH + 6, 4, 6, 4)
+        layout.setContentsMargins(_BAND_WIDTH + 6, 10, 6, 10)
         layout.setSpacing(2)
 
         title = QLabel(task.title)
@@ -495,6 +774,7 @@ class KanbanBoardWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._columns: dict[TaskBucket, QListWidget] = {}
+        self._headers: dict[TaskBucket, _ColumnHeader] = {}
         self._selected_task_id: int | None = None
 
         board = QWidget()
@@ -502,16 +782,17 @@ class KanbanBoardWidget(QWidget):
         board_layout.setSpacing(8)
         board_layout.setContentsMargins(0, 0, 0, 0)
 
-        for bucket in self.COLUMNS:
+        for i, bucket in enumerate(self.COLUMNS):
+            if i > 0:
+                board_layout.addWidget(_DashedVLine())
+
             col_widget = QWidget()
             col_layout = QVBoxLayout(col_widget)
             col_layout.setContentsMargins(0, 0, 0, 0)
             col_layout.setSpacing(4)
 
-            header = QLabel(bucket.value)
-            font = header.font()
-            font.setBold(True)
-            header.setFont(font)
+            header_color = _BOARD_ACCENT_BLUE if bucket in (TaskBucket.Inbox, TaskBucket.Today) else None
+            header = _ColumnHeader(_BUCKET_LABELS.get(bucket, bucket.value), color=header_color)
             col_layout.addWidget(header)
 
             list_widget = KanbanColumnWidget(bucket)
@@ -524,6 +805,7 @@ class KanbanBoardWidget(QWidget):
             col_layout.addWidget(list_widget, stretch=1)
 
             self._columns[bucket] = list_widget
+            self._headers[bucket] = header
             board_layout.addWidget(col_widget, stretch=1)
 
         scroll = QScrollArea()
@@ -551,6 +833,24 @@ class KanbanBoardWidget(QWidget):
             column = self._columns[task.bucket]
             column.addItem(item)
             column.setItemWidget(item, card)
+        self._refresh_column_states()
+
+    def _refresh_column_states(self) -> None:
+        """Met à jour le compteur de chaque colonne et l'apparence des colonnes vides."""
+        t = _theme.current()
+        for bucket, column in self._columns.items():
+            count = column.count()
+            self._headers[bucket].set_count(count)
+            if count == 0:
+                column.setStyleSheet(
+                    f"QListWidget {{ background-color: {_BOARD_FRAME_BG};"
+                    f" border: 1px dashed {t.border}; }}"
+                )
+            else:
+                column.setStyleSheet(
+                    f"QListWidget {{ background-color: {_BOARD_FRAME_BG};"
+                    f" border: none; }}"
+                )
 
     def _on_column_selection_changed(
         self, current: QListWidgetItem | None, _previous
@@ -593,11 +893,7 @@ class HomeWidget(QWidget):
         self._board.task_bucket_changed.connect(self._on_bucket_changed)
         self._board.tasks_reordered.connect(self._on_tasks_reordered)
 
-        title = QLabel("All Tasks")
-        font = title.font()
-        font.setPointSize(font.pointSize() + 4)
-        font.setBold(True)
-        title.setFont(font)
+        title = _SlashTitle("ALL TASKS", point_size_delta=4)
 
         self._move_up_btn = QPushButton()
         self._move_up_btn.setIcon(_arrow_icon("up"))
@@ -619,15 +915,31 @@ class HomeWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.addWidget(title)
         header_layout.addStretch()
-        header_layout.addWidget(self._show_archived_cb)
-        header_layout.addWidget(self._move_up_btn)
-        header_layout.addWidget(self._move_down_btn)
+
+        # ── Panneau TASKS encadré (équerres cyan) ─────────────────────────
+        board_frame = BoardFrame()
+        board_header = QHBoxLayout()
+        board_header.setContentsMargins(0, 0, 0, 0)
+        board_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
+        board_header.addStretch()
+        board_header.addWidget(self._show_archived_cb)
+        board_header.addWidget(self._move_up_btn)
+        board_header.addWidget(self._move_down_btn)
+
+        board_sep = QFrame()
+        board_sep.setFrameShape(QFrame.Shape.HLine)
+        board_sep.setFrameShadow(QFrame.Shadow.Plain)
+
+        frame_layout = board_frame.content_layout()
+        frame_layout.addLayout(board_header)
+        frame_layout.addWidget(board_sep)
+        frame_layout.addWidget(self._board, stretch=1)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         layout.addLayout(header_layout)
-        layout.addWidget(self._board, stretch=1)
+        layout.addWidget(board_frame, stretch=1)
 
     def load(self) -> None:
         projects = self._project_repo.list_all()
@@ -696,7 +1008,8 @@ class HomeWidget(QWidget):
 
 
 class _VerticalTabButton(QPushButton):
-    """Bouton d'onglet vertical : même style que _NavButton, texte pivoté à 90°."""
+    """Bouton d'onglet vertical : même style que _NavButton (fond clair, bordure
+    turquoise + liseré à la sélection, coin biseauté), texte pivoté à 90°."""
 
     def __init__(self, text: str, parent=None):
         super().__init__(parent)
@@ -704,7 +1017,6 @@ class _VerticalTabButton(QPushButton):
         self.setCheckable(True)
         self.setFocusPolicy(Qt.FocusPolicy.NoFocus)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setProperty("nav_btn", True)
 
     def sizeHint(self) -> QSize:
         fm = self.fontMetrics()
@@ -713,11 +1025,33 @@ class _VerticalTabButton(QPushButton):
         return QSize(text_h + 16, text_w + 24)
 
     def paintEvent(self, event):
-        super().paintEvent(event)  # background/border/radius via stylesheet
         t = _theme.current()
-        color = QColor(t.text) if (self.isChecked() or self.underMouse()) else QColor(t.tile_project_label)
         painter = QPainter(self)
-        painter.setPen(color)
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, True)
+
+        bg, border, text_color, bold, accent_bar = _nav_state_colors(
+            t, self.isChecked(), self.underMouse()
+        )
+
+        path = _chamfered_rect_path(self.width(), self.height(), _NAV_CHAMFER)
+        painter.setPen(QPen(border, 1))
+        painter.setBrush(QBrush(bg))
+        painter.drawPath(path)
+
+        if accent_bar:
+            # Liseré d'accent sur le bord supérieur (bord « d'attaque » du texte pivoté).
+            inset = 0.5
+            painter.setClipPath(path)
+            painter.fillRect(
+                QRectF(inset, inset, self.width() - 2 * inset, _PROJECT_ACCENT_WIDTH),
+                QColor(t.list_selected_accent),
+            )
+            painter.setClipping(False)
+
+        font = QFont(self.font())
+        font.setBold(bold)
+        painter.setFont(font)
+        painter.setPen(text_color)
         painter.translate(self.width(), 0)
         painter.rotate(90)
         painter.drawText(
@@ -893,9 +1227,12 @@ class ProjectDetailWidget(QWidget):
         content_layout.setContentsMargins(16, 16, 16, 16)
         content_layout.setSpacing(8)
 
-        # Name header (inline-editable)
+        # Name header (inline-editable) — sans cadre pour ressembler à un titre
         self._name_label = QLineEdit()
         self._name_label.setFrame(False)
+        self._name_label.setStyleSheet(
+            "QLineEdit { background: transparent; border: none; padding: 0; }"
+        )
         font = self._name_label.font()
         font.setPointSize(font.pointSize() + 4)
         font.setBold(True)
@@ -911,7 +1248,17 @@ class ProjectDetailWidget(QWidget):
         self._color_btn.setStyleSheet(f"border: 1px solid {_theme.current().color_btn_border}; border-radius: 3px; padding: 0; min-height: 0;")
         self._color_btn.clicked.connect(self._pick_color)
 
+        name_slash = QLabel("//")
+        slash_font = QFont(name_slash.font())
+        slash_font.setBold(True)
+        slash_font.setPointSize(slash_font.pointSize() + 4)
+        name_slash.setFont(slash_font)
+        name_slash.setStyleSheet(
+            f"color: {_theme.current().list_selected_accent}; background: transparent;"
+        )
+
         name_header = QHBoxLayout()
+        name_header.addWidget(name_slash)
         name_header.addWidget(self._name_label, stretch=1)
         name_header.addWidget(self._color_btn)
         name_header.addWidget(self._archive_cb)
@@ -925,7 +1272,7 @@ class ProjectDetailWidget(QWidget):
 
         # Description toggle
         self._desc_toggle = QToolButton()
-        self._desc_toggle.setText("Description")
+        self._desc_toggle.setText("DESCRIPTION")
         self._desc_toggle.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
         self._desc_toggle.setArrowType(Qt.ArrowType.RightArrow)  # collapsed by default
         self._desc_toggle.setCheckable(True)
@@ -947,14 +1294,14 @@ class ProjectDetailWidget(QWidget):
         self._desc_text.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
         content_layout.addWidget(self._desc_text)
 
-        # ── Tasks panel (left side of splitter) ──────────────────────────
-        tasks_panel = QGroupBox("Tasks")
-        tasks_panel_layout = QVBoxLayout(tasks_panel)
-        tasks_panel_layout.setContentsMargins(8, 4, 8, 8)
-        tasks_panel_layout.setSpacing(4)
+        # ── Tasks panel (left side of splitter) : cadre à équerres ────────
+        tasks_panel = BoardFrame()
+        tasks_panel_layout = tasks_panel.content_layout()
 
-        # Tasks header row: view selector + "+" button right
+        # Tasks header row: `// TASKS` à gauche + contrôles à droite
         tasks_header = QHBoxLayout()
+        tasks_header.setContentsMargins(0, 0, 0, 0)
+        tasks_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
         tasks_header.addStretch()
 
         self._view_selector = QComboBox()
@@ -963,7 +1310,7 @@ class ProjectDetailWidget(QWidget):
         self._view_selector.currentIndexChanged.connect(self._on_view_changed)
         tasks_header.addWidget(self._view_selector)
 
-        self._purge_btn = QPushButton("Purge")
+        self._purge_btn = QPushButton("PURGE")
         self._purge_btn.clicked.connect(self._on_purge)
         tasks_header.addWidget(self._purge_btn)
 
@@ -981,15 +1328,26 @@ class ProjectDetailWidget(QWidget):
         self._move_down_btn.setToolTip("Move down")
         self._move_down_btn.clicked.connect(self._on_move_down)
 
-        new_task_btn = QPushButton("New")
-        new_task_btn.setIcon(_plus_icon())
-        new_task_btn.setIconSize(_PLUS_ICON_SIZE)
+        t = _theme.current()
+        accent_hover = QColor(t.accent_color).darker(115).name()
+        new_task_btn = QPushButton("+ NEW")
+        new_task_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t.accent_color}; color: white; "
+            f"border: none; border-radius: 6px; padding: 4px 14px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {accent_hover}; }}"
+        )
         new_task_btn.clicked.connect(self._on_new_task)
 
         tasks_header.addWidget(self._move_up_btn)
         tasks_header.addWidget(self._move_down_btn)
         tasks_header.addWidget(new_task_btn)
         tasks_panel_layout.addLayout(tasks_header)
+
+        # Separator sous l'en-tête
+        tasks_sep = QFrame()
+        tasks_sep.setFrameShape(QFrame.Shape.HLine)
+        tasks_sep.setFrameShadow(QFrame.Shadow.Plain)
+        tasks_panel_layout.addWidget(tasks_sep)
 
         # Task table
         self._task_table = QTableWidget()
@@ -1019,27 +1377,47 @@ class ProjectDetailWidget(QWidget):
         # ── Right panel: Notes / Deliverables / Documents ─────────────────
         # Notes content
         notes_content = QWidget()
+        notes_content.setStyleSheet(f"background-color: {_NOTES_PANEL_BG};")
         notes_content_layout = QVBoxLayout(notes_content)
-        notes_content_layout.setContentsMargins(8, 4, 4, 8)
-        notes_content_layout.setSpacing(4)
+        notes_content_layout.setContentsMargins(8, 8, 8, 8)
+        notes_content_layout.setSpacing(8)
+
+        t_notes = _theme.current()
+        notes_accent_hover = QColor(t_notes.accent_color).darker(115).name()
 
         notes_header = QHBoxLayout()
-        notes_header.addStretch()
+        notes_header.setContentsMargins(0, 0, 0, 0)
+        notes_header.setSpacing(8)
         self._new_folder_btn = QPushButton("New Folder")
         self._new_folder_btn.setIcon(_plus_icon())
         self._new_folder_btn.setIconSize(_PLUS_ICON_SIZE)
+        self._new_folder_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t_notes.button_bg}; color: {t_notes.text}; "
+            f"border: 1px solid {t_notes.border}; border-radius: 0; padding: 4px 12px; }}"
+            f"QPushButton:hover {{ background-color: {t_notes.button_hover}; }}"
+            f"QPushButton:pressed {{ background-color: {t_notes.button_pressed}; }}"
+        )
         self._new_folder_btn.clicked.connect(self._on_new_folder)
-        notes_header.addWidget(self._new_folder_btn)
+        notes_header.addWidget(self._new_folder_btn, stretch=1)
         new_note_btn = QPushButton("New Note")
-        new_note_btn.setIcon(_plus_icon())
+        new_note_btn.setIcon(_plus_icon_white())
         new_note_btn.setIconSize(_PLUS_ICON_SIZE)
+        new_note_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t_notes.accent_color}; color: white; "
+            f"border: none; border-radius: 0; padding: 4px 12px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {notes_accent_hover}; }}"
+        )
         new_note_btn.clicked.connect(self._on_new_note)
-        notes_header.addWidget(new_note_btn)
+        notes_header.addWidget(new_note_btn, stretch=1)
         notes_content_layout.addLayout(notes_header)
 
         self._note_tree = _FolderTree()
         self._note_tree.setColumnCount(1)
         self._note_tree.setHeaderHidden(True)
+        self._note_tree.setFrameShape(QFrame.Shape.NoFrame)
+        self._note_tree.setStyleSheet(
+            f"QTreeWidget {{ background-color: {_NOTES_PANEL_BG}; border: none; }}"
+        )
         self._note_tree.setEditTriggers(QAbstractItemView.EditTrigger.NoEditTriggers)
         self._note_tree.setSelectionBehavior(QAbstractItemView.SelectionBehavior.SelectRows)
         self._note_tree.itemDoubleClicked.connect(self._on_note_item_double_clicked)
@@ -1332,6 +1710,7 @@ class ProjectDetailWidget(QWidget):
                 folder_item = QTreeWidgetItem(parent_item)
             folder_item.setText(0, folder.name)
             folder_item.setIcon(0, _folder_icon())
+            folder_item.setForeground(0, QBrush(QColor(_NOTES_FOLDER_TEXT)))
             folder_item.setData(0, _NOTE_NODE_DATA_ROLE, folder.id)
             folder_item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_FOLDER)
             if self._prefs is not None and self._current_project_id is not None:
@@ -1354,6 +1733,7 @@ class ProjectDetailWidget(QWidget):
         else:
             item = QTreeWidgetItem(parent)
         item.setText(0, note.title)
+        item.setForeground(0, QBrush(QColor(_NOTES_NOTE_TEXT)))
         item.setData(0, _NOTE_NODE_DATA_ROLE, note.id)
         item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_NOTE)
         item.setData(0, _NOTE_NODE_FOLDER_ROLE, note.folder_id)

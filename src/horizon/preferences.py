@@ -74,14 +74,6 @@ class Preferences:
         self._data["note_splitter_sizes"] = value
 
     @property
-    def theme(self) -> str:
-        return self._data.get("theme", "dark")
-
-    @theme.setter
-    def theme(self, value: str) -> None:
-        self._data["theme"] = value
-
-    @property
     def api_port(self) -> int:
         return self._data.get("api", {}).get("port", 5555)
 
