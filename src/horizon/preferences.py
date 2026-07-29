@@ -74,6 +74,14 @@ class Preferences:
         self._data["note_splitter_sizes"] = value
 
     @property
+    def editor_font_size(self) -> int:
+        return self._data.get("editor_font_size", 13)
+
+    @editor_font_size.setter
+    def editor_font_size(self, value: int) -> None:
+        self._data["editor_font_size"] = value
+
+    @property
     def api_port(self) -> int:
         return self._data.get("api", {}).get("port", 5555)
 

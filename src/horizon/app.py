@@ -142,10 +142,10 @@ class MainWindow(QMainWindow):
         self._templates_list = DeliverableTemplatesListWidget(self._tmpl_repo)
         self._right_stack.addWidget(self._templates_list)         # index 7
 
-        self._template_detail = DeliverableTemplateDetailWidget(self._tmpl_repo, image_repo)
+        self._template_detail = DeliverableTemplateDetailWidget(self._tmpl_repo, image_repo, prefs=self._prefs)
         self._right_stack.addWidget(self._template_detail)        # index 8
 
-        self._deliverable_detail = DeliverableDetailWidget(self._deliverable_repo, image_repo)
+        self._deliverable_detail = DeliverableDetailWidget(self._deliverable_repo, image_repo, prefs=self._prefs)
         self._right_stack.addWidget(self._deliverable_detail)     # index 9
 
         self._media_widget = MediaWidget(image_repo, self._search_repo, self._note_repo, self._proj_repo)
@@ -470,6 +470,8 @@ class MainWindow(QMainWindow):
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:
+        for detail in (self._note_detail, self._deliverable_detail, self._template_detail):
+            detail.flush_and_save()
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
         for overlay in list(self._pin_borders.values()):
             try:

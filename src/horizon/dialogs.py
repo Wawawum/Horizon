@@ -994,7 +994,7 @@ class MermaidViewerDialog(QDialog):
         import html as _h
         from horizon import theme as _t_mod
         t = _t_mod.current()
-        mermaid_theme = "default" if t.name == "light" else "dark"
+        mermaid_theme = "dark" if t.is_dark else "default"
         mermaid_js_url = _MERMAID_JS_PATH.as_uri()
         escaped_source = _h.escape(source)
         return f"""<!DOCTYPE html>

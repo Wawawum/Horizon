@@ -1,4 +1,4 @@
-from PySide6.QtCore import Qt, Signal, QEvent, QTimer
+from PySide6.QtCore import Qt, Signal, QTimer
 from PySide6.QtGui import QColor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
@@ -37,9 +37,8 @@ from horizon.widgets.markdown import (
     _make_preview_html,
     _markdown_to_html,
     MarkdownBridge,
-    MarkdownEditor,
-    MarkdownToolbar,
 )
+from horizon.widgets.webeditor import WebMarkdownEditor
 
 
 class NotesListWidget(QWidget):
@@ -253,11 +252,15 @@ class NoteDetailWidget(QWidget):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self._editor = MarkdownEditor(image_repo) if image_repo is not None else QPlainTextEdit()
-        self._editor.setPlaceholderText("Write markdown here…")
-        self._editor.installEventFilter(self)
-
-        self._toolbar = MarkdownToolbar(self._editor)
+        self._editor = WebMarkdownEditor(
+            image_repo, self,
+            show_toolbar=True,
+            placeholder="Write markdown here…",
+            prefs=prefs,
+        )
+        self._editor.editing_finished.connect(self._save_body)
+        self._editor.shortcut_pressed.connect(self._on_editor_shortcut)
+        self._editor.image_upload.connect(self._on_image_upload)
 
         self._bridge = MarkdownBridge(self)
         self._channel = QWebChannel(self)
@@ -270,7 +273,7 @@ class NoteDetailWidget(QWidget):
         self._bridge.link_clicked.connect(self._on_link_clicked)
         self._bridge.mermaid_open_requested.connect(self._on_open_mermaid)
 
-        self._editor.textChanged.connect(self._on_editor_text_changed)
+        self._editor.text_changed.connect(self._on_editor_text_changed)
 
         self._history_panel = QWidget()
         _hp_layout = QVBoxLayout(self._history_panel)
@@ -283,15 +286,8 @@ class NoteDetailWidget(QWidget):
         _hp_layout.addWidget(self._history_list)
         self._history_panel.setVisible(False)
 
-        self._editor_container = QWidget()
-        editor_layout = QHBoxLayout(self._editor_container)
-        editor_layout.setContentsMargins(0, 0, 0, 0)
-        editor_layout.setSpacing(4)
-        editor_layout.addWidget(self._toolbar)
-        editor_layout.addWidget(self._editor, stretch=1)
-
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._body_splitter.addWidget(self._editor_container)
+        self._body_splitter.addWidget(self._editor)
         self._body_splitter.addWidget(self._preview)
         self._body_splitter.addWidget(self._history_panel)
         self._body_splitter.setStretchFactor(0, 1)
@@ -343,8 +339,7 @@ class NoteDetailWidget(QWidget):
         self._viewing_version = None
         self._readonly_banner.setVisible(False)
         self._back_btn.setText("← Back")
-        self._editor.setReadOnly(False)
-        self._toolbar.setEnabled(True)
+        self._editor.set_read_only(False)
         if self._history_btn.isChecked():
             self._history_btn.setChecked(False)
             self._history_panel.setVisible(False)
@@ -374,9 +369,7 @@ class NoteDetailWidget(QWidget):
             self._folder_combo.clear()
         self._updating_folder_combo = False
 
-        self._editor.blockSignals(True)
-        self._editor.setPlainText(self._body_raw)
-        self._editor.blockSignals(False)
+        self._editor.set_text(self._body_raw)
 
         self._image_cache = {}
         self._refresh_note_cache()
@@ -410,13 +403,28 @@ class NoteDetailWidget(QWidget):
         idx = self._folder_combo.findData(selected_folder_id)
         self._folder_combo.setCurrentIndex(idx if idx >= 0 else 0)
 
-    def eventFilter(self, obj, event) -> bool:
-        if obj is self._editor and event.type() == QEvent.Type.FocusOut:
-            self._save_body()
-        return super().eventFilter(obj, event)
+    def _on_editor_shortcut(self, name: str) -> None:
+        if name == "save":
+            self._save_body(show_status=True)
+
+    def _on_image_upload(self, started: bool) -> None:
+        if started:
+            self._status_clear_timer.stop()
+            self._status_label.setText("Enregistrement de l'image…")
+        else:
+            self._status_label.setText("")
 
     def _autosave(self) -> None:
         self._save_body(show_status=True)
+
+    def flush_and_save(self) -> None:
+        """Persist any pending body edit immediately.
+
+        Called from closeEvent handlers, where the debounced autosave timer would
+        otherwise never fire and the edit would be lost.
+        """
+        self._autosave_timer.stop()
+        self._save_body()
 
     def _clear_status(self) -> None:
         self._status_label.setText("")
@@ -426,7 +434,8 @@ class NoteDetailWidget(QWidget):
             return
         if self._current_note is None:
             return
-        new_body = self._editor.toPlainText()
+        self._editor.flush()
+        new_body = self._editor.text()
         if new_body == self._body_raw:
             return
         self._autosave_timer.stop()
@@ -449,8 +458,10 @@ class NoteDetailWidget(QWidget):
             self._autosave_timer.start()
 
     def _do_render(self) -> None:
+        # No flush(): this sits behind a 300 ms debounce, so a ~120 ms stale mirror
+        # is invisible and a nested event loop here would be gratuitous.
         self._bridge.push_html(_markdown_to_html(
-            self._editor.toPlainText(),
+            self._editor.text(),
             self._image_repo,
             self._note_repo,
             title_to_id=self._note_title_to_id,
@@ -553,11 +564,8 @@ class NoteDetailWidget(QWidget):
             self._viewing_version = None
             self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.setReadOnly(False)
-            self._toolbar.setEnabled(True)
-            self._editor.blockSignals(True)
-            self._editor.setPlainText(self._body_raw)
-            self._editor.blockSignals(False)
+            self._editor.set_read_only(False)
+            self._editor.set_text(self._body_raw)
             self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
             self._history_list.blockSignals(True)
             if self._history_list.count() > 0:
@@ -581,7 +589,7 @@ class NoteDetailWidget(QWidget):
             self._load_history()
 
     def _on_toggle_presentation(self, checked: bool) -> None:
-        self._editor_container.setVisible(not checked)
+        self._editor.setVisible(not checked)
 
     def _load_history(self) -> None:
         if self._version_repo is None or self._current_note is None:
@@ -607,19 +615,13 @@ class NoteDetailWidget(QWidget):
             self._viewing_version = None
             self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.setReadOnly(False)
-            self._toolbar.setEnabled(True)
-            self._editor.blockSignals(True)
-            self._editor.setPlainText(self._body_raw)
-            self._editor.blockSignals(False)
+            self._editor.set_read_only(False)
+            self._editor.set_text(self._body_raw)
             self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
         else:
             self._viewing_version = version
             self._readonly_banner.setVisible(True)
             self._back_btn.setText("← Return to current")
-            self._editor.setReadOnly(True)
-            self._toolbar.setEnabled(False)
-            self._editor.blockSignals(True)
-            self._editor.setPlainText(version.body)
-            self._editor.blockSignals(False)
+            self._editor.set_read_only(True)
+            self._editor.set_text(version.body)
             self._bridge.push_html(_markdown_to_html(version.body, self._image_repo, self._note_repo))

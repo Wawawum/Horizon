@@ -72,6 +72,7 @@ class NoteWindow(QMainWindow):
         self.setWindowTitle(f"{title} — Horizon")
 
     def closeEvent(self, event) -> None:
+        self._note_detail.flush_and_save()
         self._prefs.note_window_size = (self.width(), self.height())
         self._prefs.save()
         super().closeEvent(event)

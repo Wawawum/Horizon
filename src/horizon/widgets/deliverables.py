@@ -23,6 +23,7 @@ from horizon.deliverable import DeliverableRepository, DeliverableState
 from horizon.project import ProjectRepository
 from horizon.deliverable_template import DeliverableTemplate, DeliverableTemplateRepository
 from horizon.image import ImageRepository
+from horizon.widgets.webeditor import WebMarkdownEditor
 from horizon.widgets.markdown import (
     _make_preview_html,
     _markdown_to_html,
@@ -30,7 +31,6 @@ from horizon.widgets.markdown import (
     _PLUS_ICON_SIZE,
     _RESOURCES_BASE_URL,
     MarkdownBridge,
-    MarkdownEditor,
 )
 
 
@@ -125,8 +125,10 @@ class DeliverableDetailWidget(QWidget):
         deliverable_repo: DeliverableRepository,
         image_repo: ImageRepository,
         parent=None,
+        prefs=None,
     ) -> None:
         super().__init__(parent)
+        self._prefs = prefs
         self._deliverable_repo = deliverable_repo
         self._image_repo = image_repo
         self._current: "Deliverable | None" = None  # type: ignore[name-defined]
@@ -185,9 +187,14 @@ class DeliverableDetailWidget(QWidget):
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
         # ── Editor + Preview ──────────────────────────────────────────────
-        self._editor = MarkdownEditor(image_repo)
-        self._editor.setPlaceholderText("Write deliverable content here…")
-        self._editor.textChanged.connect(self._on_text_changed)
+        self._editor = WebMarkdownEditor(
+            image_repo, self,
+            show_toolbar=True,
+            placeholder="Write deliverable content here…",
+            prefs=prefs,
+        )
+        self._editor.text_changed.connect(self._on_text_changed)
+        self._editor.editing_finished.connect(self._save_body)
 
         self._bridge = MarkdownBridge(self)
         self._channel = QWebChannel(self)
@@ -231,9 +238,7 @@ class DeliverableDetailWidget(QWidget):
                 break
         self._state_combo.blockSignals(False)
 
-        self._editor.blockSignals(True)
-        self._editor.setPlainText(self._body_raw)
-        self._editor.blockSignals(False)
+        self._editor.set_text(self._body_raw)
 
         self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
 
@@ -244,12 +249,17 @@ class DeliverableDetailWidget(QWidget):
         self._deliverable_repo.update(self._current)
 
     def _on_text_changed(self) -> None:
-        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+        self._bridge.push_html(_markdown_to_html(self._editor.text(), self._image_repo))
         if self._current is not None:
             self._autosave_timer.start()
 
     def _autosave(self) -> None:
         self._save_body(show_status=True)
+
+    def flush_and_save(self) -> None:
+        """Persist any pending body edit immediately (called from closeEvent)."""
+        self._autosave_timer.stop()
+        self._save_body()
 
     def _clear_status(self) -> None:
         self._status_label.setText("")
@@ -257,7 +267,8 @@ class DeliverableDetailWidget(QWidget):
     def _save_body(self, show_status: bool = False) -> None:
         if self._current is None:
             return
-        new_body = self._editor.toPlainText()
+        self._editor.flush()
+        new_body = self._editor.text()
         if new_body == self._body_raw:
             return
         self._autosave_timer.stop()
@@ -433,8 +444,10 @@ class DeliverableTemplateDetailWidget(QWidget):
         tmpl_repo: DeliverableTemplateRepository,
         image_repo: ImageRepository,
         parent=None,
+        prefs=None,
     ) -> None:
         super().__init__(parent)
+        self._prefs = prefs
         self._tmpl_repo = tmpl_repo
         self._image_repo = image_repo
         self._current_tmpl: DeliverableTemplate | None = None
@@ -485,9 +498,14 @@ class DeliverableTemplateDetailWidget(QWidget):
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self._editor = MarkdownEditor(image_repo)
-        self._editor.setPlaceholderText("Write template markdown here…")
-        self._editor.textChanged.connect(self._on_editor_text_changed)
+        self._editor = WebMarkdownEditor(
+            image_repo, self,
+            show_toolbar=True,
+            placeholder="Write template markdown here…",
+            prefs=prefs,
+        )
+        self._editor.text_changed.connect(self._on_editor_text_changed)
+        self._editor.editing_finished.connect(self._save_body)
 
         self._bridge = MarkdownBridge(self)
         self._channel = QWebChannel(self)
@@ -524,19 +542,22 @@ class DeliverableTemplateDetailWidget(QWidget):
         self._id_label.setText(f"#{tmpl.id}" if tmpl.id is not None else "")
         self._title_edit.setText(tmpl.title)
 
-        self._editor.blockSignals(True)
-        self._editor.setPlainText(self._body_raw)
-        self._editor.blockSignals(False)
+        self._editor.set_text(self._body_raw)
 
         self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo))
 
     def _on_editor_text_changed(self) -> None:
-        self._bridge.push_html(_markdown_to_html(self._editor.toPlainText(), self._image_repo))
+        self._bridge.push_html(_markdown_to_html(self._editor.text(), self._image_repo))
         if self._current_tmpl is not None:
             self._autosave_timer.start()
 
     def _autosave(self) -> None:
         self._save_body(show_status=True)
+
+    def flush_and_save(self) -> None:
+        """Persist any pending body edit immediately (called from closeEvent)."""
+        self._autosave_timer.stop()
+        self._save_body()
 
     def _clear_status(self) -> None:
         self._status_label.setText("")
@@ -544,7 +565,8 @@ class DeliverableTemplateDetailWidget(QWidget):
     def _save_body(self, show_status: bool = False) -> None:
         if self._current_tmpl is None:
             return
-        new_body = self._editor.toPlainText()
+        self._editor.flush()
+        new_body = self._editor.text()
         if new_body == self._body_raw:
             return
         self._autosave_timer.stop()
