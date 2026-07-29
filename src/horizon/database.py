@@ -15,7 +15,8 @@ _DDL = """
 CREATE TABLE IF NOT EXISTS projects (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     name        TEXT    NOT NULL CHECK(length(name) <= 255),
-    description TEXT    NOT NULL DEFAULT ''
+    description TEXT    NOT NULL DEFAULT '',
+    "order"     INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS tasks (
@@ -114,6 +115,8 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS deliverables (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, template_id INTEGER REFERENCES deliverable_templates(id) ON DELETE SET NULL, title TEXT NOT NULL CHECK(length(title) <= 255), body TEXT NOT NULL DEFAULT '')",
     "ALTER TABLE deliverables ADD COLUMN created_at TEXT NOT NULL DEFAULT ''",
     "ALTER TABLE deliverables ADD COLUMN state TEXT NOT NULL DEFAULT 'New'",
+    'ALTER TABLE projects ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
+    'UPDATE projects SET "order" = id * 1000 WHERE "order" = 0',
 ]
 
 
