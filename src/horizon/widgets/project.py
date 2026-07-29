@@ -1,7 +1,7 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QPoint, QRect, QRectF, QSize
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush, QPixmap
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QButtonGroup,
@@ -49,6 +49,7 @@ from PySide6.QtGui import QTextCursor
 
 
 _KANBAN_MIME        = "application/x-horizon-task-id"
+_PROJECT_MIME       = "application/x-horizon-project-id"
 _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
@@ -476,6 +477,147 @@ class CommandBar(QWidget):
             btn.setChecked(True)
 
 
+_DROP_LINE_HEIGHT = 3  # épaisseur de la ligne d'insertion turquoise
+_DROP_CAP_HEIGHT  = 7  # hauteur des embouts verticaux aux extrémités
+_DROP_CAP_WIDTH   = 2
+
+
+class _ProjectListView(QListWidget):
+    """Liste de projets réordonnable par glisser-déposer.
+
+    L'indicateur de dépôt est peint à la main (ligne turquoise avec embouts)
+    plutôt que via `setDropIndicatorShown`, dont le trait natif se voit mal
+    sur les cartes dessinées par `ProjectListDelegate`."""
+
+    projects_reordered = Signal(list)  # emits ordered list[int] of project ids
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._drop_row: int | None = None
+        self._press_pos = QPoint()
+        self.setDragEnabled(True)
+        self.setAcceptDrops(True)
+        self.setDropIndicatorShown(False)  # remplacé par notre propre indicateur
+        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def _row_at(self, y: int) -> int:
+        """Rang d'insertion pour une ordonnée donnée (0 .. count())."""
+        for i in range(self.count()):
+            if y < self.visualItemRect(self.item(i)).center().y():
+                return i
+        return self.count()
+
+    def _clear_drop_indicator(self) -> None:
+        if self._drop_row is not None:
+            self._drop_row = None
+            self.viewport().update()
+
+    def mousePressEvent(self, event) -> None:
+        self._press_pos = event.position().toPoint()
+        super().mousePressEvent(event)
+
+    def startDrag(self, supported_actions) -> None:
+        item = self.currentItem()
+        if item is None:
+            return
+        project_id: int = item.data(Qt.ItemDataRole.UserRole)
+        mime = self.model().mimeData([self.currentIndex()])
+        mime.setData(_PROJECT_MIME, QByteArray(str(project_id).encode()))
+        drag = QDrag(self)
+        drag.setMimeData(mime)
+
+        # Aperçu semi-transparent de la carte déplacée, sous le curseur.
+        rect = self.visualItemRect(item)
+        ghost = QPixmap(rect.size())
+        ghost.fill(Qt.GlobalColor.transparent)
+        painter = QPainter(ghost)
+        painter.setOpacity(0.75)
+        painter.drawPixmap(0, 0, self.viewport().grab(rect))
+        painter.end()
+        drag.setPixmap(ghost)
+        drag.setHotSpot(self._press_pos - rect.topLeft())
+
+        drag.exec(Qt.DropAction.MoveAction)
+        self._clear_drop_indicator()
+
+    def dragEnterEvent(self, event) -> None:
+        if event.mimeData().hasFormat(_PROJECT_MIME):
+            event.acceptProposedAction()
+        else:
+            event.ignore()
+
+    def dragMoveEvent(self, event) -> None:
+        if not event.mimeData().hasFormat(_PROJECT_MIME):
+            event.ignore()
+            return
+        super().dragMoveEvent(event)          # conserve le défilement automatique
+        event.acceptProposedAction()
+        row = self._row_at(event.position().toPoint().y())
+        if row != self._drop_row:
+            self._drop_row = row
+            self.viewport().update()
+
+    def dragLeaveEvent(self, event) -> None:
+        self._clear_drop_indicator()
+        super().dragLeaveEvent(event)
+
+    def dropEvent(self, event) -> None:
+        self._clear_drop_indicator()
+        if not event.mimeData().hasFormat(_PROJECT_MIME):
+            event.ignore()
+            return
+        project_id = int(event.mimeData().data(_PROJECT_MIME).data().decode())
+        event.acceptProposedAction()
+
+        drop_row = self._row_at(event.position().toPoint().y())
+        for i in range(self.count()):
+            if self.item(i).data(Qt.ItemDataRole.UserRole) == project_id:
+                if i == drop_row or i == drop_row - 1:
+                    return                     # déposé à sa propre place
+                # Bloquer les signaux : déplacer une carte ne doit pas changer
+                # le projet affiché dans la vue principale.
+                self.blockSignals(True)
+                dragged = self.takeItem(i)
+                if i < drop_row:
+                    drop_row -= 1
+                self.insertItem(drop_row, dragged)
+                self.setCurrentItem(dragged)
+                self.blockSignals(False)
+                break
+        else:
+            return
+
+        project_ids = [self.item(i).data(Qt.ItemDataRole.UserRole) for i in range(self.count())]
+        self.projects_reordered.emit(project_ids)
+
+    def paintEvent(self, event) -> None:
+        super().paintEvent(event)
+        if self._drop_row is None:
+            return
+
+        if self.count() == 0:
+            y = _PROJECT_ITEM_MARGIN_Y
+        elif self._drop_row < self.count():
+            y = self.visualItemRect(self.item(self._drop_row)).top()
+        else:
+            y = self.visualItemRect(self.item(self.count() - 1)).bottom()
+
+        viewport = self.viewport()
+        half = _DROP_LINE_HEIGHT // 2
+        y = max(half, min(y, viewport.height() - _DROP_LINE_HEIGHT + half))
+        x0 = _PROJECT_ITEM_MARGIN_X
+        x1 = viewport.width() - _PROJECT_ITEM_MARGIN_X
+
+        color = QColor(_theme.current().list_selected_accent)
+        painter = QPainter(viewport)
+        painter.fillRect(QRect(x0, y - half, x1 - x0, _DROP_LINE_HEIGHT), color)
+        cap_y = y - _DROP_CAP_HEIGHT // 2
+        painter.fillRect(QRect(x0, cap_y, _DROP_CAP_WIDTH, _DROP_CAP_HEIGHT), color)
+        painter.fillRect(QRect(x1 - _DROP_CAP_WIDTH, cap_y, _DROP_CAP_WIDTH, _DROP_CAP_HEIGHT), color)
+        painter.end()
+
+
 class ProjectListWidget(QWidget):
     project_selected = Signal(object)  # emits Project | None
 
@@ -486,11 +628,12 @@ class ProjectListWidget(QWidget):
 
         t = _theme.current()
 
-        self._list = QListWidget()
+        self._list = _ProjectListView(self)
         self._list.setFrameShape(QFrame.Shape.NoFrame)
         self._list.setStyleSheet("QListWidget { background: transparent; border: none; }")
         self._list.setItemDelegate(ProjectListDelegate(self._list))
         self._list.currentItemChanged.connect(self._on_selection_changed)
+        self._list.projects_reordered.connect(self._on_projects_reordered)
 
         self._show_archived_cb = QCheckBox("archived")
         self._show_archived_cb.stateChanged.connect(self._load_projects)
@@ -536,6 +679,10 @@ class ProjectListWidget(QWidget):
             return
         project_id = current.data(Qt.ItemDataRole.UserRole)
         self.project_selected.emit(self._repo.get(project_id))
+
+    def _on_projects_reordered(self, project_ids: list[int]) -> None:
+        # La liste affichée est déjà dans le bon ordre : seule la persistance reste.
+        self._repo.set_order(project_ids)
 
     def _on_new_project(self) -> None:
         dialog = NewProjectDialog(parent=self)
