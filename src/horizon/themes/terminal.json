@@ -75,5 +75,10 @@
   "preview_link":               "#2f6fed",
   "preview_table_header_bg":    "#eef1f5",
 
-  "clock_live_dot": "#34d399"
+  "clock_live_dot": "#34d399",
+
+  "editor_syntax_muted": "#8a94a6",
+  "editor_selection_bg": "#b3d0ff",
+  "editor_active_line_bg": "#2f6fed12",
+  "is_dark": false
 }

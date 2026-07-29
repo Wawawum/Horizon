@@ -96,4 +96,6 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 - Do not silently swallow exceptions except in known migration cases.
 - Do not add columns to `_DDL` without a matching migration.
 - Do not hand-edit bundled minified resources unless explicitly requested.
+- Do not hand-edit `src/horizon/resources/*.bundle.js`; edit the source under `web/src/` and
+  rebuild with `cd web && npm run build` (see [web/README.md](web/README.md)).
 - Do not run destructive checks against the user's real `~/.horizon/horizon.db`.

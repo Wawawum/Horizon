@@ -94,6 +94,18 @@ class Theme:
     # ── Liste de projets : item sélectionné ─────────────────────────────────
     list_selected_accent: str       = field(default="#2dd4bf")
     project_list_selected_bg: str   = field(default="#d8e6fb")
+    # ── Éditeur markdown : marqueurs de syntaxe atténués ────────────────────
+    editor_syntax_muted: str        = field(default="#8a94a6")
+    # Sélection et ligne active de l'éditeur. La ligne active se peint AU-DESSUS
+    # de la couche de sélection dans CodeMirror : sa couleur doit donc rester
+    # translucide (hex 8 chiffres), sinon elle masque complètement la sélection.
+    editor_selection_bg: str        = field(default="#b3d0ff")
+    editor_active_line_bg: str      = field(default="#2f6fed12")
+    # ── Clair / sombre ─────────────────────────────────────────────────────
+    # Pilote le choix des feuilles highlight.js et du thème mermaid dans les
+    # pages web. À ne pas déduire de `name` : le seul thème livré s'appelle
+    # "terminal" tout en étant une palette claire.
+    is_dark: bool                   = field(default=False)
 
 
 _current: Theme | None = None
@@ -135,6 +147,23 @@ def make_icon(resource_path: str, size: "QSize") -> "QIcon":
     renderer.render(painter)
     painter.end()
     return QIcon(pixmap)
+
+
+def to_css_variables(t: Theme | None = None) -> str:
+    """Émet les couleurs du thème en variables CSS, pour les pages QWebEngineView.
+
+    Chaque champ `str` devient `--hz-<nom-avec-tirets>`. Les champs non-couleur
+    (`name`, `font_family`, `is_dark`) sont exclus : ils sont consommés
+    directement côté Python.
+    """
+    t = t or current()
+    skip = {"name", "font_family", "is_dark"}
+    lines = [
+        f"  --hz-{f.name.replace('_', '-')}: {getattr(t, f.name)};"
+        for f in fields(Theme)
+        if f.name not in skip
+    ]
+    return ":root {\n" + "\n".join(lines) + "\n}"
 
 
 _RESOURCES_DIR = Path(__file__).parent / "resources"

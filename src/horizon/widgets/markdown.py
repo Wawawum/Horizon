@@ -3,9 +3,8 @@ import html as _html_mod
 import re
 from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QObject, QSize, Signal, Slot, QUrl
-from PySide6.QtGui import QIcon, QPixmap, QTextCursor, QTextDocument
-from PySide6.QtWidgets import QPlainTextEdit, QSizePolicy, QToolButton, QVBoxLayout, QWidget
+from PySide6.QtCore import QObject, QSize, Signal, Slot, QUrl
+from PySide6.QtGui import QIcon, QTextDocument
 
 from horizon import theme as _theme
 from horizon.image import ImageRepository
@@ -91,7 +90,7 @@ _HTML_VOID_ELEMENTS = frozenset({
 
 def _make_preview_html() -> str:
     t = _theme.current()
-    _mermaid_theme = "default" if t.name == "light" else "dark"
+    _mermaid_theme = "dark" if t.is_dark else "default"
     return f"""<!DOCTYPE html>
 <html>
 <head>
@@ -143,7 +142,7 @@ def _make_preview_html() -> str:
   .footnotes-list li {{ margin-bottom: 0.4em; }}
   .footnote-backref {{ color: {t.preview_link}; text-decoration: none; margin-left: 0.3em; }}
 </style>
-<link rel="stylesheet" href="{_HIGHLIGHT_CSS_LIGHT_URL if t.name == 'light' else _HIGHLIGHT_CSS_DARK_URL}">
+<link rel="stylesheet" href="{_HIGHLIGHT_CSS_DARK_URL if t.is_dark else _HIGHLIGHT_CSS_LIGHT_URL}">
 <style>
   pre code.hljs {{ background: transparent !important; padding: 0 !important; font-size: inherit; }}
 </style>
@@ -678,176 +677,3 @@ class MarkdownBridge(QObject):
     def open_mermaid(self, source: str) -> None:
         self.mermaid_open_requested.emit(source)
 
-
-class MarkdownEditor(QPlainTextEdit):
-    def __init__(self, image_repo: ImageRepository, parent=None) -> None:
-        super().__init__(parent)
-        self._image_repo = image_repo
-
-    def insertFromMimeData(self, source) -> None:
-        if source.hasImage():
-            image = source.imageData()
-            ba = QByteArray()
-            buf = QBuffer(ba)
-            buf.open(QIODevice.OpenModeFlag.WriteOnly)
-            image.save(buf, "PNG")
-            buf.close()
-            image_id = self._image_repo.create(bytes(ba))
-            self.insertPlainText(f"![](horizon-image://{image_id})")
-        else:
-            super().insertFromMimeData(source)
-
-
-_HEADING_PREFIX_RE = re.compile(r'^#{1,6} +')
-
-_TOOLBAR_ICON_SIZE = QSize(16, 16)
-_TOOLBAR_BUTTON_SIZE = QSize(26, 26)
-
-
-class MarkdownToolbar(QWidget):
-    """Vertical column of icon buttons that insert/wrap markdown syntax in the given editor."""
-
-    def __init__(self, editor: QPlainTextEdit, parent=None) -> None:
-        super().__init__(parent)
-        self._editor = editor
-
-        layout = QVBoxLayout(self)
-        layout.setContentsMargins(0, 0, 0, 0)
-        layout.setSpacing(2)
-
-        def add_button(icon_name: str, tooltip: str, handler) -> QToolButton:
-            btn = QToolButton()
-            btn.setIcon(_theme.make_icon(f":/icons/{icon_name}.svg", _TOOLBAR_ICON_SIZE))
-            btn.setIconSize(_TOOLBAR_ICON_SIZE)
-            btn.setFixedSize(_TOOLBAR_BUTTON_SIZE)
-            btn.setToolTip(tooltip)
-            btn.clicked.connect(handler)
-            layout.addWidget(btn)
-            return btn
-
-        for level in (1, 2, 3, 4):
-            add_button(f"heading{level}_cyan", f"Titre {level}", lambda _checked=False, lvl=level: self._apply_heading(lvl))
-
-        add_button("bullet_list_cyan", "Liste à puce", self._apply_bullet_list)
-
-        add_button("bold_cyan", "Gras", lambda: self._wrap_selection("**", "**"))
-        add_button("italic_cyan", "Italique", lambda: self._wrap_selection("*", "*"))
-        add_button("underline_cyan", "Souligné", lambda: self._wrap_selection("_", "_", underline=True))
-        add_button("strikethrough_cyan", "Barré", lambda: self._wrap_selection("~~", "~~"))
-
-        add_button("table_cyan", "Insérer un tableau", self._insert_table)
-        add_button("link_external_cyan", "Insérer un lien externe", self._insert_external_link)
-        add_button("link_internal_cyan", "Insérer un lien vers une note interne", self._insert_internal_link)
-        add_button("mermaid_cyan", "Insérer un diagramme Mermaid", self._insert_mermaid)
-        add_button("code_cyan", "Insérer un bloc de code", self._insert_code_block)
-
-        layout.addStretch()
-        self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Expanding)
-
-    def _apply_heading(self, level: int) -> None:
-        cursor = self._editor.textCursor()
-        cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-        cursor.movePosition(QTextCursor.MoveOperation.EndOfBlock, QTextCursor.MoveMode.KeepAnchor)
-        text = cursor.selectedText()
-        text = _HEADING_PREFIX_RE.sub('', text)
-        cursor.beginEditBlock()
-        cursor.insertText(f"{'#' * level} {text}")
-        cursor.endEditBlock()
-        self._editor.setTextCursor(cursor)
-
-    def _apply_bullet_list(self) -> None:
-        cursor = self._editor.textCursor()
-        doc = self._editor.document()
-        start = doc.findBlock(cursor.selectionStart())
-        end = doc.findBlock(cursor.selectionEnd())
-
-        blocks = []
-        block = start
-        while True:
-            blocks.append(block)
-            if block.blockNumber() >= end.blockNumber():
-                break
-            block = block.next()
-
-        non_empty = [b for b in blocks if b.text().strip()]
-        already_bulleted = non_empty and all(b.text().startswith("- ") for b in non_empty)
-
-        cursor.beginEditBlock()
-        for block in blocks:
-            if not block.text().strip():
-                continue
-            block_cursor = QTextCursor(block)
-            block_cursor.movePosition(QTextCursor.MoveOperation.StartOfBlock)
-            if already_bulleted:
-                block_cursor.movePosition(QTextCursor.MoveOperation.Right, QTextCursor.MoveMode.KeepAnchor, 2)
-                block_cursor.removeSelectedText()
-            else:
-                block_cursor.insertText("- ")
-        cursor.endEditBlock()
-
-    def _wrap_selection(self, prefix: str, suffix: str, underline: bool = False) -> None:
-        cursor = self._editor.textCursor()
-        cursor.beginEditBlock()
-        if cursor.hasSelection():
-            text = cursor.selectedText()
-            start = cursor.selectionStart()
-            cursor.insertText(f"{prefix}{text}{suffix}")
-            if underline and cursor.atBlockEnd():
-                cursor.insertText(" ")
-            cursor.setPosition(start + len(prefix))
-            cursor.setPosition(start + len(prefix) + len(text), QTextCursor.MoveMode.KeepAnchor)
-        else:
-            pos = cursor.position()
-            cursor.insertText(f"{prefix}{suffix}")
-            if underline and cursor.atBlockEnd():
-                cursor.insertText(" ")
-            cursor.setPosition(pos + len(prefix))
-        cursor.endEditBlock()
-        self._editor.setTextCursor(cursor)
-
-    def _insert_block(self, text: str) -> None:
-        cursor = self._editor.textCursor()
-        cursor.beginEditBlock()
-        needs_leading_nl = not cursor.atBlockStart()
-        cursor.insertText(("\n" if needs_leading_nl else "") + text + "\n")
-        cursor.endEditBlock()
-        self._editor.setTextCursor(cursor)
-
-    def _insert_table(self) -> None:
-        self._insert_block(
-            "| Colonne 1 | Colonne 2 | Colonne 3 |\n"
-            "| --- | --- | --- |\n"
-            "|  |  |  |\n"
-            "|  |  |  |"
-        )
-
-    def _insert_external_link(self) -> None:
-        cursor = self._editor.textCursor()
-        cursor.beginEditBlock()
-        cursor.insertText("[texte](https://exemple.com)")
-        cursor.endEditBlock()
-        self._editor.setTextCursor(cursor)
-
-    def _insert_internal_link(self) -> None:
-        cursor = self._editor.textCursor()
-        cursor.beginEditBlock()
-        cursor.insertText("[[id|texte]]")
-        cursor.endEditBlock()
-        self._editor.setTextCursor(cursor)
-
-    def _insert_mermaid(self) -> None:
-        self._insert_block(
-            "```mermaid\n"
-            "flowchart TD\n"
-            "    A[Début] --> B{Condition}\n"
-            "    B -->|Oui| C[Fin]\n"
-            "    B -->|Non| A\n"
-            "```"
-        )
-
-    def _insert_code_block(self) -> None:
-        self._insert_block(
-            "```python\n"
-            "print(\"Hello world\")\n"
-            "```"
-        )
