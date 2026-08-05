@@ -92,6 +92,14 @@ CREATE TABLE IF NOT EXISTS note_versions (
     version_dt TEXT    NOT NULL,
     is_current INTEGER NOT NULL DEFAULT 0
 );
+
+CREATE TABLE IF NOT EXISTS archimate_models (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
+    name       TEXT    NOT NULL CHECK(length(name) <= 255),
+    path       TEXT    NOT NULL UNIQUE,
+    added_at   TEXT    NOT NULL
+);
 """
 
 _SEARCH_INDEX_VERSION = 1
@@ -117,6 +125,7 @@ _MIGRATIONS = [
     "ALTER TABLE deliverables ADD COLUMN state TEXT NOT NULL DEFAULT 'New'",
     'ALTER TABLE projects ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
     'UPDATE projects SET "order" = id * 1000 WHERE "order" = 0',
+    "CREATE TABLE IF NOT EXISTS archimate_models (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL, name TEXT NOT NULL CHECK(length(name) <= 255), path TEXT NOT NULL UNIQUE, added_at TEXT NOT NULL)",
 ]
 
 

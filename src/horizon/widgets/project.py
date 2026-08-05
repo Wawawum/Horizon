@@ -410,13 +410,14 @@ class _NavButton(QPushButton):
 
 class CommandBar(QWidget):
     """Barre de commandes horizontale (sous la barre de titre) regroupant la
-    navigation principale : Board, Notes, Tags, Deliverables, Media."""
+    navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate."""
 
     home_requested = Signal()
     notes_requested = Signal()
     tags_requested = Signal()
     deliverables_requested = Signal()
     media_requested = Signal()
+    archimate_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -440,12 +441,16 @@ class CommandBar(QWidget):
         self._media_btn = _NavButton("Media", "05")
         self._media_btn.clicked.connect(self.media_requested)
 
+        self._archimate_btn = _NavButton("ArchiMate", "06")
+        self._archimate_btn.clicked.connect(self.archimate_requested)
+
         self._buttons = {
             "board": self._board_btn,
             "notes": self._notes_btn,
             "tags": self._tags_btn,
             "deliverables": self._deliverables_btn,
             "media": self._media_btn,
+            "archimate": self._archimate_btn,
         }
 
         self._nav_group = QButtonGroup(self)

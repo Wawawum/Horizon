@@ -27,6 +27,8 @@ from horizon.widgets.deliverables import (
     DeliverableTemplateDetailWidget,
 )
 from horizon.widgets.media import MediaWidget
+from horizon.archimate import ArchimateModelRepository
+from horizon.widgets.archimate import ArchimateWidget
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
 from horizon.note_window import NoteWindow
@@ -104,6 +106,7 @@ class MainWindow(QMainWindow):
         self._note_windows: dict[int, NoteWindow] = {}
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
+        self._archimate_repo = ArchimateModelRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -151,6 +154,9 @@ class MainWindow(QMainWindow):
         self._media_widget = MediaWidget(image_repo, self._search_repo, self._note_repo, self._proj_repo)
         self._right_stack.addWidget(self._media_widget)           # index 10
 
+        self._archimate_widget = ArchimateWidget(self._archimate_repo, self._prefs)
+        self._right_stack.addWidget(self._archimate_widget)       # index 11
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -173,6 +179,7 @@ class MainWindow(QMainWindow):
         self._command_bar.tags_requested.connect(self._show_tags)
         self._command_bar.deliverables_requested.connect(self._show_deliverables)
         self._command_bar.media_requested.connect(self._show_media)
+        self._command_bar.archimate_requested.connect(self._show_archimate)
         self._media_widget.note_open_requested.connect(self._open_note_from_media)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
@@ -327,6 +334,12 @@ class MainWindow(QMainWindow):
         self._command_bar.set_active("media")
         self._media_widget.load()
         self._right_stack.setCurrentIndex(10)
+
+    def _show_archimate(self) -> None:
+        self._project_list.clear_selection()
+        self._command_bar.set_active("archimate")
+        self._archimate_widget.load()
+        self._right_stack.setCurrentIndex(11)
 
     def _open_note_from_media(self, note_id: int) -> None:
         self._note_source = "media"
