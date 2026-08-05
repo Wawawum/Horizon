@@ -208,3 +208,6 @@ __marimo__/
 
 # Node (web/ build toolchain, see web/README.md)
 node_modules/
+
+# Archi (sauvegardes ecrites a chaque enregistrement d un modele)
+*.archimate.bak
