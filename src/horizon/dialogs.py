@@ -711,7 +711,7 @@ class NewFolderDialog(QDialog):
         return self._name_edit.text().strip()
 
 
-class _ZoomableGraphicsView(QGraphicsView):
+class ZoomableGraphicsView(QGraphicsView):
     _ZOOM_FACTOR = 1.15
     _MIN_SCALE   = 0.05
     _MAX_SCALE   = 20.0
@@ -766,7 +766,7 @@ class ImageViewerDialog(QDialog):
         scene.setSceneRect(QRectF(pixmap.rect()))
         self._scene_rect = scene.sceneRect()
 
-        self._view = _ZoomableGraphicsView(scene, self)
+        self._view = ZoomableGraphicsView(scene, self)
 
         zoom_in_btn  = QPushButton("+")
         zoom_out_btn = QPushButton("−")

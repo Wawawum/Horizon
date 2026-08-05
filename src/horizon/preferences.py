@@ -102,6 +102,14 @@ class Preferences:
         self._data["note_window"]["height"] = value[1]
 
     @property
+    def last_archimate_dir(self) -> str:
+        return self._data.get("last_archimate_dir", "")
+
+    @last_archimate_dir.setter
+    def last_archimate_dir(self, value: str) -> None:
+        self._data["last_archimate_dir"] = value
+
+    @property
     def pin_hotkey(self) -> dict:
         default = {"modifiers": ["win", "ctrl"], "vk": 84}  # Win+Ctrl+T
         return self._data.get("pin_hotkey", default)
