@@ -551,6 +551,15 @@ RELATION_STYLE: dict[str, tuple[Qt.PenStyle, str | None, str | None]] = {
 }
 _DEFAULT_RELATION_STYLE = (Qt.PenStyle.SolidLine, None, None)
 
+# Relations dont le trait est masqué lorsque les deux objets sont imbriqués :
+# une boîte dessinée dans une autre exprime déjà la composition ou l'agrégation,
+# et Archi n'affiche alors aucune flèche (réglage « hide relationships when
+# nested »). Les autres types restent tracés même imbriqués.
+NESTED_HIDDEN_RELATIONS = frozenset({
+    "CompositionRelationship",
+    "AggregationRelationship",
+})
+
 # accessType : 0 = écriture (flèche vers la cible), 1 = lecture (vers la source),
 # 2 = accès indifférencié (aucune flèche), 3 = lecture/écriture (les deux).
 _ACCESS_HEADS = {
@@ -911,6 +920,8 @@ def _add_nodes(
     scene: QGraphicsScene,
     model: ArchimateModel | None,
     rects: dict[str, QRectF],
+    parents: dict[str, str],
+    parent_id: str | None = None,
 ) -> None:
     for node in nodes:
         label = node.label
@@ -920,7 +931,23 @@ def _add_nodes(
         item = NodeItem(node, label)
         scene.addItem(item)
         rects[node.id] = QRectF(node.x, node.y, node.width, node.height)
-        _add_nodes(node.children, scene, model, rects)
+        if parent_id is not None:
+            parents[node.id] = parent_id
+        _add_nodes(node.children, scene, model, rects, parents, node.id)
+
+
+def _is_nested_in(node_id: str, ancestor_id: str, parents: dict[str, str]) -> bool:
+    """Vrai si `node_id` est dessiné à l'intérieur de `ancestor_id`.
+
+    La chaîne complète est remontée : une boîte contenue à deux niveaux de
+    profondeur reste visuellement dans son aïeul.
+    """
+    current = parents.get(node_id)
+    while current is not None:
+        if current == ancestor_id:
+            return True
+        current = parents.get(current)
+    return False
 
 
 def build_scene(
@@ -931,11 +958,13 @@ def build_scene(
     """Peuple `scene` avec la vue et renvoie le rectangle englobant (avec marge).
 
     Les nœuds imbriqués sont empilés selon leur profondeur, les connexions
-    passent au-dessus de tous les nœuds.
+    passent au-dessus de tous les nœuds. Une composition ou une agrégation entre
+    deux objets imbriqués n'est pas tracée : l'imbrication la porte déjà.
     """
     scene.clear()
     rects: dict[str, QRectF] = {}
-    _add_nodes(view.nodes, scene, model, rects)
+    parents: dict[str, str] = {}
+    _add_nodes(view.nodes, scene, model, rects, parents)
 
     for connection in view.connections:
         source = rects.get(connection.source)
@@ -943,6 +972,13 @@ def build_scene(
         # Une connexion dont une extrémité manque (fichier partiel, ou trait vers
         # un objet non supporté) est simplement omise du rendu.
         if source is None or target is None:
+            continue
+        # L'imbrication est testée dans les deux sens : le tout est en général le
+        # conteneur, mais rien n'empêche de poser le diagramme à l'envers.
+        if connection.relation_type in NESTED_HIDDEN_RELATIONS and (
+            _is_nested_in(connection.target, connection.source, parents)
+            or _is_nested_in(connection.source, connection.target, parents)
+        ):
             continue
         item = ConnectionItem(connection, source, target)
         item.setZValue(_CONNECTION_Z)
