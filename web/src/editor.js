@@ -411,7 +411,10 @@ function buildExtensions() {
       ...closeBracketsKeymap,
       ...defaultKeymap,
       ...historyKeymap,
-      ...foldKeymap,
+      // Windows delivers AltGr as Ctrl+Alt. On an AZERTY layout AltGr+5 types "["
+      // and AltGr+° types "]", which matched foldAll/unfoldAll and swallowed the
+      // character. Fold stays reachable via Ctrl-Shift-[ / ] and the fold gutter.
+      ...foldKeymap.filter((b) => b.key !== "Ctrl-Alt-[" && b.key !== "Ctrl-Alt-]"),
       ...searchKeymap,
       indentWithTab,
     ]),
