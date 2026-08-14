@@ -100,6 +100,15 @@ CREATE TABLE IF NOT EXISTS archimate_models (
     path       TEXT    NOT NULL UNIQUE,
     added_at   TEXT    NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS documents (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    folder_id  INTEGER REFERENCES folders(id) ON DELETE SET NULL,
+    name       TEXT    NOT NULL CHECK(length(name) <= 255),
+    url        TEXT    NOT NULL DEFAULT '',
+    created_at TEXT    NOT NULL
+);
 """
 
 _SEARCH_INDEX_VERSION = 1
@@ -126,6 +135,7 @@ _MIGRATIONS = [
     'ALTER TABLE projects ADD COLUMN "order" INTEGER NOT NULL DEFAULT 0',
     'UPDATE projects SET "order" = id * 1000 WHERE "order" = 0',
     "CREATE TABLE IF NOT EXISTS archimate_models (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL, name TEXT NOT NULL CHECK(length(name) <= 255), path TEXT NOT NULL UNIQUE, added_at TEXT NOT NULL)",
+    "CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL, name TEXT NOT NULL CHECK(length(name) <= 255), url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)",
 ]
 
 

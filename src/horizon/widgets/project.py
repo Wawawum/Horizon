@@ -1,9 +1,10 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QPoint, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QPainter, QPainterPath, QPen, QBrush, QPixmap
+from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QBrush, QPixmap, QShortcut
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QButtonGroup,
     QCheckBox,
     QColorDialog,
@@ -31,6 +32,7 @@ from PySide6.QtWidgets import (
     QToolButton,
     QTreeWidget,
     QTreeWidgetItem,
+    QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
 )
@@ -39,6 +41,7 @@ from horizon import theme as _theme
 from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
 from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.document import URL_SCHEMES, DocumentRepository, extract_document_link
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
@@ -59,6 +62,7 @@ _PLUS_ICON_SIZE     = QSize(12, 12)
 _PLUS_ICON_WHITE: QIcon | None = None
 _FOLDER_ICON: QIcon | None = None
 _FOLDER_ICON_SIZE   = QSize(14, 14)
+_DOCUMENT_ICON: QIcon | None = None
 
 def _plus_icon() -> QIcon:
     global _PLUS_ICON
@@ -77,6 +81,12 @@ def _folder_icon() -> QIcon:
     if _FOLDER_ICON is None:
         _FOLDER_ICON = QIcon(str(_RESOURCES_DIR / "folder_square.svg"))
     return _FOLDER_ICON
+
+def _document_icon() -> QIcon:
+    global _DOCUMENT_ICON
+    if _DOCUMENT_ICON is None:
+        _DOCUMENT_ICON = _theme.make_icon(":/icons/link_external_cyan.svg", _FOLDER_ICON_SIZE)
+    return _DOCUMENT_ICON
 _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
 _TILE_RADIUS        = 0
@@ -410,7 +420,7 @@ class _NavButton(QPushButton):
 
 class CommandBar(QWidget):
     """Barre de commandes horizontale (sous la barre de titre) regroupant la
-    navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate."""
+    navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate, Debug."""
 
     home_requested = Signal()
     notes_requested = Signal()
@@ -418,6 +428,7 @@ class CommandBar(QWidget):
     deliverables_requested = Signal()
     media_requested = Signal()
     archimate_requested = Signal()
+    debug_requested = Signal()
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -444,6 +455,9 @@ class CommandBar(QWidget):
         self._archimate_btn = _NavButton("ArchiMate", "06")
         self._archimate_btn.clicked.connect(self.archimate_requested)
 
+        self._debug_btn = _NavButton("Debug", "07")
+        self._debug_btn.clicked.connect(self.debug_requested)
+
         self._buttons = {
             "board": self._board_btn,
             "notes": self._notes_btn,
@@ -451,6 +465,7 @@ class CommandBar(QWidget):
             "deliverables": self._deliverables_btn,
             "media": self._media_btn,
             "archimate": self._archimate_btn,
+            "debug": self._debug_btn,
         }
 
         self._nav_group = QButtonGroup(self)
@@ -1241,36 +1256,89 @@ class _VerticalTabBar(QWidget):
 
 
 # QTreeWidget item data roles for the notes panel folder tree
-_NOTE_NODE_DATA_ROLE   = Qt.ItemDataRole.UserRole        # folder_id or note_id
-_NOTE_NODE_TYPE_ROLE   = Qt.ItemDataRole.UserRole + 1   # "folder" | "note"
-_NOTE_NODE_FOLDER_ROLE = Qt.ItemDataRole.UserRole + 2   # folder_id of the note (note nodes only)
+_NOTE_NODE_DATA_ROLE   = Qt.ItemDataRole.UserRole        # folder_id, note_id or document_id
+_NOTE_NODE_TYPE_ROLE   = Qt.ItemDataRole.UserRole + 1   # "folder" | "note" | "document"
+_NOTE_NODE_FOLDER_ROLE = Qt.ItemDataRole.UserRole + 2   # folder_id of the note/document (leaf nodes only)
+_NOTE_NODE_URL_ROLE    = Qt.ItemDataRole.UserRole + 3   # url (document nodes only)
 
-_NOTE_NODE_TYPE_FOLDER = "folder"
-_NOTE_NODE_TYPE_NOTE   = "note"
+_NOTE_NODE_TYPE_FOLDER   = "folder"
+_NOTE_NODE_TYPE_NOTE     = "note"
+_NOTE_NODE_TYPE_DOCUMENT = "document"
 
 
 class _FolderTree(QTreeWidget):
-    """QTreeWidget avec drag-and-drop pour déplacer des dossiers et des notes."""
+    """QTreeWidget avec drag-and-drop pour déplacer dossiers, notes et documents.
+
+    Accepte aussi les dépôts *externes* (Edge, Explorateur) porteurs d'un lien,
+    qui créent un document dans le dossier visé."""
 
     folder_moved = Signal(int, object)  # (folder_id, new_parent_id: int | None)
     note_moved   = Signal(int, object)  # (note_id,   new_folder_id: int | None)
+    document_moved = Signal(int, object)  # (document_id, new_folder_id: int | None)
+    document_dropped = Signal(str, str, object)  # (name, url, folder_id: int | None)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self.setDragEnabled(True)
         self.setAcceptDrops(True)
-        self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
+        # DragDrop (et non InternalMove) : en InternalMove, QAbstractItemView
+        # refuse tout drag dont la source n'est pas cette vue, avant même que
+        # dropEvent ne soit atteint — les liens venus d'Edge n'arriveraient jamais.
+        self.setDragDropMode(QAbstractItemView.DragDropMode.DragDrop)
+        # InternalMove imposait Move ; en DragDrop il faut le redemander pour que
+        # les déplacements internes gardent leur curseur (et non celui de copie).
+        self.setDefaultDropAction(Qt.DropAction.MoveAction)
         self.setDropIndicatorShown(True)
 
     def startDrag(self, supported_actions) -> None:
         item = self.currentItem()
         if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) not in (
-            _NOTE_NODE_TYPE_FOLDER, _NOTE_NODE_TYPE_NOTE
+            _NOTE_NODE_TYPE_FOLDER, _NOTE_NODE_TYPE_NOTE, _NOTE_NODE_TYPE_DOCUMENT
         ):
             return
         super().startDrag(supported_actions)
 
+    # ── Dépôts externes ───────────────────────────────────────────────────
+    def dragEnterEvent(self, event) -> None:
+        if self._is_external_link_drag(event):
+            event.acceptProposedAction()
+            return
+        super().dragEnterEvent(event)
+
+    def dragMoveEvent(self, event) -> None:
+        if self._is_external_link_drag(event):
+            # Laisser la vue faire son travail visuel (survol, auto-scroll,
+            # dépliage des dossiers) avant d'imposer notre acceptation : elle
+            # refuserait sinon un MIME que son modèle ne connaît pas.
+            super().dragMoveEvent(event)
+            event.acceptProposedAction()
+            return
+        super().dragMoveEvent(event)
+
+    @staticmethod
+    def _is_external_link_drag(event) -> bool:
+        """Drag venu d'une autre application et porteur d'un lien potentiel.
+
+        Test volontairement bon marché (appelé à chaque dragMoveEvent) : on cherche
+        seulement un schéma d'URL, l'extraction complète n'a lieu qu'au dépôt."""
+        if event.source() is not None:
+            return False
+        mime = event.mimeData()
+        if mime.hasUrls():
+            return True
+        for payload in (mime.text() if mime.hasText() else "", mime.html() if mime.hasHtml() else ""):
+            if any(scheme in payload for scheme in URL_SCHEMES):
+                return True
+        return False
+
     def dropEvent(self, event) -> None:
+        # Le test doit précéder tout appel à currentItem() : sur un dépôt externe
+        # celui-ci renvoie le dernier item *sélectionné*, et le code interne
+        # déplacerait alors une note sans rapport avec le geste de l'utilisateur.
+        if event.source() is None:
+            self._handle_external_drop(event)
+            return
+
         dragged = self.currentItem()
         if dragged is None:
             event.ignore()
@@ -1287,10 +1355,53 @@ class _FolderTree(QTreeWidget):
 
         if dragged_type == _NOTE_NODE_TYPE_FOLDER:
             self._handle_folder_drop(dragged, target, on_item, event)
-        elif dragged_type == _NOTE_NODE_TYPE_NOTE:
-            self._handle_note_drop(dragged, target, on_item, event)
+        elif dragged_type in (_NOTE_NODE_TYPE_NOTE, _NOTE_NODE_TYPE_DOCUMENT):
+            self._handle_leaf_drop(dragged, target, on_item, event)
         else:
             event.ignore()
+
+    def _handle_external_drop(self, event) -> None:
+        """Crée un document à partir d'un lien déposé depuis une autre application.
+
+        Le QMimeData d'un drag externe n'est valide que pendant l'événement : tout
+        est extrait ici, de façon synchrone, avant d'émettre le signal."""
+        mime = event.mimeData()
+        link = extract_document_link(
+            mime.html() if mime.hasHtml() else None,
+            mime.text() if mime.hasText() else None,
+            [u.toString() for u in mime.urls()] if mime.hasUrls() else [],
+        )
+        if link is None:
+            event.ignore()
+            return
+
+        target = self.itemAt(event.position().toPoint())
+        folder_id = self._resolve_drop_folder_id(target)
+        # Contrairement aux dépôts internes, il faut accepter : la source (Edge)
+        # considère sinon que le dépôt a été refusé.
+        event.acceptProposedAction()
+        name, url = link
+        self.document_dropped.emit(name, url, folder_id)
+
+    @staticmethod
+    def _resolve_drop_folder_id(target) -> "int | None":
+        """Dossier visé par un dépôt externe, None pour la racine du projet.
+
+        Contrairement aux dépôts internes, la résolution ne s'appuie pas sur
+        `dropIndicatorPosition()` : Qt ne le met à jour que lorsque son modèle
+        reconnaît le MIME déposé, ce qui n'est jamais le cas d'un lien venu
+        d'Edge. La règle est donc plus simple — déposer n'importe où sur la
+        ligne d'un dossier place le document dans ce dossier, déposer sur une
+        note ou un document le place à côté d'elle, et la zone vide sous le
+        dernier élément vise la racine."""
+        if target is None:
+            return None
+        if target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER:
+            return target.data(0, _NOTE_NODE_DATA_ROLE)
+        parent = target.parent()
+        if parent is not None and parent.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER:
+            return parent.data(0, _NOTE_NODE_DATA_ROLE)
+        return None
 
     def _handle_folder_drop(self, dragged, target, on_item, event) -> None:
         # Nouveau parent : le dossier cible (OnItem) ou le parent de la cible
@@ -1324,7 +1435,8 @@ class _FolderTree(QTreeWidget):
         event.ignore()
         self.folder_moved.emit(folder_id, new_parent_id)
 
-    def _handle_note_drop(self, dragged, target, on_item, event) -> None:
+    def _handle_leaf_drop(self, dragged, target, on_item, event) -> None:
+        """Déplacement d'une feuille (note ou document) vers un autre dossier."""
         # Nouveau dossier : le dossier cible (OnItem) ou le dossier parent de la cible
         if target.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_FOLDER and on_item:
             new_folder_item = target
@@ -1336,7 +1448,7 @@ class _FolderTree(QTreeWidget):
                 else None
             )
 
-        note_id: int = dragged.data(0, _NOTE_NODE_DATA_ROLE)
+        entity_id: int = dragged.data(0, _NOTE_NODE_DATA_ROLE)
         new_folder_id = (
             new_folder_item.data(0, _NOTE_NODE_DATA_ROLE)
             if new_folder_item is not None else None
@@ -1346,15 +1458,19 @@ class _FolderTree(QTreeWidget):
             return
 
         event.ignore()
-        self.note_moved.emit(note_id, new_folder_id)
+        if dragged.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_DOCUMENT:
+            self.document_moved.emit(entity_id, new_folder_id)
+        else:
+            self.note_moved.emit(entity_id, new_folder_id)
 
 
 class ProjectDetailWidget(QWidget):
     note_edit_requested = Signal(int)        # emits note_id
     deliverable_edit_requested = Signal(int) # emits deliverable_id
+    document_open_requested = Signal(str)    # emits url
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, prefs=None, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, document_repo: DocumentRepository, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
@@ -1363,6 +1479,7 @@ class ProjectDetailWidget(QWidget):
         self._folder_repo = folder_repo
         self._deliverable_repo = deliverable_repo
         self._tmpl_repo = tmpl_repo
+        self._document_repo = document_repo
         self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
@@ -1578,25 +1695,31 @@ class ProjectDetailWidget(QWidget):
         self._note_tree.customContextMenuRequested.connect(self._on_notes_context_menu)
         self._note_tree.folder_moved.connect(self._on_folder_moved)
         self._note_tree.note_moved.connect(self._on_note_moved)
+        self._note_tree.document_moved.connect(self._on_document_moved)
+        self._note_tree.document_dropped.connect(self._on_document_dropped)
         self._note_tree.itemExpanded.connect(self._on_folder_expanded)
         self._note_tree.itemCollapsed.connect(self._on_folder_collapsed)
         notes_content_layout.addWidget(self._note_tree, stretch=1)
+
+        # Coller un lien (SharePoint…) crée un document dans le dossier sélectionné.
+        # WindowShortcut plutôt que WidgetWithChildrenShortcut : le raccourci doit
+        # marcher dès que la page projet est affichée, quel que soit le panneau qui
+        # a le focus. Qt désactive les raccourcis des widgets non visibles, donc il
+        # ne tire pas depuis les autres pages du QStackedWidget de la fenêtre.
+        self._paste_shortcut = QShortcut(QKeySequence.StandardKey.Paste, self)
+        self._paste_shortcut.setContext(Qt.ShortcutContext.WindowShortcut)
+        self._paste_shortcut.activated.connect(self._on_paste_document)
 
         # Deliverables panel
         self._deliverables_panel = ProjectDeliverablesPanel(self._deliverable_repo, self._tmpl_repo)
         self._deliverables_panel.deliverable_edit_requested.connect(self.deliverable_edit_requested)
 
-        # Placeholder
-        documents_placeholder = QLabel("Documents — coming soon")
-        documents_placeholder.setAlignment(Qt.AlignmentFlag.AlignCenter)
-
         # Stacked content + vertical tab bar
         self._right_stack = QStackedWidget()
         self._right_stack.addWidget(notes_content)           # index 0
         self._right_stack.addWidget(self._deliverables_panel) # index 1
-        self._right_stack.addWidget(documents_placeholder)    # index 2
 
-        right_tab_bar = _VerticalTabBar(["Notes", "Deliverables", "Documents"])
+        right_tab_bar = _VerticalTabBar(["Notes", "Deliverables"])
         right_tab_bar.tab_changed.connect(self._right_stack.setCurrentIndex)
 
         right_panel = QWidget()
@@ -1835,14 +1958,37 @@ class ProjectDetailWidget(QWidget):
             )
             self._load_tasks(self._current_project_id)
 
-    def _load_notes(self, project_id: int) -> None:
+    def _load_notes(self, project_id: int, select_document_id: int | None = None) -> None:
         self._note_tree.clear()
         self._note_selected_folder_id = None
 
         notes = [n for n in self._note_repo.list_all_for_project(project_id) if not n.archived]
         all_folders = self._folder_repo.list_for_project(project_id)
         notes_by_folder = self._index_notes_by_folder(notes)
-        self._build_note_folder_subtree(None, all_folders, None, notes_by_folder)
+        docs_by_folder = self._index_documents_by_folder(self._document_repo.list_for_project(project_id))
+        self._build_note_folder_subtree(None, all_folders, None, notes_by_folder, docs_by_folder)
+
+        if select_document_id is not None:
+            self._select_document_item(select_document_id)
+
+    def _select_document_item(self, document_id: int) -> None:
+        """Resélectionne un document après reconstruction de l'arbre.
+
+        `_load_notes` repart de zéro et remet `_note_selected_folder_id` à None :
+        sans cela, deux collages successifs sans reclic mettraient le second à la
+        racine. Resélectionner restaure la cible via `currentItemChanged` et
+        montre à l'utilisateur ce qui vient d'être ajouté."""
+        iterator = QTreeWidgetItemIterator(self._note_tree)
+        while iterator.value():
+            item = iterator.value()
+            if (
+                item.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_DOCUMENT
+                and item.data(0, _NOTE_NODE_DATA_ROLE) == document_id
+            ):
+                self._note_tree.setCurrentItem(item)
+                self._note_tree.scrollToItem(item)
+                return
+            iterator += 1
 
     def _index_notes_by_folder(self, notes) -> dict:
         index: dict = {}
@@ -1850,7 +1996,13 @@ class ProjectDetailWidget(QWidget):
             index.setdefault(note.folder_id, []).append(note)
         return index
 
-    def _build_note_folder_subtree(self, parent_item, all_folders, parent_id, notes_by_folder) -> None:
+    def _index_documents_by_folder(self, documents) -> dict:
+        index: dict = {}
+        for document in documents:
+            index.setdefault(document.folder_id, []).append(document)
+        return index
+
+    def _build_note_folder_subtree(self, parent_item, all_folders, parent_id, notes_by_folder, docs_by_folder) -> None:
         children = sorted(
             [f for f in all_folders if f.parent_id == parent_id],
             key=lambda f: f.name.lower(),
@@ -1870,14 +2022,18 @@ class ProjectDetailWidget(QWidget):
             else:
                 folder_item.setExpanded(True)
 
-            self._build_note_folder_subtree(folder_item, all_folders, folder.id, notes_by_folder)
+            self._build_note_folder_subtree(folder_item, all_folders, folder.id, notes_by_folder, docs_by_folder)
 
             for note in sorted(notes_by_folder.get(folder.id, []), key=lambda n: n.title.lower()):
                 self._make_note_tree_item(folder_item, note)
+            for document in sorted(docs_by_folder.get(folder.id, []), key=lambda d: d.name.lower()):
+                self._make_document_tree_item(folder_item, document)
 
         if parent_id is None:
             for note in sorted(notes_by_folder.get(None, []), key=lambda n: n.title.lower()):
                 self._make_note_tree_item(None, note)
+            for document in sorted(docs_by_folder.get(None, []), key=lambda d: d.name.lower()):
+                self._make_document_tree_item(None, document)
 
     def _make_note_tree_item(self, parent, note) -> QTreeWidgetItem:
         if parent is None:
@@ -1889,6 +2045,21 @@ class ProjectDetailWidget(QWidget):
         item.setData(0, _NOTE_NODE_DATA_ROLE, note.id)
         item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_NOTE)
         item.setData(0, _NOTE_NODE_FOLDER_ROLE, note.folder_id)
+        return item
+
+    def _make_document_tree_item(self, parent, document) -> QTreeWidgetItem:
+        if parent is None:
+            item = QTreeWidgetItem(self._note_tree)
+        else:
+            item = QTreeWidgetItem(parent)
+        item.setText(0, document.name)
+        item.setIcon(0, _document_icon())
+        item.setToolTip(0, document.url)
+        item.setForeground(0, QBrush(QColor(_NOTES_NOTE_TEXT)))
+        item.setData(0, _NOTE_NODE_DATA_ROLE, document.id)
+        item.setData(0, _NOTE_NODE_TYPE_ROLE, _NOTE_NODE_TYPE_DOCUMENT)
+        item.setData(0, _NOTE_NODE_FOLDER_ROLE, document.folder_id)
+        item.setData(0, _NOTE_NODE_URL_ROLE, document.url)
         return item
 
     def _on_folder_expanded(self, item) -> None:
@@ -1910,16 +2081,24 @@ class ProjectDetailWidget(QWidget):
         node_type = current.data(0, _NOTE_NODE_TYPE_ROLE)
         if node_type == _NOTE_NODE_TYPE_FOLDER:
             self._note_selected_folder_id = current.data(0, _NOTE_NODE_DATA_ROLE)
-        elif node_type == _NOTE_NODE_TYPE_NOTE:
+        elif node_type in (_NOTE_NODE_TYPE_NOTE, _NOTE_NODE_TYPE_DOCUMENT):
             self._note_selected_folder_id = current.data(0, _NOTE_NODE_FOLDER_ROLE)
 
     def _on_note_item_double_clicked(self, item, _col) -> None:
-        if item.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_NOTE:
+        node_type = item.data(0, _NOTE_NODE_TYPE_ROLE)
+        if node_type == _NOTE_NODE_TYPE_NOTE:
             self.note_edit_requested.emit(item.data(0, _NOTE_NODE_DATA_ROLE))
+        elif node_type == _NOTE_NODE_TYPE_DOCUMENT:
+            self.document_open_requested.emit(item.data(0, _NOTE_NODE_URL_ROLE))
 
     def _on_notes_context_menu(self, pos) -> None:
         item = self._note_tree.itemAt(pos)
-        if item is None or item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
+        if item is None:
+            return
+        if item.data(0, _NOTE_NODE_TYPE_ROLE) == _NOTE_NODE_TYPE_DOCUMENT:
+            self._show_document_context_menu(item, pos)
+            return
+        if item.data(0, _NOTE_NODE_TYPE_ROLE) != _NOTE_NODE_TYPE_FOLDER:
             return
         menu = QMenu(self)
         rename_action = menu.addAction("Rename")
@@ -1975,6 +2154,88 @@ class ProjectDetailWidget(QWidget):
         note.folder_id = new_folder_id
         self._note_repo.update(note)
         self._load_notes(self._current_project_id)
+
+    # ── Documents ─────────────────────────────────────────────────────────
+    def _on_document_moved(self, document_id: int, new_folder_id) -> None:
+        self._document_repo.move(document_id, new_folder_id)
+        self._load_notes(self._current_project_id, select_document_id=document_id)
+
+    def _on_document_dropped(self, name: str, url: str, folder_id) -> None:
+        """Lien déposé sur l'arbre depuis une application externe."""
+        self._create_document(name, url, folder_id)
+
+    def _on_paste_document(self) -> None:
+        """Ctrl+V sur la page projet : crée un document depuis le presse-papiers.
+
+        Le raccourci étant en contexte fenêtre, il faut rendre la main aux champs
+        éditables de la page pour ne pas leur voler leur collage."""
+        if self._current_project_id is None:
+            return
+        focused = QApplication.focusWidget()
+        if isinstance(focused, (QLineEdit, QTextEdit)):
+            focused.paste()
+            return
+
+        mime = QApplication.clipboard().mimeData()
+        if mime is None:
+            return
+        link = extract_document_link(
+            mime.html() if mime.hasHtml() else None,
+            mime.text() if mime.hasText() else None,
+            [u.toString() for u in mime.urls()] if mime.hasUrls() else [],
+        )
+        if link is None:
+            return
+        name, url = link
+        self._create_document(name, url, self._note_selected_folder_id)
+
+    def _create_document(self, name: str, url: str, folder_id) -> None:
+        if self._current_project_id is None:
+            return
+        document = self._document_repo.create(
+            project_id=self._current_project_id,
+            name=name,
+            url=url,
+            folder_id=folder_id,
+        )
+        self._load_notes(self._current_project_id, select_document_id=document.id)
+
+    def _show_document_context_menu(self, item, pos) -> None:
+        menu = QMenu(self)
+        open_action = menu.addAction("Open")
+        rename_action = menu.addAction("Rename")
+        menu.addSeparator()
+        delete_action = menu.addAction("Delete")
+        chosen = menu.exec(self._note_tree.viewport().mapToGlobal(pos))
+        if chosen is open_action:
+            self.document_open_requested.emit(item.data(0, _NOTE_NODE_URL_ROLE))
+        elif chosen is rename_action:
+            self._rename_document(item)
+        elif chosen is delete_action:
+            self._delete_document(item)
+
+    def _rename_document(self, item) -> None:
+        document_id: int = item.data(0, _NOTE_NODE_DATA_ROLE)
+        current_name: str = item.text(0)
+        dlg = NewFolderDialog(title="Rename Document", initial_name=current_name, parent=self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        new_name = dlg.name()
+        if not new_name or new_name == current_name:
+            return
+        self._document_repo.rename(document_id, new_name)
+        self._load_notes(self._current_project_id, select_document_id=document_id)
+
+    def _delete_document(self, item) -> None:
+        document_id: int = item.data(0, _NOTE_NODE_DATA_ROLE)
+        name: str = item.text(0)
+        if ConfirmDialog.ask(
+            "Delete Document",
+            f'Delete document "{name}"?\nOnly the link is removed; the file itself is untouched.',
+            self,
+        ):
+            self._document_repo.delete(document_id)
+            self._load_notes(self._current_project_id)
 
     def _on_folder_moved(self, folder_id: int, new_parent_id) -> None:
         if self._current_project_id is None:

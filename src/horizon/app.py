@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidg
 
 from horizon import theme as _theme
 from horizon.database import Database
+from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
@@ -29,6 +30,7 @@ from horizon.widgets.deliverables import (
 from horizon.widgets.media import MediaWidget
 from horizon.archimate import ArchimateModelRepository
 from horizon.widgets.archimate import ArchimateWidget
+from horizon.widgets.debug_drop import DebugDropWidget
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
 from horizon.note_window import NoteWindow
@@ -107,6 +109,7 @@ class MainWindow(QMainWindow):
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
         self._archimate_repo = ArchimateModelRepository(db)
+        self._document_repo = DocumentRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -120,7 +123,7 @@ class MainWindow(QMainWindow):
         self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._deliverable_repo, self._tmpl_repo, self._prefs)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._deliverable_repo, self._tmpl_repo, self._document_repo, self._prefs)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
@@ -157,6 +160,9 @@ class MainWindow(QMainWindow):
         self._archimate_widget = ArchimateWidget(self._archimate_repo, self._prefs)
         self._right_stack.addWidget(self._archimate_widget)       # index 11
 
+        self._debug_widget = DebugDropWidget()
+        self._right_stack.addWidget(self._debug_widget)           # index 12
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -180,12 +186,14 @@ class MainWindow(QMainWindow):
         self._command_bar.deliverables_requested.connect(self._show_deliverables)
         self._command_bar.media_requested.connect(self._show_media)
         self._command_bar.archimate_requested.connect(self._show_archimate)
+        self._command_bar.debug_requested.connect(self._show_debug)
         self._media_widget.note_open_requested.connect(self._open_note_from_media)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
         self._tags_widget.note_edit_requested.connect(self._open_note_from_tags)
         self._project_detail.note_edit_requested.connect(self._open_note_from_project)
         self._project_detail.deliverable_edit_requested.connect(self._open_deliverable_from_project)
+        self._project_detail.document_open_requested.connect(self._open_document_url)
         self._project_detail.project_renamed.connect(self._project_list._load_projects)
         self._note_detail.back_requested.connect(self._go_back_from_note)
         self._note_detail.note_link_clicked.connect(self._show_note_detail)
@@ -341,6 +349,12 @@ class MainWindow(QMainWindow):
         self._archimate_widget.load()
         self._right_stack.setCurrentIndex(11)
 
+    def _show_debug(self) -> None:
+        self._project_list.clear_selection()
+        self._command_bar.set_active("debug")
+        self._debug_widget.load()
+        self._right_stack.setCurrentIndex(12)
+
     def _open_note_from_media(self, note_id: int) -> None:
         self._note_source = "media"
         self._show_note_detail(note_id)
@@ -361,6 +375,11 @@ class MainWindow(QMainWindow):
     def _open_note_from_notes(self, note_id: int) -> None:
         self._note_source = "notes"
         self._show_note_detail(note_id)
+
+    def _open_document_url(self, url: str) -> None:
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        QDesktopServices.openUrl(QUrl(url))
 
     def _open_note_from_project(self, note_id: int) -> None:
         self._note_source = "project"
