@@ -11,6 +11,7 @@ from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
+from horizon.note_task import NoteTaskRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
@@ -100,6 +101,7 @@ class MainWindow(QMainWindow):
         self._subtask_repo = subtask_repo
         self._note_repo = NoteRepository(db)
         self._note_version_repo = NoteVersionRepository(db)
+        self._note_task_repo = NoteTaskRepository(db)
         self._folder_repo = FolderRepository(db)
         self._tag_repo = TagRepository(db)
         image_repo = ImageRepository(db)
@@ -133,6 +135,8 @@ class MainWindow(QMainWindow):
             self._note_repo, self._proj_repo, self._folder_repo,
             prefs=self._prefs, image_repo=image_repo,
             version_repo=self._note_version_repo,
+            task_repo=task_repo, subtask_repo=subtask_repo,
+            note_task_repo=self._note_task_repo,
         )
         self._right_stack.addWidget(self._note_detail)     # index 3
 
@@ -416,6 +420,8 @@ class MainWindow(QMainWindow):
         win = NoteWindow(
             self._note_repo, self._proj_repo, self._folder_repo,
             self._image_repo, self._note_version_repo, self._prefs,
+            task_repo=self._task_repo, subtask_repo=self._subtask_repo,
+            note_task_repo=self._note_task_repo,
         )
         win.load_note(note_id)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
