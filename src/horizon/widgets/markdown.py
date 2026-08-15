@@ -8,6 +8,7 @@ from PySide6.QtGui import QIcon, QTextDocument
 
 from horizon import theme as _theme
 from horizon.image import ImageRepository
+from horizon.note_task import split_title_description, sub_outside_code
 
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE = QSize(12, 12)
@@ -32,6 +33,16 @@ _RESOURCES_BASE_URL       = QUrl((Path(__file__).parent.parent / "resources" / "
 
 _TAG_RE    = re.compile(r'\{#([A-Za-z0-9_\-]+)\}')
 _TAG_PH_RE = re.compile(r'HORIZONTAG(\d+)END')
+
+# {task: …} blocks — the syntax itself lives in horizon.note_task
+_TASK_PH_RE = re.compile(r'HORIZONTASK(\d+)END')
+_TASK_STATE_GLYPHS = {
+    "New":         "○",
+    "In-Progress": "◐",
+    "On hold":     "⏸",
+    "Completed":   "●",
+    "Cancelled":   "✕",
+}
 
 _MERMAID_FENCE_RE = re.compile(
     r'^[ \t]*```[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*```[ \t]*$',
@@ -135,6 +146,15 @@ def _make_preview_html() -> str:
   a.note-link {{ color: {t.accent_color}; text-decoration: none; border-bottom: 1px dashed {t.accent_color}; }}
   a.note-link:hover {{ border-bottom-style: solid; }}
   .note-link-broken {{ color: {t.preview_text}; opacity: 0.45; text-decoration: line-through; cursor: default; font-style: italic; }}
+  .task-ref {{ display: inline-block; background-color: {t.accent_color}14; border: 1px solid {t.preview_border}; border-left: 3px solid {t.accent_color}; border-radius: 4px; padding: 1px 8px; white-space: nowrap; }}
+  .task-glyph {{ color: {t.accent_color}; margin-right: 5px; font-size: 0.9em; }}
+  a.task-link {{ color: {t.preview_link}; text-decoration: none; font-weight: 500; }}
+  a.task-link:hover {{ text-decoration: underline; }}
+  .task-state-new .task-glyph {{ color: {t.preview_text}; opacity: 0.55; }}
+  .task-state-completed a.task-link {{ text-decoration: line-through; opacity: 0.65; }}
+  .task-state-cancelled a.task-link {{ text-decoration: line-through; opacity: 0.45; font-style: italic; }}
+  .task-ref-pending {{ border-left-style: dashed; color: {t.preview_text}; opacity: 0.7; font-style: italic; }}
+  .task-ref-missing {{ border-left-color: {t.preview_border}; color: {t.preview_text}; opacity: 0.45; font-family: 'JetBrains Mono', monospace; font-size: 0.85em; }}
   sup.footnote-ref a {{ color: {t.preview_link}; text-decoration: none; }}
   .footnotes {{ margin-top: 2em; font-size: 0.9em; opacity: 0.8; }}
   .footnotes hr.footnotes-sep {{ margin-bottom: 0.8em; }}
@@ -292,6 +312,55 @@ def _inject_tags(html: str, tags: list[str]) -> str:
         span = f'<span class="tag">#{name}</span>'
         html = html.replace(placeholder, span)
     return html
+
+
+def _extract_tasks(md: str, task_info: dict[int, tuple[str, str]]) -> tuple[str, list[str]]:
+    """Replace {task: …} blocks with placeholders and build their HTML.
+
+    Three shapes: a live task (glyph + clickable title), a block not yet
+    persisted (dimmed title, no link), and an id whose task has been deleted —
+    that one shows the bare id, since neither title nor state exist any more.
+    """
+    items: list[str] = []
+
+    def replace(m: re.Match) -> str:
+        idx = len(items)
+        raw = m.group(1).strip()
+
+        if raw.isdigit():
+            task_id = int(raw)
+            info = task_info.get(task_id)
+            if info is None:
+                html = f'<span class="task-ref task-ref-missing">#{task_id}</span>'
+            else:
+                title, state = info
+                glyph = _TASK_STATE_GLYPHS.get(state, "○")
+                cls = "task-state-" + state.lower().replace(" ", "-")
+                html = (
+                    f'<span class="task-ref {cls}">'
+                    f'<span class="task-glyph" title="{_html_mod.escape(state)}">{glyph}</span>'
+                    f'<a href="horizon://task/{task_id}" class="task-link">'
+                    f'{_html_mod.escape(title)}</a></span>'
+                )
+        else:
+            title, _description = split_title_description(raw)
+            if not title:
+                return m.group(0)
+            html = (
+                f'<span class="task-ref task-ref-pending">'
+                f'<span class="task-glyph">+</span>{_html_mod.escape(title)}</span>'
+            )
+
+        items.append(html)
+        return f'HORIZONTASK{idx}END'
+
+    return sub_outside_code(replace, md), items
+
+
+def _inject_tasks(html: str, items: list[str]) -> str:
+    def replace(m: re.Match) -> str:
+        return items[int(m.group(1))]
+    return _TASK_PH_RE.sub(replace, html)
 
 
 def _extract_wikilinks(
@@ -585,6 +654,7 @@ def _markdown_to_html(
     title_to_id: dict[str, int] | None = None,
     id_exists: set[int] | None = None,
     image_cache: dict[int, bytes | None] | None = None,
+    task_info: dict[int, tuple[str, str]] | None = None,
 ) -> str:
     # Use pre-computed note maps when provided to avoid hitting the DB on every render
     if title_to_id is not None and id_exists is not None:
@@ -614,6 +684,7 @@ def _markdown_to_html(
     markdown, inline_tags = _extract_tags(markdown)
     markdown, diagrams = _extract_mermaid(markdown)
     markdown, code_blocks = _extract_code_blocks(markdown)
+    markdown, tasks = _extract_tasks(markdown, task_info or {})
     markdown, footnotes = _extract_footnotes(markdown)
     markdown, wikilinks = _extract_wikilinks(markdown, _title_to_id, _id_exists)
     markdown, bq_list = _extract_blockquotes(markdown)
@@ -629,6 +700,7 @@ def _markdown_to_html(
     html = _inject_mermaid(html, diagrams)
     html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
     html = _inject_tags(html, inline_tags)
+    html = _inject_tasks(html, tasks)
     html = _inject_wikilinks(html, wikilinks)
     html = _inject_footnotes(html, footnotes)
 

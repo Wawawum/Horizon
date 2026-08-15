@@ -9,8 +9,10 @@ from horizon import theme as _theme
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
+from horizon.note_task import NoteTaskRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
+from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
 from horizon.widgets.notes import NoteDetailWidget
 
@@ -27,6 +29,9 @@ class NoteWindow(QMainWindow):
         image_repo: ImageRepository | None,
         version_repo: NoteVersionRepository | None,
         prefs: Preferences,
+        task_repo: TaskRepository | None = None,
+        subtask_repo: SubtaskRepository | None = None,
+        note_task_repo: NoteTaskRepository | None = None,
         parent=None,
     ) -> None:
         super().__init__(parent)
@@ -43,6 +48,9 @@ class NoteWindow(QMainWindow):
             prefs=prefs,
             image_repo=image_repo,
             version_repo=version_repo,
+            task_repo=task_repo,
+            subtask_repo=subtask_repo,
+            note_task_repo=note_task_repo,
             windowed=True,
         )
         self._note_detail.back_requested.connect(self.close)

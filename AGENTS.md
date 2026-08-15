@@ -63,6 +63,7 @@ Detailed patterns: [docs/agent-patterns.md](docs/agent-patterns.md)
 
 - Searchable entities: notes, tasks, projects.
 - Tagged entities: notes, tasks.
+- Note↔task links: `note_tasks`, synced from the `{task: …}` blocks of a note body by `src/horizon/note_task.py`.
 - Other repositories, such as deliverables, folders, images, and deliverable templates, still follow the repository pattern and commit mutations, but do not currently sync tags or `search_index`.
 
 ## Common Workflows
@@ -81,6 +82,7 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/app.py](src/horizon/app.py) | `MainWindow`, widget wiring, hotkeys, signal routing |
 | [src/horizon/database.py](src/horizon/database.py) | SQLite connection, DDL, migrations, search index sync |
 | [src/horizon/note.py](src/horizon/note.py) | Canonical `Note` dataclass + `NoteRepository` |
+| [src/horizon/note_task.py](src/horizon/note_task.py) | `{task: …}` block syntax, `NoteTaskRepository`, note→task sync |
 | [src/horizon/task.py](src/horizon/task.py) | Canonical enum-backed `Task` + `TaskRepository` |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |

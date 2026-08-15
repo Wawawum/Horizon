@@ -80,6 +80,29 @@ Tags are extracted from note/task bodies by [../src/horizon/tag.py](../src/horiz
 
 ---
 
+## Tasks In Notes
+
+A note can declare a task inline, title on the first line and an optional description below:
+
+```markdown
+{task: Préparer le COPIL
+Slides + relevé de décisions}
+```
+
+On an **explicit** save (Ctrl+S, blur, Back, window close — not the 5 s autosave) the block is
+persisted as a real task in the note's project and rewritten to `{task: 42}`. A note with no
+project is skipped silently. Blocks inside a fenced code region are ignored.
+
+[../src/horizon/note_task.py](../src/horizon/note_task.py) owns the syntax and the `note_tasks`
+N:N association, which is re-synced on every explicit save: removing a block unlinks the task
+but never deletes it. Deleting the task from its project drops the link through the FK cascade,
+and the note then renders the bare id — archiving does not, so archived tasks keep showing their
+title and status.
+
+The renderer resolves titles and states **when the note is opened**, not on every keystroke.
+
+---
+
 ## HTTP API
 
 [../src/horizon/api_server.py](../src/horizon/api_server.py) uses stdlib `ThreadingHTTPServer` and `BaseHTTPRequestHandler`.
