@@ -160,6 +160,9 @@ class NoteDetailWidget(QWidget):
         self._body_raw: str = ""
         self._body_at_open: str = ""
         self._viewing_version: NoteVersion | None = None
+        # Verrou posé quand la note est détenue par une fenêtre détachée. Orthogonal à
+        # _viewing_version : les deux mènent en lecture seule, pas avec le même périmètre.
+        self._locked = False
         self._updating_combo = False
         self._updating_folder_combo = False
 
@@ -370,6 +373,42 @@ class NoteDetailWidget(QWidget):
         lay.addWidget(text)
         dlg.exec()
 
+    def _apply_readonly(self) -> None:
+        """Source unique de vérité de l'état lecture seule et de sa bannière."""
+        if self._viewing_version is not None:
+            message = "Viewing historical version — read only. Press ← Back to return."
+        elif self._locked:
+            message = ("Ouverte dans une fenêtre séparée — lecture seule ici. "
+                       "Fermez la fenêtre pour reprendre l'édition.")
+        else:
+            message = ""
+        self._readonly_banner.setText(message)
+        self._readonly_banner.setVisible(bool(message))
+        self._editor.set_read_only(bool(message))
+        # Réservé au verrou : consulter une version laisse ces contrôles actifs, comme avant.
+        for widget in (self._title_edit, self._project_combo, self._folder_combo,
+                       self._archive_cb, self._delete_btn, self._history_btn):
+            widget.setEnabled(not self._locked)
+
+    def set_locked(self, locked: bool) -> None:
+        """Passe le panneau en lecture seule tant qu'une fenêtre détachée détient la note.
+
+        Sans ce verrou les deux vues gardent chacune leur copie du corps, et la dernière à
+        écrire écrase l'autre — NoteRepository.update réécrit toutes les colonnes.
+        """
+        if locked == self._locked:
+            return
+        if locked:
+            # Avant de verrouiller, jamais après : la fenêtre détachée relit la note depuis
+            # la base juste ensuite et doit voir la dernière frappe faite ici.
+            self.flush_and_save()
+        self._locked = locked
+        self._apply_readonly()
+
+    @property
+    def current_note_id(self) -> int | None:
+        return self._current_note.id if self._current_note is not None else None
+
     def load_note(self, note: Note, projects: list) -> None:
         self._autosave_timer.stop()
         self._status_label.setText("")
@@ -377,9 +416,8 @@ class NoteDetailWidget(QWidget):
         self._body_raw = note.body
         self._body_at_open = note.body
         self._viewing_version = None
-        self._readonly_banner.setVisible(False)
         self._back_btn.setText("← Back")
-        self._editor.set_read_only(False)
+        self._apply_readonly()
         if self._history_btn.isChecked():
             self._history_btn.setChecked(False)
             self._history_panel.setVisible(False)
@@ -471,7 +509,7 @@ class NoteDetailWidget(QWidget):
         self._status_label.setText("")
 
     def _save_body(self, show_status: bool = False, sync_tasks: bool = True) -> None:
-        if self._viewing_version is not None:
+        if self._locked or self._viewing_version is not None:
             return
         if self._current_note is None:
             return
@@ -528,7 +566,7 @@ class NoteDetailWidget(QWidget):
     def _on_editor_text_changed(self) -> None:
         if not self._sticky:
             self._render_timer.start()
-        if self._current_note is not None and self._viewing_version is None:
+        if self._current_note is not None and self._viewing_version is None and not self._locked:
             self._autosave_timer.start()
 
     def _do_render(self) -> None:
@@ -621,7 +659,7 @@ class NoteDetailWidget(QWidget):
         self._editor.focus_editor()
 
     def _save_title(self) -> None:
-        if self._current_note is None:
+        if self._locked or self._current_note is None:
             return
         self._current_note.title = self._title_edit.text().strip() or self._current_note.title
         self._title_edit.setText(self._current_note.title)
@@ -630,14 +668,14 @@ class NoteDetailWidget(QWidget):
         self.title_changed.emit(self._current_note.title)
 
     def _on_archive_changed(self) -> None:
-        if self._current_note is None:
+        if self._locked or self._current_note is None:
             return
         self._current_note.archived = self._archive_cb.isChecked()
         self._note_repo.update(self._current_note)
         self._delete_btn.setVisible(self._current_note.archived)
 
     def _on_delete_clicked(self) -> None:
-        if self._current_note is None or not self._current_note.archived:
+        if self._locked or self._current_note is None or not self._current_note.archived:
             return
         if ConfirmDialog.ask(
             "Delete Note",
@@ -649,7 +687,7 @@ class NoteDetailWidget(QWidget):
             self.back_requested.emit()
 
     def _on_project_changed(self, _index: int) -> None:
-        if self._updating_combo or self._current_note is None:
+        if self._locked or self._updating_combo or self._current_note is None:
             return
         new_project_id = self._project_combo.currentData()
         self._current_note.project_id = new_project_id
@@ -668,7 +706,7 @@ class NoteDetailWidget(QWidget):
         self._updating_folder_combo = False
 
     def _on_folder_changed(self, _index: int) -> None:
-        if self._updating_folder_combo or self._current_note is None:
+        if self._locked or self._updating_folder_combo or self._current_note is None:
             return
         self._current_note.folder_id = self._folder_combo.currentData()
         self._note_repo.update(self._current_note)
@@ -676,9 +714,8 @@ class NoteDetailWidget(QWidget):
     def _on_back_clicked(self) -> None:
         if self._viewing_version is not None:
             self._viewing_version = None
-            self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.set_read_only(False)
+            self._apply_readonly()
             self._editor.set_text(self._body_raw)
             self._refresh_task_cache(self._body_raw)
             self._bridge.push_html(_markdown_to_html(
@@ -729,18 +766,16 @@ class NoteDetailWidget(QWidget):
             return
         if version.is_current:
             self._viewing_version = None
-            self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.set_read_only(False)
+            self._apply_readonly()
             self._editor.set_text(self._body_raw)
             self._refresh_task_cache(self._body_raw)
             self._bridge.push_html(_markdown_to_html(
                 self._body_raw, self._image_repo, self._note_repo, task_info=self._task_info))
         else:
             self._viewing_version = version
-            self._readonly_banner.setVisible(True)
             self._back_btn.setText("← Return to current")
-            self._editor.set_read_only(True)
+            self._apply_readonly()
             self._editor.set_text(version.body)
             self._refresh_task_cache(version.body)
             self._bridge.push_html(_markdown_to_html(

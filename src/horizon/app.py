@@ -107,8 +107,9 @@ class MainWindow(QMainWindow):
         image_repo = ImageRepository(db)
         self._image_repo = image_repo
         self._search_repo = SearchRepository(db)
+        # Une note a au plus une fenêtre détachée, pense-bête ou non : deux éditeurs
+        # concurrents sur la même note divergeraient l'un de l'autre.
         self._note_windows: dict[int, NoteWindow] = {}
-        self._sticky_windows: dict[int, NoteWindow] = {}
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
         self._archimate_repo = ArchimateModelRepository(db)
@@ -309,8 +310,7 @@ class MainWindow(QMainWindow):
         title = f"{meeting.start.strftime('%Y-%m-%d')} {subject}"
         body = _build_meeting_note_body(meeting)
         note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start)
-        projects = self._proj_repo.list_all()
-        self._note_detail.load_note(note, projects)
+        self._load_note_into_detail(note)
         self._right_stack.setCurrentIndex(3)
 
     def _show_home(self) -> None:
@@ -408,24 +408,39 @@ class MainWindow(QMainWindow):
         else:
             self._show_notes()
 
+    def _load_note_into_detail(self, note) -> None:
+        """Charge une note dans le panneau principal en recalculant son verrou.
+
+        Le déverrouillage précède load_note : _apply_readonly lit _locked, donc un verrou
+        laissé par la note précédente s'afficherait sur la nouvelle.
+        """
+        self._note_detail.set_locked(False)
+        self._note_detail.load_note(note, self._proj_repo.list_all())
+        self._note_detail.set_locked(note.id in self._note_windows)
+
     def _show_note_detail(self, note_id: int) -> None:
         note = self._note_repo.get(note_id)
         if note is None:
             return
-        projects = self._proj_repo.list_all()
-        self._note_detail.load_note(note, projects)
+        self._load_note_into_detail(note)
         self._right_stack.setCurrentIndex(3)
 
-    def _open_note_window(self, note_id: int, registry: dict, sticky: bool) -> NoteWindow | None:
-        """Ouvre (ou ramène au premier plan) la fenêtre de `note_id` dans `registry`.
+    def _refresh_note_lock(self, note_id: int) -> None:
+        """Aligne le verrou du panneau principal sur la présence d'une fenêtre détachée."""
+        if self._note_detail.current_note_id == note_id:
+            self._note_detail.set_locked(note_id in self._note_windows)
 
-        Retourne None quand la fenêtre existait déjà, pour que l'appelant n'ait pas à
-        refaire son travail d'installation.
+    def _open_note_window(self, note_id: int, sticky: bool) -> NoteWindow | None:
+        """Ouvre la fenêtre détachée de `note_id`, ou ramène l'existante au premier plan.
+
+        Retourne None dans ce second cas, pour que l'appelant n'ait pas à refaire son
+        travail d'installation. Une fenêtre déjà ouverte l'emporte sur le mode demandé :
+        un second éditeur sur la même note rouvrirait la divergence que le verrou ferme.
         """
-        if note_id in registry:
-            win = registry[note_id]
-            win.raise_()
-            win.activateWindow()
+        existing = self._note_windows.get(note_id)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
             return None
         win = NoteWindow(
             self._note_repo, self._proj_repo, self._folder_repo,
@@ -434,18 +449,53 @@ class MainWindow(QMainWindow):
             note_task_repo=self._note_task_repo,
             sticky=sticky,
         )
-        win.load_note(note_id)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        win.destroyed.connect(lambda _, nid=note_id: registry.pop(nid, None))
-        registry[note_id] = win
+        win.closed.connect(self._on_note_window_closed)
+        win.note_changed.connect(self._on_note_window_note_changed)
+        # Filet pour une destruction sans closeEvent. Par identité et non par id de note :
+        # après un [[lien]] la fenêtre a changé de clé, et une clé périmée retirerait du
+        # registre une autre fenêtre légitimement rouverte entre-temps.
+        win.destroyed.connect(lambda _=None, w=win: self._forget_note_window(w))
+        self._note_windows[note_id] = win
+        # Avant load_note : le verrou déclenche un flush du panneau principal, sans quoi la
+        # fenêtre relirait un corps périmé depuis la base.
+        self._refresh_note_lock(note_id)
+        win.load_note(note_id)
         win.show()
         return win
 
+    def _forget_note_window(self, win) -> None:
+        """Retire `win` du registre. Comparaison d'identité seule : l'objet C++ est mort."""
+        for note_id, existing in list(self._note_windows.items()):
+            if existing is win:
+                del self._note_windows[note_id]
+
+    def _on_note_window_closed(self, note_id: int) -> None:
+        self._note_windows.pop(note_id, None)
+        if self._note_detail.current_note_id == note_id:
+            self._note_detail.set_locked(False)
+            note = self._note_repo.get(note_id)
+            if note is not None:
+                self._note_detail.load_note(note, self._proj_repo.list_all())
+        # Le titre a pu changer dans la fenêtre : rafraîchir la liste affichée.
+        index = self._right_stack.currentIndex()
+        if index == 2:
+            self._notes_list.load()
+        elif index == 1 and self._current_project is not None:
+            self._project_detail.load_project(self._current_project)
+
+    def _on_note_window_note_changed(self, old_id: int, new_id: int) -> None:
+        win = self._note_windows.pop(old_id, None)
+        if win is not None:
+            self._note_windows[new_id] = win
+        self._refresh_note_lock(old_id)  # l'ancienne note se libère
+        self._refresh_note_lock(new_id)  # la nouvelle se verrouille
+
     def _open_note_in_window(self, note_id: int) -> None:
-        self._open_note_window(note_id, self._note_windows, sticky=False)
+        self._open_note_window(note_id, sticky=False)
 
     def _open_note_as_sticky(self, note_id: int) -> None:
-        win = self._open_note_window(note_id, self._sticky_windows, sticky=True)
+        win = self._open_note_window(note_id, sticky=True)
         if win is None:
             return
         hwnd = int(win.winId())

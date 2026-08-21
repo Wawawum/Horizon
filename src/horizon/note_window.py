@@ -1,7 +1,7 @@
 import ctypes
 import ctypes.wintypes
 
-from PySide6.QtCore import Qt
+from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
@@ -17,6 +17,9 @@ from horizon.widgets.notes import NoteDetailWidget
 
 
 class NoteWindow(QMainWindow):
+    closed = Signal(int)  # emits note_id, once the body has been flushed to the database
+    note_changed = Signal(int, int)  # emits (previous_note_id, new_note_id)
+
     def __init__(
         self,
         note_repo: NoteRepository,
@@ -38,6 +41,7 @@ class NoteWindow(QMainWindow):
         # Mode pense-bête : fenêtre réduite à l'éditeur, épinglée au-dessus des autres par
         # MainWindow (l'épinglage est un appel Win32, pas un flag Qt — voir app.py).
         self._sticky = sticky
+        self._note_id: int | None = None
 
         self.setWindowIcon(QIcon(":/icons/Horizon_Icon.png"))
         w, h = prefs.sticky_note_window_size if sticky else prefs.note_window_size
@@ -73,6 +77,9 @@ class NoteWindow(QMainWindow):
         layout.addWidget(self._note_detail)
         self.setCentralWidget(container)
 
+    def note_id(self) -> int | None:
+        return self._note_id
+
     def load_note(self, note_id: int) -> None:
         note = self._note_repo.get(note_id)
         if note is None:
@@ -81,6 +88,11 @@ class NoteWindow(QMainWindow):
         self._note_detail.load_note(note, projects)
         title = note.title or f"Note #{note_id}"
         self.setWindowTitle(f"{title} — Horizon")
+        # Suivre un [[lien]] fait changer de note à la fenêtre : le registre de MainWindow
+        # la référence encore sous l'ancien id, et c'est lui qui décide du verrou.
+        previous, self._note_id = self._note_id, note_id
+        if previous is not None and previous != note_id:
+            self.note_changed.emit(previous, note_id)
 
     def _on_title_changed(self, title: str) -> None:
         self.setWindowTitle(f"{title} — Horizon")
@@ -93,6 +105,9 @@ class NoteWindow(QMainWindow):
             self._prefs.note_window_size = (self.width(), self.height())
         self._prefs.save()
         super().closeEvent(event)
+        # Après flush_and_save : la fenêtre principale recharge depuis la base.
+        if self._note_id is not None:
+            self.closed.emit(self._note_id)
 
     def changeEvent(self, event) -> None:
         if event.type() == 105 and hasattr(self, "_title_bar"):  # QEvent.Type.WindowStateChange = 105
