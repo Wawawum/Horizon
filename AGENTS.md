@@ -84,6 +84,7 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/note.py](src/horizon/note.py) | Canonical `Note` dataclass + `NoteRepository` |
 | [src/horizon/note_task.py](src/horizon/note_task.py) | `{task: …}` block syntax, `NoteTaskRepository`, note→task sync |
 | [src/horizon/task.py](src/horizon/task.py) | Canonical enum-backed `Task` + `TaskRepository` |
+| [src/horizon/note_window.py](src/horizon/note_window.py) | Detached note window, windowed and sticky (pinned) modes |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |

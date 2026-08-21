@@ -292,6 +292,7 @@ class WebMarkdownEditor(QWidget):
     font_size_changed = Signal(int)
     flushed           = Signal()
     image_upload      = Signal(bool)  # True = started, False = finished
+    editor_ready      = Signal()      # CodeMirror is live; call_js() lands from here on
 
     def __init__(
         self,
@@ -430,6 +431,7 @@ class WebMarkdownEditor(QWidget):
 
     def _on_ready(self) -> None:
         self._ready = True
+        self.editor_ready.emit()
 
     def _on_text_pushed(self, _text: str) -> None:
         self._js_dirty = False
