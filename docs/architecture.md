@@ -103,6 +103,38 @@ The renderer resolves titles and states **when the note is opened**, not on ever
 
 ---
 
+## Note Windows And Sticky Notes
+
+[../src/horizon/note_window.py](../src/horizon/note_window.py) hosts a `NoteDetailWidget` in a
+standalone frameless `QMainWindow`. It has two modes, both opened from `MainWindow` and tracked
+in their own registry so the same note can have one of each:
+
+| Mode | Trigger | Registry | Size preference |
+|---|---|---|---|
+| Windowed | `⧉ Fenêtre` | `_note_windows` | `note_window_size` |
+| Sticky | `📌 Pense-bête` | `_sticky_windows` | `sticky_note_window_size` |
+
+Sticky mode is for taking notes during a meeting or a presentation. `NoteDetailWidget(sticky=True)`
+keeps only the editor and the save indicator: the header row, the project/folder row, the
+separator, the markdown formatting toolbar and the preview are all gone. The preview
+`QWebEngineView` is **not constructed at all**, and `_do_render` returns early — rendering
+markdown on every keystroke is the bulk of the per-edit cost and nothing would consume it.
+Everything else (5 s autosave, `flush_and_save()` on close, `{task: …}` sync, Ctrl+S) is the
+shared code path, unchanged.
+
+There is no button to leave sticky mode: the note lives in its own window, so closing it is the
+exit. Autofocus waits for `WebMarkdownEditor.editor_ready` — `call_js()` is inert until
+CodeMirror has loaded, so focusing right after `show()` would be lost.
+
+A sticky window is pinned above other windows on open. The pin is the Win32 mechanism already
+behind the Win+Ctrl+T hotkey (`MainWindow._pin_hwnd` / `_unpin_hwnd`: `SetWindowPos(HWND_TOPMOST)`
+plus a `PinBorderOverlay`), not a Qt window flag — `setWindowFlags()` after `show()` recreates the
+native window on Windows and would drop the frameless `nativeEvent` handling. Because the overlay
+is registered in the shared `_pin_borders` map, Win+Ctrl+T unpins a sticky note like any other
+window, and closing it removes the border.
+
+---
+
 ## HTTP API
 
 [../src/horizon/api_server.py](../src/horizon/api_server.py) uses stdlib `ThreadingHTTPServer` and `BaseHTTPRequestHandler`.

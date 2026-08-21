@@ -5,7 +5,6 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
-from horizon import theme as _theme
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
@@ -15,9 +14,6 @@ from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
 from horizon.titlebar import TitleBar
 from horizon.widgets.notes import NoteDetailWidget
-
-_GWL_EXSTYLE    = -20
-_WS_EX_TOPMOST  = 0x00000008
 
 
 class NoteWindow(QMainWindow):
@@ -32,15 +28,19 @@ class NoteWindow(QMainWindow):
         task_repo: TaskRepository | None = None,
         subtask_repo: SubtaskRepository | None = None,
         note_task_repo: NoteTaskRepository | None = None,
+        sticky: bool = False,
         parent=None,
     ) -> None:
         super().__init__(parent)
         self._prefs = prefs
         self._note_repo = note_repo
         self._project_repo = project_repo
+        # Mode pense-bête : fenêtre réduite à l'éditeur, épinglée au-dessus des autres par
+        # MainWindow (l'épinglage est un appel Win32, pas un flag Qt — voir app.py).
+        self._sticky = sticky
 
         self.setWindowIcon(QIcon(":/icons/Horizon_Icon.png"))
-        w, h = prefs.note_window_size
+        w, h = prefs.sticky_note_window_size if sticky else prefs.note_window_size
         self.resize(w, h)
 
         self._note_detail = NoteDetailWidget(
@@ -52,12 +52,18 @@ class NoteWindow(QMainWindow):
             subtask_repo=subtask_repo,
             note_task_repo=note_task_repo,
             windowed=True,
+            sticky=sticky,
         )
         self._note_detail.back_requested.connect(self.close)
         self._note_detail.note_link_clicked.connect(self.load_note)
         self._note_detail.title_changed.connect(self._on_title_changed)
+        if sticky:
+            # call_js() est inerte tant que CodeMirror n'a pas signalé qu'il est prêt, donc
+            # le focus ne peut pas être posé juste après show().
+            self._note_detail.editor_ready.connect(self._note_detail.focus_editor)
 
-        self._title_bar = TitleBar(self, subtitle="Note", show_search=False)
+        self._title_bar = TitleBar(
+            self, subtitle="Pense-bête" if sticky else "Note", show_search=False)
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -81,7 +87,10 @@ class NoteWindow(QMainWindow):
 
     def closeEvent(self, event) -> None:
         self._note_detail.flush_and_save()
-        self._prefs.note_window_size = (self.width(), self.height())
+        if self._sticky:
+            self._prefs.sticky_note_window_size = (self.width(), self.height())
+        else:
+            self._prefs.note_window_size = (self.width(), self.height())
         self._prefs.save()
         super().closeEvent(event)
 

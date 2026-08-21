@@ -102,6 +102,19 @@ class Preferences:
         self._data["note_window"]["height"] = value[1]
 
     @property
+    def sticky_note_window_size(self) -> tuple[int, int]:
+        # La TitleBar impose un plancher d'environ 452 px de large (libellés + 3 boutons
+        # de 46 px), donc un défaut plus étroit serait élargi d'office à l'affichage.
+        w = self._data.get("sticky_note_window", {})
+        return w.get("width", 460), w.get("height", 560)
+
+    @sticky_note_window_size.setter
+    def sticky_note_window_size(self, value: tuple[int, int]) -> None:
+        self._data.setdefault("sticky_note_window", {})
+        self._data["sticky_note_window"]["width"] = value[0]
+        self._data["sticky_note_window"]["height"] = value[1]
+
+    @property
     def last_archimate_dir(self) -> str:
         return self._data.get("last_archimate_dir", "")
 

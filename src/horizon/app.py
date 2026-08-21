@@ -108,6 +108,7 @@ class MainWindow(QMainWindow):
         self._image_repo = image_repo
         self._search_repo = SearchRepository(db)
         self._note_windows: dict[int, NoteWindow] = {}
+        self._sticky_windows: dict[int, NoteWindow] = {}
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
         self._archimate_repo = ArchimateModelRepository(db)
@@ -202,6 +203,7 @@ class MainWindow(QMainWindow):
         self._note_detail.back_requested.connect(self._go_back_from_note)
         self._note_detail.note_link_clicked.connect(self._show_note_detail)
         self._note_detail.open_in_window_requested.connect(self._open_note_in_window)
+        self._note_detail.open_as_sticky_requested.connect(self._open_note_as_sticky)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)
@@ -246,33 +248,36 @@ class MainWindow(QMainWindow):
                 file=sys.stderr,
             )
 
+    def _close_pin_border(self, hwnd: int) -> None:
+        overlay = self._pin_borders.pop(hwnd, None)
+        if overlay is not None:
+            try:
+                overlay.close()
+            except RuntimeError:
+                pass
+
+    def _pin_hwnd(self, hwnd: int) -> None:
+        """Passe la fenêtre au-dessus des autres et dessine la bordure d'accent."""
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+        self._close_pin_border(hwnd)  # remplace un overlay resté d'un épinglage précédent
+        self._pin_borders[hwnd] = PinBorderOverlay(hwnd)
+
+    def _unpin_hwnd(self, hwnd: int) -> None:
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+        self._close_pin_border(hwnd)
+
     def _on_pin_hotkey(self) -> None:
         user32 = ctypes.windll.user32
         target = user32.GetForegroundWindow()
         if not target:
             return
-        ex_style = user32.GetWindowLongW(target, _GWL_EXSTYLE)
-        if ex_style & _WS_EX_TOPMOST:
-            # Unpin: remove topmost and destroy the border overlay
-            user32.SetWindowPos(target, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
-            overlay = self._pin_borders.pop(target, None)
-            if overlay is not None:
-                try:
-                    overlay.close()
-                except RuntimeError:
-                    pass
+        if user32.GetWindowLongW(target, _GWL_EXSTYLE) & _WS_EX_TOPMOST:
+            self._unpin_hwnd(target)
             label = "Désépinglé"
         else:
-            # Pin: set topmost and create the border overlay
-            user32.SetWindowPos(target, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
-            # Replace any stale overlay for this HWND
-            old = self._pin_borders.pop(target, None)
-            if old is not None:
-                try:
-                    old.close()
-                except RuntimeError:
-                    pass
-            self._pin_borders[target] = PinBorderOverlay(target)
+            self._pin_hwnd(target)
             label = "Épinglé"
         if self._pin_toast is not None:
             try:
@@ -411,23 +416,45 @@ class MainWindow(QMainWindow):
         self._note_detail.load_note(note, projects)
         self._right_stack.setCurrentIndex(3)
 
-    def _open_note_in_window(self, note_id: int) -> None:
-        if note_id in self._note_windows:
-            win = self._note_windows[note_id]
+    def _open_note_window(self, note_id: int, registry: dict, sticky: bool) -> NoteWindow | None:
+        """Ouvre (ou ramène au premier plan) la fenêtre de `note_id` dans `registry`.
+
+        Retourne None quand la fenêtre existait déjà, pour que l'appelant n'ait pas à
+        refaire son travail d'installation.
+        """
+        if note_id in registry:
+            win = registry[note_id]
             win.raise_()
             win.activateWindow()
-            return
+            return None
         win = NoteWindow(
             self._note_repo, self._proj_repo, self._folder_repo,
             self._image_repo, self._note_version_repo, self._prefs,
             task_repo=self._task_repo, subtask_repo=self._subtask_repo,
             note_task_repo=self._note_task_repo,
+            sticky=sticky,
         )
         win.load_note(note_id)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        win.destroyed.connect(lambda _, nid=note_id: self._note_windows.pop(nid, None))
-        self._note_windows[note_id] = win
+        win.destroyed.connect(lambda _, nid=note_id: registry.pop(nid, None))
+        registry[note_id] = win
         win.show()
+        return win
+
+    def _open_note_in_window(self, note_id: int) -> None:
+        self._open_note_window(note_id, self._note_windows, sticky=False)
+
+    def _open_note_as_sticky(self, note_id: int) -> None:
+        win = self._open_note_window(note_id, self._sticky_windows, sticky=True)
+        if win is None:
+            return
+        hwnd = int(win.winId())
+        # L'épinglage attend un tour de boucle : PinBorderOverlay lit la géométrie native
+        # de la fenêtre, qui n'est pas encore posée au retour de show().
+        QTimer.singleShot(0, lambda: self._pin_hwnd(hwnd))
+        # Sans ça, fermer un pense-bête encore épinglé laisse la bordure à l'écran et une
+        # entrée morte dans _pin_borders.
+        win.destroyed.connect(lambda _=None, h=hwnd: self._unpin_hwnd(h))
 
     def _open_deliverable_from_project(self, deliverable_id: int) -> None:
         self._deliverable_source = "project"
@@ -511,12 +538,8 @@ class MainWindow(QMainWindow):
         for detail in (self._note_detail, self._deliverable_detail, self._template_detail):
             detail.flush_and_save()
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
-        for overlay in list(self._pin_borders.values()):
-            try:
-                overlay.close()
-            except RuntimeError:
-                pass
-        self._pin_borders.clear()
+        for hwnd in list(self._pin_borders):
+            self._close_pin_border(hwnd)
         self._prefs.window_maximized = self.isMaximized()
         if not self.isMaximized():
             self._prefs.window_size = (self.width(), self.height())
