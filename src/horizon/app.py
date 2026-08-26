@@ -11,6 +11,7 @@ from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
+from horizon.note_task import NoteTaskRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
@@ -100,11 +101,14 @@ class MainWindow(QMainWindow):
         self._subtask_repo = subtask_repo
         self._note_repo = NoteRepository(db)
         self._note_version_repo = NoteVersionRepository(db)
+        self._note_task_repo = NoteTaskRepository(db)
         self._folder_repo = FolderRepository(db)
         self._tag_repo = TagRepository(db)
         image_repo = ImageRepository(db)
         self._image_repo = image_repo
         self._search_repo = SearchRepository(db)
+        # Une note a au plus une fenêtre détachée, pense-bête ou non : deux éditeurs
+        # concurrents sur la même note divergeraient l'un de l'autre.
         self._note_windows: dict[int, NoteWindow] = {}
         self._tmpl_repo = DeliverableTemplateRepository(db)
         self._deliverable_repo = DeliverableRepository(db)
@@ -133,6 +137,8 @@ class MainWindow(QMainWindow):
             self._note_repo, self._proj_repo, self._folder_repo,
             prefs=self._prefs, image_repo=image_repo,
             version_repo=self._note_version_repo,
+            task_repo=task_repo, subtask_repo=subtask_repo,
+            note_task_repo=self._note_task_repo,
         )
         self._right_stack.addWidget(self._note_detail)     # index 3
 
@@ -198,6 +204,7 @@ class MainWindow(QMainWindow):
         self._note_detail.back_requested.connect(self._go_back_from_note)
         self._note_detail.note_link_clicked.connect(self._show_note_detail)
         self._note_detail.open_in_window_requested.connect(self._open_note_in_window)
+        self._note_detail.open_as_sticky_requested.connect(self._open_note_as_sticky)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)
@@ -242,33 +249,36 @@ class MainWindow(QMainWindow):
                 file=sys.stderr,
             )
 
+    def _close_pin_border(self, hwnd: int) -> None:
+        overlay = self._pin_borders.pop(hwnd, None)
+        if overlay is not None:
+            try:
+                overlay.close()
+            except RuntimeError:
+                pass
+
+    def _pin_hwnd(self, hwnd: int) -> None:
+        """Passe la fenêtre au-dessus des autres et dessine la bordure d'accent."""
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+        self._close_pin_border(hwnd)  # remplace un overlay resté d'un épinglage précédent
+        self._pin_borders[hwnd] = PinBorderOverlay(hwnd)
+
+    def _unpin_hwnd(self, hwnd: int) -> None:
+        ctypes.windll.user32.SetWindowPos(
+            hwnd, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
+        self._close_pin_border(hwnd)
+
     def _on_pin_hotkey(self) -> None:
         user32 = ctypes.windll.user32
         target = user32.GetForegroundWindow()
         if not target:
             return
-        ex_style = user32.GetWindowLongW(target, _GWL_EXSTYLE)
-        if ex_style & _WS_EX_TOPMOST:
-            # Unpin: remove topmost and destroy the border overlay
-            user32.SetWindowPos(target, _HWND_NOTOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
-            overlay = self._pin_borders.pop(target, None)
-            if overlay is not None:
-                try:
-                    overlay.close()
-                except RuntimeError:
-                    pass
+        if user32.GetWindowLongW(target, _GWL_EXSTYLE) & _WS_EX_TOPMOST:
+            self._unpin_hwnd(target)
             label = "Désépinglé"
         else:
-            # Pin: set topmost and create the border overlay
-            user32.SetWindowPos(target, _HWND_TOPMOST, 0, 0, 0, 0, _SWP_NOMOVE | _SWP_NOSIZE | _SWP_NOACTIVATE)
-            # Replace any stale overlay for this HWND
-            old = self._pin_borders.pop(target, None)
-            if old is not None:
-                try:
-                    old.close()
-                except RuntimeError:
-                    pass
-            self._pin_borders[target] = PinBorderOverlay(target)
+            self._pin_hwnd(target)
             label = "Épinglé"
         if self._pin_toast is not None:
             try:
@@ -300,8 +310,7 @@ class MainWindow(QMainWindow):
         title = f"{meeting.start.strftime('%Y-%m-%d')} {subject}"
         body = _build_meeting_note_body(meeting)
         note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start)
-        projects = self._proj_repo.list_all()
-        self._note_detail.load_note(note, projects)
+        self._load_note_into_detail(note)
         self._right_stack.setCurrentIndex(3)
 
     def _show_home(self) -> None:
@@ -399,29 +408,103 @@ class MainWindow(QMainWindow):
         else:
             self._show_notes()
 
+    def _load_note_into_detail(self, note) -> None:
+        """Charge une note dans le panneau principal en recalculant son verrou.
+
+        Le déverrouillage précède load_note : _apply_readonly lit _locked, donc un verrou
+        laissé par la note précédente s'afficherait sur la nouvelle.
+        """
+        self._note_detail.set_locked(False)
+        self._note_detail.load_note(note, self._proj_repo.list_all())
+        self._note_detail.set_locked(note.id in self._note_windows)
+
     def _show_note_detail(self, note_id: int) -> None:
         note = self._note_repo.get(note_id)
         if note is None:
             return
-        projects = self._proj_repo.list_all()
-        self._note_detail.load_note(note, projects)
+        self._load_note_into_detail(note)
         self._right_stack.setCurrentIndex(3)
 
-    def _open_note_in_window(self, note_id: int) -> None:
-        if note_id in self._note_windows:
-            win = self._note_windows[note_id]
-            win.raise_()
-            win.activateWindow()
-            return
+    def _refresh_note_lock(self, note_id: int) -> None:
+        """Aligne le verrou du panneau principal sur la présence d'une fenêtre détachée."""
+        if self._note_detail.current_note_id == note_id:
+            self._note_detail.set_locked(note_id in self._note_windows)
+
+    def _open_note_window(self, note_id: int, sticky: bool) -> NoteWindow | None:
+        """Ouvre la fenêtre détachée de `note_id`, ou ramène l'existante au premier plan.
+
+        Retourne None dans ce second cas, pour que l'appelant n'ait pas à refaire son
+        travail d'installation. Une fenêtre déjà ouverte l'emporte sur le mode demandé :
+        un second éditeur sur la même note rouvrirait la divergence que le verrou ferme.
+        """
+        existing = self._note_windows.get(note_id)
+        if existing is not None:
+            existing.raise_()
+            existing.activateWindow()
+            return None
         win = NoteWindow(
             self._note_repo, self._proj_repo, self._folder_repo,
             self._image_repo, self._note_version_repo, self._prefs,
+            task_repo=self._task_repo, subtask_repo=self._subtask_repo,
+            note_task_repo=self._note_task_repo,
+            sticky=sticky,
         )
-        win.load_note(note_id)
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        win.destroyed.connect(lambda _, nid=note_id: self._note_windows.pop(nid, None))
+        win.closed.connect(self._on_note_window_closed)
+        win.note_changed.connect(self._on_note_window_note_changed)
+        # Filet pour une destruction sans closeEvent. Par identité et non par id de note :
+        # après un [[lien]] la fenêtre a changé de clé, et une clé périmée retirerait du
+        # registre une autre fenêtre légitimement rouverte entre-temps.
+        win.destroyed.connect(lambda _=None, w=win: self._forget_note_window(w))
         self._note_windows[note_id] = win
+        # Avant load_note : le verrou déclenche un flush du panneau principal, sans quoi la
+        # fenêtre relirait un corps périmé depuis la base.
+        self._refresh_note_lock(note_id)
+        win.load_note(note_id)
         win.show()
+        return win
+
+    def _forget_note_window(self, win) -> None:
+        """Retire `win` du registre. Comparaison d'identité seule : l'objet C++ est mort."""
+        for note_id, existing in list(self._note_windows.items()):
+            if existing is win:
+                del self._note_windows[note_id]
+
+    def _on_note_window_closed(self, note_id: int) -> None:
+        self._note_windows.pop(note_id, None)
+        if self._note_detail.current_note_id == note_id:
+            self._note_detail.set_locked(False)
+            note = self._note_repo.get(note_id)
+            if note is not None:
+                self._note_detail.load_note(note, self._proj_repo.list_all())
+        # Le titre a pu changer dans la fenêtre : rafraîchir la liste affichée.
+        index = self._right_stack.currentIndex()
+        if index == 2:
+            self._notes_list.load()
+        elif index == 1 and self._current_project is not None:
+            self._project_detail.load_project(self._current_project)
+
+    def _on_note_window_note_changed(self, old_id: int, new_id: int) -> None:
+        win = self._note_windows.pop(old_id, None)
+        if win is not None:
+            self._note_windows[new_id] = win
+        self._refresh_note_lock(old_id)  # l'ancienne note se libère
+        self._refresh_note_lock(new_id)  # la nouvelle se verrouille
+
+    def _open_note_in_window(self, note_id: int) -> None:
+        self._open_note_window(note_id, sticky=False)
+
+    def _open_note_as_sticky(self, note_id: int) -> None:
+        win = self._open_note_window(note_id, sticky=True)
+        if win is None:
+            return
+        hwnd = int(win.winId())
+        # L'épinglage attend un tour de boucle : PinBorderOverlay lit la géométrie native
+        # de la fenêtre, qui n'est pas encore posée au retour de show().
+        QTimer.singleShot(0, lambda: self._pin_hwnd(hwnd))
+        # Sans ça, fermer un pense-bête encore épinglé laisse la bordure à l'écran et une
+        # entrée morte dans _pin_borders.
+        win.destroyed.connect(lambda _=None, h=hwnd: self._unpin_hwnd(h))
 
     def _open_deliverable_from_project(self, deliverable_id: int) -> None:
         self._deliverable_source = "project"
@@ -505,12 +588,8 @@ class MainWindow(QMainWindow):
         for detail in (self._note_detail, self._deliverable_detail, self._template_detail):
             detail.flush_and_save()
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
-        for overlay in list(self._pin_borders.values()):
-            try:
-                overlay.close()
-            except RuntimeError:
-                pass
-        self._pin_borders.clear()
+        for hwnd in list(self._pin_borders):
+            self._close_pin_border(hwnd)
         self._prefs.window_maximized = self.isMaximized()
         if not self.isMaximized():
             self._prefs.window_size = (self.width(), self.height())

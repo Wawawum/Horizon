@@ -25,11 +25,13 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
-from horizon.dialogs import ConfirmDialog
+from horizon.dialogs import ConfirmDialog, TaskDetailDialog
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
+from horizon.note_task import NoteTaskRepository, build_task_render_map, sync_note_tasks
 from horizon.project import ProjectRepository
+from horizon.task import SubtaskRepository, TaskRepository
 from horizon.widgets.markdown import (
     _plus_icon,
     _PLUS_ICON_SIZE,
@@ -139,9 +141,11 @@ class NoteDetailWidget(QWidget):
     back_requested = Signal()
     note_link_clicked = Signal(int)  # emits note_id
     open_in_window_requested = Signal(int)  # emits note_id
+    open_as_sticky_requested = Signal(int)  # emits note_id
     title_changed = Signal(str)  # emits new title after save
+    editor_ready = Signal()  # CodeMirror is live; focus_editor() lands from here on
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, windowed: bool = False, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, task_repo: TaskRepository | None = None, subtask_repo: SubtaskRepository | None = None, note_task_repo: NoteTaskRepository | None = None, windowed: bool = False, sticky: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
@@ -149,10 +153,16 @@ class NoteDetailWidget(QWidget):
         self._prefs = prefs
         self._image_repo = image_repo
         self._version_repo = version_repo
+        self._task_repo = task_repo
+        self._subtask_repo = subtask_repo
+        self._note_task_repo = note_task_repo
         self._current_note: Note | None = None
         self._body_raw: str = ""
         self._body_at_open: str = ""
         self._viewing_version: NoteVersion | None = None
+        # Verrou posé quand la note est détenue par une fenêtre détachée. Orthogonal à
+        # _viewing_version : les deux mènent en lecture seule, pas avec le même périmètre.
+        self._locked = False
         self._updating_combo = False
         self._updating_folder_combo = False
 
@@ -169,13 +179,19 @@ class NoteDetailWidget(QWidget):
         self._note_title_to_id: dict[str, int] = {}
         self._note_id_exists: set[int] = set()
         self._image_cache: dict[int, bytes | None] = {}
+        # Task titles/states, resolved when the note is opened rather than on
+        # every keystroke — the preview deliberately shows a snapshot.
+        self._task_info: dict[int, tuple[str, str]] = {}
 
         self._status_clear_timer = QTimer(self)
         self._status_clear_timer.setSingleShot(True)
         self._status_clear_timer.setInterval(2000)
         self._status_clear_timer.timeout.connect(self._clear_status)
 
+        # Le pense-bête est une fenêtre détachée réduite à l'éditeur : il implique windowed.
+        windowed = windowed or sticky
         self._windowed = windowed
+        self._sticky = sticky
 
         back_btn = QPushButton("← Back")
         self._back_btn = back_btn
@@ -185,6 +201,11 @@ class NoteDetailWidget(QWidget):
         self._window_btn.setToolTip("Ouvrir dans une fenêtre séparée")
         self._window_btn.clicked.connect(self._on_open_in_window)
         self._window_btn.setVisible(not windowed)
+
+        self._sticky_btn = QPushButton("📌 Pense-bête")
+        self._sticky_btn.setToolTip("Ouvrir en pense-bête — fenêtre épinglée au-dessus des autres")
+        self._sticky_btn.clicked.connect(self._on_open_as_sticky)
+        self._sticky_btn.setVisible(not windowed)
 
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
@@ -229,15 +250,22 @@ class NoteDetailWidget(QWidget):
         self._presentation_btn.setToolTip("Cacher l'éditeur pour la présentation")
         self._presentation_btn.clicked.connect(self._on_toggle_presentation)
 
-        header_layout = QHBoxLayout()
+        # Les deux rangées de chrome vivent dans un conteneur plutôt que dans une layout
+        # nue, pour que le mode pense-bête les masque d'un seul setVisible().
+        self._header_widget = QWidget(self)
+        header_layout = QHBoxLayout(self._header_widget)
+        header_layout.setContentsMargins(0, 0, 0, 0)
         header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
         header_layout.addWidget(self._archive_cb)
         header_layout.addWidget(self._delete_btn)
+        header_layout.addWidget(self._sticky_btn)
         header_layout.addWidget(self._window_btn)
         header_layout.addWidget(back_btn)
 
-        project_row = QHBoxLayout()
+        self._project_row_widget = QWidget(self)
+        project_row = QHBoxLayout(self._project_row_widget)
+        project_row.setContentsMargins(0, 0, 0, 0)
         project_row.addWidget(QLabel("Project:"))
         project_row.addWidget(self._project_combo)
         project_row.addSpacing(16)
@@ -254,24 +282,31 @@ class NoteDetailWidget(QWidget):
 
         self._editor = WebMarkdownEditor(
             image_repo, self,
-            show_toolbar=True,
-            placeholder="Write markdown here…",
+            show_toolbar=not sticky,
+            placeholder="Notes de réunion…" if sticky else "Write markdown here…",
             prefs=prefs,
         )
-        self._editor.editing_finished.connect(self._save_body)
+        self._editor.editing_finished.connect(self._on_editing_finished)
         self._editor.shortcut_pressed.connect(self._on_editor_shortcut)
         self._editor.image_upload.connect(self._on_image_upload)
+        self._editor.editor_ready.connect(self.editor_ready)
 
         self._bridge = MarkdownBridge(self)
-        self._channel = QWebChannel(self)
-
-        self._preview = QWebEngineView()
-        self._preview.page().setWebChannel(self._channel)
-        self._channel.registerObject("bridge", self._bridge)
-        self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
         self._bridge.image_clicked.connect(self._on_image_clicked)
         self._bridge.link_clicked.connect(self._on_link_clicked)
         self._bridge.mermaid_open_requested.connect(self._on_open_mermaid)
+
+        # En pense-bête l'aperçu n'existe pas du tout : pas de QWebEngineView, et le rendu
+        # markdown est court-circuité (voir _do_render). Le bridge reste construit, c'est un
+        # simple QObject et _on_view_source lit encore son HTML courant.
+        self._preview: QWebEngineView | None = None
+        self._channel: QWebChannel | None = None
+        if not sticky:
+            self._channel = QWebChannel(self)
+            self._channel.registerObject("bridge", self._bridge)
+            self._preview = QWebEngineView()
+            self._preview.page().setWebChannel(self._channel)
+            self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
 
         self._editor.text_changed.connect(self._on_editor_text_changed)
 
@@ -288,11 +323,13 @@ class NoteDetailWidget(QWidget):
 
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
         self._body_splitter.addWidget(self._editor)
-        self._body_splitter.addWidget(self._preview)
+        if self._preview is not None:
+            self._body_splitter.addWidget(self._preview)
         self._body_splitter.addWidget(self._history_panel)
         self._body_splitter.setStretchFactor(0, 1)
-        self._body_splitter.setStretchFactor(1, 1)
-        self._body_splitter.setStretchFactor(2, 0)
+        if self._preview is not None:
+            self._body_splitter.setStretchFactor(1, 1)
+        self._body_splitter.setStretchFactor(self._body_splitter.count() - 1, 0)
         self._body_splitter.splitterMoved.connect(self._on_splitter_moved)
 
         self._status_label = QLabel("")
@@ -305,16 +342,22 @@ class NoteDetailWidget(QWidget):
         self._readonly_banner.setVisible(False)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(16, 16, 16, 16)
-        layout.setSpacing(8)
-        layout.addLayout(header_layout)
-        layout.addLayout(project_row)
+        layout.setContentsMargins(*((6, 6, 6, 6) if sticky else (16, 16, 16, 16)))
+        layout.setSpacing(4 if sticky else 8)
+        layout.addWidget(self._header_widget)
+        layout.addWidget(self._project_row_widget)
         layout.addWidget(sep)
         layout.addWidget(self._readonly_banner)
         layout.addWidget(self._body_splitter, stretch=1)
         layout.addWidget(self._status_label)
 
-        self._restore_splitter_sizes()
+        if sticky:
+            self._header_widget.setVisible(False)
+            self._project_row_widget.setVisible(False)
+            sep.setVisible(False)
+        else:
+            # Les tailles sauvegardées valent pour le splitter à trois volets.
+            self._restore_splitter_sizes()
 
     def _on_view_source(self) -> None:
         """Open a dialog showing the raw HTML sent to the preview."""
@@ -330,6 +373,42 @@ class NoteDetailWidget(QWidget):
         lay.addWidget(text)
         dlg.exec()
 
+    def _apply_readonly(self) -> None:
+        """Source unique de vérité de l'état lecture seule et de sa bannière."""
+        if self._viewing_version is not None:
+            message = "Viewing historical version — read only. Press ← Back to return."
+        elif self._locked:
+            message = ("Ouverte dans une fenêtre séparée — lecture seule ici. "
+                       "Fermez la fenêtre pour reprendre l'édition.")
+        else:
+            message = ""
+        self._readonly_banner.setText(message)
+        self._readonly_banner.setVisible(bool(message))
+        self._editor.set_read_only(bool(message))
+        # Réservé au verrou : consulter une version laisse ces contrôles actifs, comme avant.
+        for widget in (self._title_edit, self._project_combo, self._folder_combo,
+                       self._archive_cb, self._delete_btn, self._history_btn):
+            widget.setEnabled(not self._locked)
+
+    def set_locked(self, locked: bool) -> None:
+        """Passe le panneau en lecture seule tant qu'une fenêtre détachée détient la note.
+
+        Sans ce verrou les deux vues gardent chacune leur copie du corps, et la dernière à
+        écrire écrase l'autre — NoteRepository.update réécrit toutes les colonnes.
+        """
+        if locked == self._locked:
+            return
+        if locked:
+            # Avant de verrouiller, jamais après : la fenêtre détachée relit la note depuis
+            # la base juste ensuite et doit voir la dernière frappe faite ici.
+            self.flush_and_save()
+        self._locked = locked
+        self._apply_readonly()
+
+    @property
+    def current_note_id(self) -> int | None:
+        return self._current_note.id if self._current_note is not None else None
+
     def load_note(self, note: Note, projects: list) -> None:
         self._autosave_timer.stop()
         self._status_label.setText("")
@@ -337,9 +416,8 @@ class NoteDetailWidget(QWidget):
         self._body_raw = note.body
         self._body_at_open = note.body
         self._viewing_version = None
-        self._readonly_banner.setVisible(False)
         self._back_btn.setText("← Back")
-        self._editor.set_read_only(False)
+        self._apply_readonly()
         if self._history_btn.isChecked():
             self._history_btn.setChecked(False)
             self._history_panel.setVisible(False)
@@ -373,14 +451,10 @@ class NoteDetailWidget(QWidget):
 
         self._image_cache = {}
         self._refresh_note_cache()
-        self._bridge.push_html(_markdown_to_html(
-            self._body_raw,
-            self._image_repo,
-            self._note_repo,
-            title_to_id=self._note_title_to_id,
-            id_exists=self._note_id_exists,
-            image_cache=self._image_cache,
-        ))
+        # _task_info sert aussi au rendu qui suit la réécriture des blocs {task: …},
+        # donc le cache est rafraîchi même sans aperçu.
+        self._refresh_task_cache(self._body_raw)
+        self._do_render()
 
     def _populate_folder_combo(self, project_id: int, selected_folder_id: int | None) -> None:
         self._folder_combo.clear()
@@ -415,7 +489,12 @@ class NoteDetailWidget(QWidget):
             self._status_label.setText("")
 
     def _autosave(self) -> None:
-        self._save_body(show_status=True)
+        # Task blocks are left alone here: rewriting them into ids mid-typing
+        # would move the caret under the user's hands.
+        self._save_body(show_status=True, sync_tasks=False)
+
+    def _on_editing_finished(self) -> None:
+        self._save_body()
 
     def flush_and_save(self) -> None:
         """Persist any pending body edit immediately.
@@ -429,19 +508,47 @@ class NoteDetailWidget(QWidget):
     def _clear_status(self) -> None:
         self._status_label.setText("")
 
-    def _save_body(self, show_status: bool = False) -> None:
-        if self._viewing_version is not None:
+    def _save_body(self, show_status: bool = False, sync_tasks: bool = True) -> None:
+        if self._locked or self._viewing_version is not None:
             return
         if self._current_note is None:
             return
         self._editor.flush()
         new_body = self._editor.text()
-        if new_body == self._body_raw:
+        changed = new_body != self._body_raw
+        rewritten = False
+
+        # The body may be unchanged and still hold blocks an autosave persisted
+        # verbatim, so this cannot sit behind the "changed" check.
+        if (
+            sync_tasks
+            and self._task_repo is not None
+            and self._note_task_repo is not None
+            and self._current_note.project_id is not None
+            and (changed or "{task:" in new_body)
+        ):
+            synced = sync_note_tasks(
+                new_body,
+                self._current_note.id,
+                self._current_note.project_id,
+                self._task_repo,
+                self._note_task_repo,
+            )
+            if synced != new_body:
+                new_body = synced
+                changed = True
+                rewritten = True
+
+        if not changed:
             return
         self._autosave_timer.stop()
         self._body_raw = new_body
         self._current_note.body = self._body_raw
         self._note_repo.update(self._current_note)
+        if rewritten:
+            self._refresh_task_cache(self._body_raw)
+            self._editor.set_text(self._body_raw)
+            self._do_render()
         if show_status:
             self._status_label.setText("Saving...")
             self._status_clear_timer.start()
@@ -452,12 +559,19 @@ class NoteDetailWidget(QWidget):
             self._note_title_to_id = {n.title.lower(): n.id for n in notes}
             self._note_id_exists = {n.id for n in notes}
 
+    def _refresh_task_cache(self, body: str) -> None:
+        if self._task_repo is not None:
+            self._task_info = build_task_render_map(body, self._task_repo)
+
     def _on_editor_text_changed(self) -> None:
-        self._render_timer.start()
-        if self._current_note is not None and self._viewing_version is None:
+        if not self._sticky:
+            self._render_timer.start()
+        if self._current_note is not None and self._viewing_version is None and not self._locked:
             self._autosave_timer.start()
 
     def _do_render(self) -> None:
+        if self._sticky:
+            return  # pas d'aperçu à alimenter, et _markdown_to_html est le gros du coût
         # No flush(): this sits behind a 300 ms debounce, so a ~120 ms stale mirror
         # is invisible and a nested event loop here would be gratuitous.
         self._bridge.push_html(_markdown_to_html(
@@ -467,6 +581,7 @@ class NoteDetailWidget(QWidget):
             title_to_id=self._note_title_to_id,
             id_exists=self._note_id_exists,
             image_cache=self._image_cache,
+            task_info=self._task_info,
         ))
 
     def _on_image_clicked(self, data_uri: str) -> None:
@@ -489,8 +604,38 @@ class NoteDetailWidget(QWidget):
                 return
             self.note_link_clicked.emit(note_id)
             return
+        if parsed.scheme() == "horizon" and parsed.host() == "task":
+            try:
+                task_id = int(parsed.path().lstrip("/"))
+            except ValueError:
+                return
+            self._open_task_dialog(task_id)
+            return
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(parsed)
+
+    def _open_task_dialog(self, task_id: int) -> None:
+        if self._task_repo is None or self._subtask_repo is None:
+            return
+        task = self._task_repo.get(task_id)
+        if task is None:
+            return
+        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return
+        if dialog.deleted():
+            # note_tasks rows for this task go with it, through the FK cascade
+            self._task_repo.delete(task.id)
+        else:
+            task.title = dialog.title()
+            task.description = dialog.description()
+            task.state = dialog.state()
+            task.priority = dialog.priority()
+            task.bucket = dialog.bucket()
+            task.archived = dialog.archived()
+            self._task_repo.update(task)
+        self._refresh_task_cache(self._editor.text())
+        self._do_render()
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
         if self._prefs is not None:
@@ -506,8 +651,15 @@ class NoteDetailWidget(QWidget):
         if self._current_note is not None:
             self.open_in_window_requested.emit(self._current_note.id)
 
+    def _on_open_as_sticky(self) -> None:
+        if self._current_note is not None:
+            self.open_as_sticky_requested.emit(self._current_note.id)
+
+    def focus_editor(self) -> None:
+        self._editor.focus_editor()
+
     def _save_title(self) -> None:
-        if self._current_note is None:
+        if self._locked or self._current_note is None:
             return
         self._current_note.title = self._title_edit.text().strip() or self._current_note.title
         self._title_edit.setText(self._current_note.title)
@@ -516,14 +668,14 @@ class NoteDetailWidget(QWidget):
         self.title_changed.emit(self._current_note.title)
 
     def _on_archive_changed(self) -> None:
-        if self._current_note is None:
+        if self._locked or self._current_note is None:
             return
         self._current_note.archived = self._archive_cb.isChecked()
         self._note_repo.update(self._current_note)
         self._delete_btn.setVisible(self._current_note.archived)
 
     def _on_delete_clicked(self) -> None:
-        if self._current_note is None or not self._current_note.archived:
+        if self._locked or self._current_note is None or not self._current_note.archived:
             return
         if ConfirmDialog.ask(
             "Delete Note",
@@ -535,7 +687,7 @@ class NoteDetailWidget(QWidget):
             self.back_requested.emit()
 
     def _on_project_changed(self, _index: int) -> None:
-        if self._updating_combo or self._current_note is None:
+        if self._locked or self._updating_combo or self._current_note is None:
             return
         new_project_id = self._project_combo.currentData()
         self._current_note.project_id = new_project_id
@@ -554,7 +706,7 @@ class NoteDetailWidget(QWidget):
         self._updating_folder_combo = False
 
     def _on_folder_changed(self, _index: int) -> None:
-        if self._updating_folder_combo or self._current_note is None:
+        if self._locked or self._updating_folder_combo or self._current_note is None:
             return
         self._current_note.folder_id = self._folder_combo.currentData()
         self._note_repo.update(self._current_note)
@@ -562,11 +714,12 @@ class NoteDetailWidget(QWidget):
     def _on_back_clicked(self) -> None:
         if self._viewing_version is not None:
             self._viewing_version = None
-            self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.set_read_only(False)
+            self._apply_readonly()
             self._editor.set_text(self._body_raw)
-            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
+            self._refresh_task_cache(self._body_raw)
+            self._bridge.push_html(_markdown_to_html(
+                self._body_raw, self._image_repo, self._note_repo, task_info=self._task_info))
             self._history_list.blockSignals(True)
             if self._history_list.count() > 0:
                 self._history_list.setCurrentRow(0)
@@ -613,15 +766,17 @@ class NoteDetailWidget(QWidget):
             return
         if version.is_current:
             self._viewing_version = None
-            self._readonly_banner.setVisible(False)
             self._back_btn.setText("← Back")
-            self._editor.set_read_only(False)
+            self._apply_readonly()
             self._editor.set_text(self._body_raw)
-            self._bridge.push_html(_markdown_to_html(self._body_raw, self._image_repo, self._note_repo))
+            self._refresh_task_cache(self._body_raw)
+            self._bridge.push_html(_markdown_to_html(
+                self._body_raw, self._image_repo, self._note_repo, task_info=self._task_info))
         else:
             self._viewing_version = version
-            self._readonly_banner.setVisible(True)
             self._back_btn.setText("← Return to current")
-            self._editor.set_read_only(True)
+            self._apply_readonly()
             self._editor.set_text(version.body)
-            self._bridge.push_html(_markdown_to_html(version.body, self._image_repo, self._note_repo))
+            self._refresh_task_cache(version.body)
+            self._bridge.push_html(_markdown_to_html(
+                version.body, self._image_repo, self._note_repo, task_info=self._task_info))
