@@ -1841,7 +1841,7 @@ class ProjectDetailWidget(QWidget):
             self._prefs.save()
 
     def _load_tasks(self, project_id: int) -> None:
-        tasks = [t for t in self._task_repo.list_for_project(project_id) if not t.archived]
+        tasks = self._task_repo.list_for_project(project_id, archived_only=False)
         self._populate_table(tasks)
         project_colors = {project_id: self._current_project.color} if self._current_project else None
         self._kanban_board.populate(tasks, project_colors=project_colors, subtask_repo=self._subtask_repo)

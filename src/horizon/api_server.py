@@ -10,6 +10,7 @@ from pathlib import Path
 from horizon.database import open_connection
 from horizon.deliverable import Deliverable, DeliverableRepository, DeliverableState
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
+from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
 from horizon.task import (
     Subtask, SubtaskRepository, Task, TaskBucket, TaskPriority, TaskRepository,
@@ -21,6 +22,7 @@ logger = logging.getLogger(__name__)
 _NOTES_ID_RE = re.compile(r"^/notes/(\d+)$")
 _NOTES_VERSIONS_RE = re.compile(r"^/notes/(\d+)/versions$")
 _PROJECTS_ID_RE = re.compile(r"^/projects/(\d+)$")
+_PROJECTS_TASKS_RE = re.compile(r"^/projects/(\d+)/tasks$")
 _TASKS_ID_RE = re.compile(r"^/tasks/(\d+)$")
 _DELIVERABLES_ID_RE = re.compile(r"^/deliverables/(\d+)$")
 
@@ -142,6 +144,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_note_versions(int(m.group(1)))
         elif m := _NOTES_ID_RE.match(path):
             self._handle_note_detail(int(m.group(1)))
+        elif m := _PROJECTS_TASKS_RE.match(path):
+            self._handle_project_tasks(int(m.group(1)))
         elif m := _PROJECTS_ID_RE.match(path):
             self._handle_project_detail(int(m.group(1)))
         elif m := _TASKS_ID_RE.match(path):
@@ -237,6 +241,23 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to get project %d", project_id)
             self._send_json(500, {"error": "failed to get project"})
+        finally:
+            conn.close()
+
+    def _handle_project_tasks(self, project_id: int) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            db = _Db(conn)
+            if ProjectRepository(db).get(project_id) is None:
+                self._send_json(404, {"error": "project not found"})
+                return
+            tasks = TaskRepository(db).list_for_project(project_id, archived_only=False)
+            subtask_repo = SubtaskRepository(db)
+            payload = [_task_to_dict(t, subtask_repo.list_for_task(t.id)) for t in tasks]
+            self._send_json(200, {"tasks": payload})
+        except Exception:
+            logger.exception("Failed to list tasks for project %d", project_id)
+            self._send_json(500, {"error": "failed to list project tasks"})
         finally:
             conn.close()
 
