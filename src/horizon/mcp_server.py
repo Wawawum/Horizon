@@ -46,6 +46,11 @@ async def list_tools() -> list[types.Tool]:
             inputSchema={"type": "object", "properties": {}},
         ),
         types.Tool(
+            name="list_projects",
+            description="List all active (non-archived) projects in Horizon, with their ID, name and description. Use this to find the project_id required by create_task.",
+            inputSchema={"type": "object", "properties": {}},
+        ),
+        types.Tool(
             name="get_note",
             description="Get the full content of a Horizon note by its ID.",
             inputSchema={
@@ -268,6 +273,17 @@ async def _tool_list_notes(client: httpx.AsyncClient, arguments: dict) -> list[t
     return [types.TextContent(type="text", text=json.dumps(notes, ensure_ascii=False, indent=2))]
 
 
+async def _tool_list_projects(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    resp = await client.get("/projects")
+    data = resp.json()
+    if resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    projects = data.get("projects", [])
+    if not projects:
+        return [types.TextContent(type="text", text="No projects found.")]
+    return [types.TextContent(type="text", text=json.dumps(projects, ensure_ascii=False, indent=2))]
+
+
 async def _tool_get_note(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
     note_id = arguments.get("note_id")
     if note_id is None:
@@ -407,6 +423,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_search(client, arguments)
         elif name == "list_notes":
             return await _tool_list_notes(client, arguments)
+        elif name == "list_projects":
+            return await _tool_list_projects(client, arguments)
         elif name == "get_note":
             return await _tool_get_note(client, arguments)
         elif name == "create_note":

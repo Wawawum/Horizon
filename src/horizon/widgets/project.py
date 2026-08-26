@@ -682,11 +682,8 @@ class ProjectListWidget(QWidget):
         self._load_projects()
 
     def _load_projects(self) -> None:
-        show_archived = self._show_archived_cb.isChecked()
         self._list.clear()
-        for project in self._repo.list_all():
-            if project.archived != show_archived:
-                continue
+        for project in self._repo.list_all(archived_only=self._show_archived_cb.isChecked()):
             item = QListWidgetItem(project.name)
             item.setData(Qt.ItemDataRole.UserRole, project.id)
             self._list.addItem(item)
