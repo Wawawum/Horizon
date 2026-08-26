@@ -116,12 +116,16 @@ class TaskRepository:
         )
         self._db.conn.commit()
 
-    def list_for_project(self, project_id: int) -> list[Task]:
-        rows = self._db.conn.execute(
-            'SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
-            ' FROM tasks WHERE project_id = ? ORDER BY "order"',
-            (project_id,),
-        ).fetchall()
+    def list_for_project(self, project_id: int, archived_only: bool | None = None) -> list[Task]:
+        # archived_only=None : toutes les tâches ; True : les archivées ; False : les actives.
+        sql = ('SELECT id, project_id, title, description, state, priority, bucket, "order", archived'
+               ' FROM tasks WHERE project_id = ?')
+        params: tuple = (project_id,)
+        if archived_only is not None:
+            sql += " AND archived = ?"
+            params = (project_id, int(archived_only))
+        sql += ' ORDER BY "order"'
+        rows = self._db.conn.execute(sql, params).fetchall()
         return [
             Task(
                 id=r["id"],

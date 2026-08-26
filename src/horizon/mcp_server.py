@@ -105,6 +105,17 @@ async def list_tools() -> list[types.Tool]:
             },
         ),
         types.Tool(
+            name="list_tasks",
+            description="List the active (non-archived) tasks of a Horizon project, with their state, priority, bucket and subtasks.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "project_id": {"type": "integer", "description": "The project ID"},
+                },
+                "required": ["project_id"],
+            },
+        ),
+        types.Tool(
             name="create_task",
             description="Create a new task in Horizon. Returns the created task with its ID and subtasks.",
             inputSchema={
@@ -375,6 +386,22 @@ async def _tool_update_deliverable(client: httpx.AsyncClient, arguments: dict) -
     return [types.TextContent(type="text", text=json.dumps(data, ensure_ascii=False, indent=2))]
 
 
+async def _tool_list_tasks(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
+    project_id = arguments.get("project_id")
+    if not isinstance(project_id, int):
+        return [types.TextContent(type="text", text="Error: project_id is required and must be an integer")]
+    resp = await client.get(f"/projects/{project_id}/tasks")
+    data = resp.json()
+    if resp.status_code == 404:
+        return [types.TextContent(type="text", text="Project not found.")]
+    if resp.status_code != 200:
+        return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
+    tasks = data.get("tasks", [])
+    if not tasks:
+        return [types.TextContent(type="text", text="No tasks found for this project.")]
+    return [types.TextContent(type="text", text=json.dumps(tasks, ensure_ascii=False, indent=2))]
+
+
 async def _tool_create_task(client: httpx.AsyncClient, arguments: dict) -> list[types.TextContent]:
     project_id = arguments.get("project_id")
     if not isinstance(project_id, int):
@@ -437,6 +464,8 @@ async def call_tool(name: str, arguments: dict) -> list[types.TextContent]:
             return await _tool_get_deliverable(client, arguments)
         elif name == "update_deliverable":
             return await _tool_update_deliverable(client, arguments)
+        elif name == "list_tasks":
+            return await _tool_list_tasks(client, arguments)
         elif name == "create_task":
             return await _tool_create_task(client, arguments)
         elif name == "update_task":
