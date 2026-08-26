@@ -56,11 +56,15 @@ class ProjectRepository:
             order=row["order"],
         )
 
-    def list_all(self) -> list[Project]:
-        rows = self._db.conn.execute(
-            'SELECT id, name, description, archived, color, "order" FROM projects'
-            ' ORDER BY "order", id'
-        ).fetchall()
+    def list_all(self, archived_only: bool | None = None) -> list[Project]:
+        # archived_only=None : tous les projets ; True : les archivés ; False : les actifs.
+        sql = 'SELECT id, name, description, archived, color, "order" FROM projects'
+        params: tuple = ()
+        if archived_only is not None:
+            sql += " WHERE archived = ?"
+            params = (int(archived_only),)
+        sql += ' ORDER BY "order", id'
+        rows = self._db.conn.execute(sql, params).fetchall()
         return [
             Project(
                 id=row["id"],

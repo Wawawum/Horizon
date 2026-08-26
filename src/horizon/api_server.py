@@ -10,6 +10,7 @@ from pathlib import Path
 from horizon.database import open_connection
 from horizon.deliverable import Deliverable, DeliverableRepository, DeliverableState
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
+from horizon.project import Project, ProjectRepository
 from horizon.search import SearchRepository
 from horizon.task import (
     Subtask, SubtaskRepository, Task, TaskBucket, TaskPriority, TaskRepository,
@@ -52,6 +53,10 @@ def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
     if include_body:
         d["body"] = note.body
     return d
+
+
+def _project_to_dict(p: Project) -> dict:
+    return {"id": p.id, "name": p.name, "description": p.description}
 
 
 def _deliverable_to_dict(d: Deliverable) -> dict:
@@ -138,6 +143,8 @@ class _Handler(BaseHTTPRequestHandler):
             self._handle_search(parsed.query)
         elif path == "/notes":
             self._handle_notes_list()
+        elif path == "/projects":
+            self._handle_projects_list()
         elif m := _NOTES_VERSIONS_RE.match(path):
             self._handle_note_versions(int(m.group(1)))
         elif m := _NOTES_ID_RE.match(path):
@@ -214,6 +221,17 @@ class _Handler(BaseHTTPRequestHandler):
         except Exception:
             logger.exception("Failed to list versions for note %d", note_id)
             self._send_json(500, {"error": "failed to list note versions"})
+        finally:
+            conn.close()
+
+    def _handle_projects_list(self) -> None:
+        conn = open_connection(self._db_path)
+        try:
+            projects = ProjectRepository(_Db(conn)).list_all(archived_only=False)
+            self._send_json(200, {"projects": [_project_to_dict(p) for p in projects]})
+        except Exception:
+            logger.exception("Failed to list projects")
+            self._send_json(500, {"error": "failed to list projects"})
         finally:
             conn.close()
 
