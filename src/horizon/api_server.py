@@ -10,7 +10,7 @@ from pathlib import Path
 from horizon.database import open_connection
 from horizon.deliverable import Deliverable, DeliverableRepository, DeliverableState
 from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
-from horizon.project import ProjectRepository
+from horizon.project import Project, ProjectRepository
 from horizon.search import SearchRepository
 from horizon.task import (
     Subtask, SubtaskRepository, Task, TaskBucket, TaskPriority, TaskRepository,
