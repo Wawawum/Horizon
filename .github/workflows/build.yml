@@ -1,0 +1,121 @@
+name: Build Windows
+
+on:
+  push:
+    branches: [main]
+    tags: ['v*']
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: build-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: |
+            pyproject.toml
+            requirements-build.txt
+
+      - name: Determiner la version
+        id: version
+        shell: pwsh
+        run: |
+          if ($env:GITHUB_REF -like 'refs/tags/v*') {
+            $version = $env:GITHUB_REF -replace '^refs/tags/v', ''
+          } else {
+            $version = python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
+          }
+          "version=$version" >> $env:GITHUB_OUTPUT
+          Write-Host "Version : $version"
+
+      - name: Installer les dependances
+        run: pip install . -r requirements-build.txt
+
+      - name: Verifier que les sources compilent
+        run: python -m compileall -q src
+
+      - name: Verifier que tous les modules s'importent
+        run: python tools/check_imports.py
+
+      - name: Generer l'icone Windows
+        continue-on-error: true
+        run: python tools/make_icon.py
+
+      - name: Geler l'application (PyInstaller)
+        run: pyinstaller --noconfirm horizon.spec
+
+      - name: Verifier le contenu du bundle
+        shell: pwsh
+        run: |
+          $required = @(
+            'dist/Horizon/Horizon.exe',
+            'dist/Horizon/_internal/horizon/preferences.json',
+            'dist/Horizon/_internal/horizon/themes/terminal.json',
+            'dist/Horizon/_internal/horizon/resources/mermaid.min.js',
+            'dist/Horizon/_internal/horizon/resources/horizon-editor.bundle.js',
+            'dist/Horizon/_internal/horizon/resources/JetBrainsMono-Regular.ttf'
+          )
+          $missing = $required | Where-Object { -not (Test-Path $_) }
+          if ($missing) {
+            Write-Host "::error::Fichiers absents du bundle : $($missing -join ', ')"
+            exit 1
+          }
+          if (-not (Get-ChildItem dist/Horizon -Recurse -Filter QtWebEngineProcess.exe)) {
+            Write-Host "::error::QtWebEngineProcess.exe absent : l'editeur et l'apercu Markdown ne demarreront pas"
+            exit 1
+          }
+          $size = (Get-ChildItem dist/Horizon -Recurse | Measure-Object Length -Sum).Sum / 1MB
+          Write-Host ("Bundle complet : {0:N0} Mo" -f $size)
+
+      - name: Archiver
+        shell: pwsh
+        run: |
+          $zip = "Horizon-${{ steps.version.outputs.version }}-win64.zip"
+          # 7-Zip est fourni par l'image windows-latest et compresse 566 Mo bien
+          # plus vite que Compress-Archive, qui reste le filet de securite.
+          if (Get-Command 7z -ErrorAction SilentlyContinue) {
+            7z a -tzip -mx=5 $zip "dist/Horizon"
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          } else {
+            Compress-Archive -Path dist/Horizon -DestinationPath $zip
+          }
+          Write-Host ("{0} : {1:N0} Mo" -f $zip, ((Get-Item $zip).Length / 1MB))
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Horizon-${{ steps.version.outputs.version }}-win64
+          path: Horizon-*.zip
+          retention-days: 30
+          compression-level: 0
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: Horizon-${{ needs.build.outputs.version }}-win64
+
+      - name: Publier la release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release create "$GITHUB_REF_NAME" Horizon-*.zip --repo "$GITHUB_REPOSITORY" --generate-notes

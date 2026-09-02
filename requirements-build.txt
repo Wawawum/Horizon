@@ -1,0 +1,7 @@
+# Dependances necessaires uniquement pour geler l'application (voir horizon.spec
+# et .github/workflows/build.yml). Les versions sont epinglees : pyproject.toml
+# ne pinne rien, et une montee de version de Qt casserait le build gele sans
+# qu'aucun commit du depot n'ait change.
+PySide6==6.11.0
+pyinstaller==6.22.2
+pillow==12.3.0
