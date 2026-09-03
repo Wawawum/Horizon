@@ -67,6 +67,33 @@ horizon-mcp
 
 ---
 
+## Building a Windows executable
+
+Every push to `main` and every pull request triggers
+[`.github/workflows/build.yml`](.github/workflows/build.yml), which freezes the app with
+PyInstaller on a Windows runner and uploads `Horizon-<version>-win64.zip` as a workflow
+artifact. Tagging a commit `v*` additionally attaches that zip to a GitHub Release.
+
+To reproduce the build locally:
+
+```powershell
+pip install . -r requirements-build.txt
+python tools/make_icon.py          # optional, produces build/horizon.ico
+pyinstaller --noconfirm horizon.spec
+.\dist\Horizon\Horizon.exe
+```
+
+The build is `--onedir`, not `--onefile`: the app loads its resources into a
+`QWebEngineView` through `file://` URLs, which onefile re-extracts to a temp directory on
+every launch. Expect roughly 570 MB unpacked (~180 MB zipped), most of it QtWebEngine.
+
+Resources resolved at runtime via `Path(__file__).parent` must be declared in
+[`horizon.spec`](horizon.spec) — if you add a directory next to the Python modules that is
+read from disk (rather than through the Qt resource system in `resources.qrc`), add it to
+`datas` there too.
+
+---
+
 ## Architecture
 
 ```
