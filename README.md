@@ -85,7 +85,14 @@ pyinstaller --noconfirm horizon.spec
 
 The build is `--onedir`, not `--onefile`: the app loads its resources into a
 `QWebEngineView` through `file://` URLs, which onefile re-extracts to a temp directory on
-every launch. Expect roughly 570 MB unpacked (~180 MB zipped), most of it QtWebEngine.
+every launch. Expect roughly 570 MB unpacked (~210 MB zipped), most of it QtWebEngine.
+
+Dependencies are constrained at two levels: [`pyproject.toml`](pyproject.toml) carries
+version bounds so a fresh `pip install -e .` cannot pull an incompatible release (mcp 2.x
+dropped the low-level API `mcp_server.py` uses), while
+[`requirements-build.txt`](requirements-build.txt) pins exact versions so two builds of the
+same commit produce the same executable. Bump a version there, let CI pass, and launch the
+resulting exe before merging.
 
 Resources resolved at runtime via `Path(__file__).parent` must be declared in
 [`horizon.spec`](horizon.spec) — if you add a directory next to the Python modules that is

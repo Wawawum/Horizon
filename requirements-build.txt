@@ -1,10 +1,18 @@
-# Dependances necessaires uniquement pour geler l'application (voir horizon.spec
-# et .github/workflows/build.yml). Les versions sont epinglees : pyproject.toml
-# ne pinne rien, et une montee de version de Qt casserait le build gele sans
-# qu'aucun commit du depot n'ait change.
+# Versions exactes du build gele (voir horizon.spec et .github/workflows/build.yml).
+#
+# Deux niveaux complementaires :
+#   - pyproject.toml borne les dependances pour une installation de dev saine ;
+#   - ce fichier les fige pour que deux builds du meme commit produisent le meme
+#     executable, et qu'une nouvelle version publiee sur PyPI ne casse jamais le
+#     gel sans qu'un commit du depot ait change.
+#
+# Pour monter une version : la changer ici, verifier que le CI passe, et lancer
+# l'executable produit avant de merger.
 PySide6==6.11.0
 # mcp 2.x a supprime l'API bas niveau utilisee par mcp_server.py
 # (@server.list_tools() n'existe plus) : le gel doit rester en 1.x.
 mcp==1.27.1
+httpx==0.28.1
+pywin32==312
 pyinstaller==6.22.2
 pillow==12.3.0

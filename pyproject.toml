@@ -6,11 +6,21 @@ build-backend = "hatchling.build"
 name = "horizon"
 version = "0.1.0"
 requires-python = ">=3.11"
+# Horizon est une application, pas une bibliotheque : les bornes hautes sont
+# volontaires. Sans elles, une installation neuve resout la derniere version de
+# chaque paquet et peut casser sans qu'aucun commit du depot n'ait change --
+# c'est ce qui est arrive avec mcp 2.x. Les versions exactes du build gele sont
+# dans requirements-build.txt.
 dependencies = [
-    "PySide6",
-    "pywin32",
-    "mcp",
-    "httpx",
+    # Qt 6 ; une majeure 7 changerait les APIs Qt utilisees partout dans widgets/
+    "PySide6>=6.11,<7",
+    # win32com.client et pythoncom (widgets/calendar.py, raccourcis globaux) ;
+    # numerotation par build, API stable, pas de borne haute utile
+    "pywin32>=306",
+    # mcp 2.x a supprime l'API bas niveau de mcp_server.py (@server.list_tools())
+    "mcp>=1.27,<2",
+    # httpx est en 0.x : pas de garantie de stabilite entre mineures
+    "httpx>=0.28,<1",
 ]
 
 [tool.hatch.build.targets.wheel]
