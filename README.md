@@ -14,7 +14,7 @@ Manage notes, tasks, projects, deliverables, and calendar — all in one place, 
 - **Tags** — Auto-extracted `#hashtags` from note/task body, searchable globally
 - **Full-text search** — FTS5-powered search across notes, tasks, and projects
 - **Calendar** — Outlook calendar integration (reads meetings via `win32com`)
-- **Themes** — Dark, Light, Synthwave
+- **Themes** — Single built-in theme (`terminal`), defined as JSON in `src/horizon/themes/`
 - **HTTP API** — Local REST API for external integrations (port stored in `~/.horizon/api.port`)
 - **MCP server** — Model Context Protocol server for AI agent integration
 
@@ -31,7 +31,7 @@ Manage notes, tasks, projects, deliverables, and calendar — all in one place, 
 
 ```powershell
 # 1. Clone the repo
-git clone <repo-url>
+git clone https://github.com/Wawawum/Horizon.git
 cd Horizon
 
 # 2. Create and activate a virtual environment
@@ -133,7 +133,7 @@ src/horizon/
 │   ├── deliverables.py      # Deliverable widgets
 │   ├── calendar.py          # CalendarMeeting widget
 │   └── …
-├── themes/                  # dark.json, light.json, synthwave.json
+├── themes/                  # terminal.json — the theme palette
 └── resources/               # Bundled JS/CSS (highlight.js, mermaid)
 ```
 
@@ -142,3 +142,12 @@ src/horizon/
 ## Contributing
 
 See [AGENTS.md](AGENTS.md) for coding conventions, architecture patterns, and step-by-step guides for adding new features — written for both human contributors and AI coding agents.
+
+---
+
+## License
+
+Horizon is released under the [MIT License](LICENSE).
+
+Bundled third-party resources (JetBrains Mono, highlight.js, Mermaid, CodeMirror) keep their
+own licenses — see [THIRD-PARTY-NOTICES.md](THIRD-PARTY-NOTICES.md).

@@ -93,9 +93,9 @@ Ce build est informatif : l'artefact produit s'appelle déjà `Horizon-<VERSION>
 ce qui confirme que le bump a bien été pris en compte **avant** de taguer quoi que ce soit.
 Signale-le à l'utilisateur, c'est sa vérification gratuite.
 
-Si le run est rouge, arrête la release : corrige sur la branche et relance. Ne merge pas un
-check rouge — la protection de branche n'est pas disponible sur ce dépôt (privé en plan
-Free), donc rien ne t'en empêchera techniquement.
+Si le run est rouge, arrête la release : corrige sur la branche et relance. Ne merge jamais
+un check rouge. Vérifie si une règle de protection couvre `main` — si oui elle t'arrêtera,
+sinon rien ne t'en empêchera techniquement et la discipline t'incombe entièrement.
 
 ### 5. — POINT D'ARRÊT — Merger
 
