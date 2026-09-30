@@ -80,6 +80,7 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | File | Purpose |
 |---|---|
 | [src/horizon/app.py](src/horizon/app.py) | `MainWindow`, widget wiring, hotkeys, signal routing |
+| [src/horizon/titlebar.py](src/horizon/titlebar.py) | Custom `TitleBar` + DPI-aware `native_hit_test` for frameless windows |
 | [src/horizon/database.py](src/horizon/database.py) | SQLite connection, DDL, migrations, search index sync |
 | [src/horizon/note.py](src/horizon/note.py) | Canonical `Note` dataclass + `NoteRepository` |
 | [src/horizon/note_task.py](src/horizon/note_task.py) | `{task: …}` block syntax, `NoteTaskRepository`, note→task sync |

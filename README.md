@@ -57,6 +57,13 @@ horizon
 python -m horizon
 ```
 
+On Windows you can also double-click [`Lancer-Horizon.bat`](Lancer-Horizon.bat) at the repo root.
+It launches the app without a console using the repo's `.venv`; on first run it creates that
+virtual environment and installs Horizon in editable mode (it reinstalls if `.venv` points at
+another checkout).
+
+Only one instance of Horizon can run at a time: a second launch shows a warning and exits.
+
 The local HTTP API starts automatically alongside the app (default port in `~/.horizon/api.port`).
 
 To run the MCP server separately (for AI agent integration):
