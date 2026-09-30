@@ -1,7 +1,20 @@
 from pathlib import Path
 
 from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QPoint, QRect, QRectF, QSize
-from PySide6.QtGui import QColor, QDrag, QFont, QIcon, QKeySequence, QPainter, QPainterPath, QPen, QBrush, QPixmap, QShortcut
+from PySide6.QtGui import (
+    QColor,
+    QDrag,
+    QFont,
+    QIcon,
+    QKeyEvent,
+    QKeySequence,
+    QPainter,
+    QPainterPath,
+    QPen,
+    QBrush,
+    QPixmap,
+    QShortcut,
+)
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -418,6 +431,14 @@ class _NavButton(QPushButton):
         painter.end()
 
 
+class _SearchLineEdit(QLineEdit):
+    def keyPressEvent(self, event: QKeyEvent) -> None:
+        if event.key() == Qt.Key.Key_Escape:
+            self.clear()
+        else:
+            super().keyPressEvent(event)
+
+
 class CommandBar(QWidget):
     """Barre de commandes horizontale (sous la barre de titre) regroupant la
     navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate, Debug."""
@@ -429,6 +450,7 @@ class CommandBar(QWidget):
     media_requested = Signal()
     archimate_requested = Signal()
     debug_requested = Signal()
+    search_requested = Signal(str, str)  # (query, mode)
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -482,6 +504,53 @@ class CommandBar(QWidget):
             layout.addWidget(btn)
         layout.addStretch()
 
+        t = _theme.current()
+
+        self._search_edit = _SearchLineEdit()
+        self._search_edit.setPlaceholderText("Rechercher…")
+        self._search_edit.setMinimumWidth(200)
+        self._search_edit.setMaximumWidth(250)
+        self._search_edit.setStyleSheet(
+            f"QLineEdit {{"
+            f"  background-color: {t.titlebar_input_bg};"
+            f"  color: {t.titlebar_text};"
+            f"  border: 1px solid {t.titlebar_border};"
+            f"  border-radius: 3px;"
+            f"  padding: 0 6px;"
+            f"  font-size: 11px;"
+            f"}}"
+        )
+        self._search_edit.returnPressed.connect(self._on_search_return)
+
+        self._search_mode = QComboBox()
+        self._search_mode.addItem("Tous les termes", userData="all")
+        self._search_mode.addItem("Au moins un terme", userData="any")
+        self._search_mode.setMaximumWidth(120)
+        self._search_mode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
+        self._search_mode.setStyleSheet(
+            f"QComboBox {{"
+            f"  background-color: {t.titlebar_input_bg};"
+            f"  color: {t.titlebar_text};"
+            f"  border: 1px solid {t.titlebar_border};"
+            f"  border-radius: 3px;"
+            f"  padding: 0 6px;"
+            f"  font-size: 11px;"
+            f"}}"
+            f"QComboBox::drop-down {{ border: none; width: 16px; }}"
+            f"QComboBox QAbstractItemView {{"
+            f"  background-color: {t.titlebar_input_bg};"
+            f"  color: {t.titlebar_text};"
+            f"  border: 1px solid {t.titlebar_border};"
+            f"  selection-background-color: {t.titlebar_accent};"
+            f"  selection-color: {t.titlebar_bg};"
+            f"}}"
+        )
+
+        layout.addSpacing(6)
+        layout.addWidget(self._search_edit)
+        layout.addSpacing(4)
+        layout.addWidget(self._search_mode)
+
     def clear_active(self) -> None:
         """Décoche tout bouton actif (ex. lorsqu'un projet est sélectionné)."""
         self._nav_group.setExclusive(False)
@@ -495,6 +564,11 @@ class CommandBar(QWidget):
         btn = self._buttons.get(name)
         if btn is not None:
             btn.setChecked(True)
+
+    def _on_search_return(self) -> None:
+        query = self._search_edit.text().strip()
+        if query:
+            self.search_requested.emit(query, self._search_mode.currentData())
 
 
 _DROP_LINE_HEIGHT = 3  # épaisseur de la ligne d'insertion turquoise

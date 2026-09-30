@@ -1,28 +1,89 @@
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QKeyEvent, QPixmap
-from PySide6.QtWidgets import QComboBox, QHBoxLayout, QLabel, QLineEdit, QPushButton, QWidget
+import ctypes
+import ctypes.wintypes
+
+from PySide6.QtCore import Qt
+from PySide6.QtGui import QPixmap
+from PySide6.QtWidgets import QHBoxLayout, QLabel, QPushButton, QWidget
 
 from horizon import theme as _theme
 
+_TITLEBAR_HEIGHT = 36
+_TITLEBAR_CONTROLS_WIDTH = 138  # min/max/close buttons, 46 px each
+_RESIZE_BORDER = 6
 
-class _SearchLineEdit(QLineEdit):
-    def keyPressEvent(self, event: QKeyEvent) -> None:
-        if event.key() == Qt.Key.Key_Escape:
-            self.clear()
-        else:
-            super().keyPressEvent(event)
 
-    def mouseDoubleClickEvent(self, event) -> None:
-        # Prevent double-click from bubbling up to the title bar (would toggle maximize)
-        event.accept()
+def window_hit_test(
+    x: int,
+    y: int,
+    left: int,
+    top: int,
+    right: int,
+    bottom: int,
+    scale: float,
+    maximized: bool,
+) -> int | None:
+    """Win32 hit-test code for a frameless window, or None for the client area.
+
+    All coordinates are physical pixels; `scale` converts the logical sizes of
+    the title bar and resize border to the window's DPI.
+    """
+    titlebar_height = round(_TITLEBAR_HEIGHT * scale)
+    controls_width = round(_TITLEBAR_CONTROLS_WIDTH * scale)
+    if top <= y < top + titlebar_height and x < right - controls_width:
+        return 2  # HTCAPTION — enables Win+arrows and Aero snap
+
+    if maximized:
+        return None
+
+    border = round(_RESIZE_BORDER * scale)
+    is_left = x < left + border
+    is_right = x > right - border
+    is_top = y < top + border
+    is_bottom = y > bottom - border
+    if is_top and is_left:
+        return 13  # HTTOPLEFT
+    if is_top and is_right:
+        return 14  # HTTOPRIGHT
+    if is_bottom and is_left:
+        return 16  # HTBOTTOMLEFT
+    if is_bottom and is_right:
+        return 17  # HTBOTTOMRIGHT
+    if is_left:
+        return 10  # HTLEFT
+    if is_right:
+        return 11  # HTRIGHT
+    if is_top:
+        return 12  # HTTOP
+    if is_bottom:
+        return 15  # HTBOTTOM
+    return None
+
+
+def native_hit_test(window: QWidget, lparam: int) -> int | None:
+    """Handle WM_NCHITTEST for a frameless top-level window.
+
+    WM_NCHITTEST coordinates are physical screen pixels, while Qt geometry is
+    logical (DPI-scaled): compare against GetWindowRect instead so the hit zones
+    stay aligned at any display scaling.
+    """
+    x = ctypes.c_int16(lparam & 0xFFFF).value
+    y = ctypes.c_int16((lparam >> 16) & 0xFFFF).value
+    hwnd = int(window.winId())
+    rect = ctypes.wintypes.RECT()
+    if not ctypes.windll.user32.GetWindowRect(hwnd, ctypes.byref(rect)):
+        return None
+    dpi = ctypes.windll.user32.GetDpiForWindow(hwnd)
+    if not dpi:
+        return None
+    return window_hit_test(
+        x, y, rect.left, rect.top, rect.right, rect.bottom, dpi / 96.0, window.isMaximized()
+    )
 
 
 class TitleBar(QWidget):
     """Barre de titre personnalisée au style Synthwave."""
 
-    search_requested = Signal(str, str)  # (query, mode)
-
-    def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True, show_search: bool = False) -> None:
+    def __init__(self, parent=None, *, subtitle: str = "", show_min_max: bool = True) -> None:
         super().__init__(parent)
         self.setAttribute(Qt.WidgetAttribute.WA_StyledBackground, True)
         self.setProperty("titlebar", "true")
@@ -83,55 +144,6 @@ class TitleBar(QWidget):
 
         layout.addStretch()
 
-        # Barre de recherche (fenêtre principale uniquement)
-        self._search_edit: _SearchLineEdit | None = None
-        self._search_mode: QComboBox | None = None
-        if show_search:
-            self._search_edit = _SearchLineEdit()
-            self._search_edit.setPlaceholderText("Rechercher…")
-            self._search_edit.setFixedWidth(220)
-            self._search_edit.setFixedHeight(22)
-            self._search_edit.setStyleSheet(
-                f"QLineEdit {{"
-                f"  background-color: {t.titlebar_input_bg};"
-                f"  color: {t.titlebar_text};"
-                f"  border: 1px solid {t.titlebar_border};"
-                f"  border-radius: 3px;"
-                f"  padding: 0 6px;"
-                f"  font-size: 11px;"
-                f"}}"
-            )
-            self._search_edit.returnPressed.connect(self._on_search_return)
-            layout.addWidget(self._search_edit)
-
-            layout.addSpacing(6)
-
-            self._search_mode = QComboBox()
-            self._search_mode.addItem("Tous les termes", userData="all")
-            self._search_mode.addItem("Au moins un terme", userData="any")
-            self._search_mode.setFixedHeight(22)
-            self._search_mode.setFocusPolicy(Qt.FocusPolicy.NoFocus)
-            self._search_mode.setStyleSheet(
-                f"QComboBox {{"
-                f"  background-color: {t.titlebar_input_bg};"
-                f"  color: {t.titlebar_text};"
-                f"  border: 1px solid {t.titlebar_border};"
-                f"  border-radius: 3px;"
-                f"  padding: 0 6px;"
-                f"  font-size: 11px;"
-                f"}}"
-                f"QComboBox::drop-down {{ border: none; width: 16px; }}"
-                f"QComboBox QAbstractItemView {{"
-                f"  background-color: {t.titlebar_input_bg};"
-                f"  color: {t.titlebar_text};"
-                f"  border: 1px solid {t.titlebar_border};"
-                f"  selection-background-color: {t.titlebar_accent};"
-                f"  selection-color: {t.titlebar_bg};"
-                f"}}"
-            )
-            layout.addWidget(self._search_mode)
-            layout.addStretch()
-
         # Bouton minimiser
         self._btn_min = QPushButton("—")
         self._btn_min.setProperty("title_btn", "min")
@@ -157,12 +169,6 @@ class TitleBar(QWidget):
         self._btn_close.setToolTip("Fermer")
         self._btn_close.clicked.connect(self._close_window)
         layout.addWidget(self._btn_close)
-
-    def _on_search_return(self) -> None:
-        query = self._search_edit.text().strip()
-        if query:
-            mode = self._search_mode.currentData() if self._search_mode else "all"
-            self.search_requested.emit(query, mode)
 
     def _minimize(self) -> None:
         self.window().showMinimized()
@@ -207,4 +213,3 @@ class TitleBar(QWidget):
         if event.button() == Qt.MouseButton.LeftButton:
             self._toggle_maximize()
         super().mouseDoubleClickEvent(event)
-

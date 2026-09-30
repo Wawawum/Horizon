@@ -12,7 +12,7 @@ from horizon.note_task import NoteTaskRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
-from horizon.titlebar import TitleBar
+from horizon.titlebar import TitleBar, native_hit_test
 from horizon.widgets.notes import NoteDetailWidget
 
 
@@ -67,7 +67,7 @@ class NoteWindow(QMainWindow):
             self._note_detail.editor_ready.connect(self._note_detail.focus_editor)
 
         self._title_bar = TitleBar(
-            self, subtitle="Pense-bête" if sticky else "Note", show_search=False)
+            self, subtitle="Pense-bête" if sticky else "Note")
 
         container = QWidget()
         layout = QVBoxLayout(container)
@@ -129,24 +129,7 @@ class NoteWindow(QMainWindow):
                     rect.bottom -= b
                 return True, 0
             if msg.message == 0x0084:  # WM_NCHITTEST
-                lp = msg.lParam
-                x = ctypes.c_int16(lp & 0xFFFF).value
-                y = ctypes.c_int16((lp >> 16) & 0xFFFF).value
-                r = self.frameGeometry()
-                if r.top() <= y < r.top() + 36 and x < r.right() - 138:
-                    return True, 2  # HTCAPTION
-                if not self.isMaximized():
-                    b = 6
-                    left   = x < r.left()   + b
-                    right  = x > r.right()  - b
-                    top    = y < r.top()    + b
-                    bottom = y > r.bottom() - b
-                    if top    and left:  return True, 13
-                    if top    and right: return True, 14
-                    if bottom and left:  return True, 16
-                    if bottom and right: return True, 17
-                    if left:             return True, 10
-                    if right:            return True, 11
-                    if top:              return True, 12
-                    if bottom:           return True, 15
+                hit_test = native_hit_test(self, msg.lParam)
+                if hit_test is not None:
+                    return True, hit_test
         return super().nativeEvent(event_type, message)
