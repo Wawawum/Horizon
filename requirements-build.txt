@@ -11,7 +11,7 @@
 PySide6==6.11.0
 # mcp 2.x a supprime l'API bas niveau utilisee par mcp_server.py
 # (@server.list_tools() n'existe plus) : le gel doit rester en 1.x.
-mcp==1.27.1
+mcp==1.28.1
 httpx==0.28.1
 pywin32==312
 pyinstaller==6.22.2
