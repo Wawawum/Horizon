@@ -1,7 +1,7 @@
 import ctypes
 import ctypes.wintypes
 
-from PySide6.QtCore import QEvent, QPoint, Qt, QTimer
+from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
@@ -17,7 +17,7 @@ from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
 from horizon.tag import TagRepository
 from horizon.task import SubtaskRepository, TaskRepository
-from horizon.titlebar import TitleBar
+from horizon.titlebar import TitleBar, native_hit_test
 from horizon.widgets import CalendarMeeting, CommandBar, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 from horizon.widgets.tags import TagsWidget
 from horizon.deliverable import DeliverableRepository
@@ -193,6 +193,7 @@ class MainWindow(QMainWindow):
         self._command_bar.media_requested.connect(self._show_media)
         self._command_bar.archimate_requested.connect(self._show_archimate)
         self._command_bar.debug_requested.connect(self._show_debug)
+        self._command_bar.search_requested.connect(self._on_search)
         self._media_widget.note_open_requested.connect(self._open_note_from_media)
         self._notes_list.note_edit_requested.connect(self._open_note_from_notes)
         self._notes_list.note_open_in_window_requested.connect(self._open_note_in_window)
@@ -219,8 +220,7 @@ class MainWindow(QMainWindow):
         container_layout.setContentsMargins(0, 0, 0, 0)
         container_layout.setSpacing(0)
 
-        self._title_bar = TitleBar(self, subtitle="workspace", show_search=True)
-        self._title_bar.search_requested.connect(self._on_search)
+        self._title_bar = TitleBar(self, subtitle="workspace")
         container_layout.addWidget(self._title_bar)
         container_layout.addWidget(self._command_bar)
         container_layout.addWidget(self._splitter, stretch=1)
@@ -554,34 +554,9 @@ class MainWindow(QMainWindow):
                     rect.bottom -= b
                 return True, 0
             if msg.message == 0x0084:  # WM_NCHITTEST
-                lp = msg.lParam
-                x = ctypes.c_int16(lp & 0xFFFF).value
-                y = ctypes.c_int16((lp >> 16) & 0xFFFF).value
-                r = self.frameGeometry()
-                # Title bar zone (exclude rightmost 138px reserved for the 3 control buttons)
-                if r.top() <= y < r.top() + 36 and x < r.right() - 138:
-                    # Exclude interactive titlebar widgets so they receive normal mouse events
-                    if hasattr(self, "_title_bar"):
-                        for widget in (self._title_bar._search_edit, self._title_bar._search_mode):
-                            if widget is not None:
-                                wpos = widget.mapToGlobal(QPoint(0, 0))
-                                if wpos.x() <= x < wpos.x() + widget.width():
-                                    return True, 1  # HTCLIENT
-                    return True, 2  # HTCAPTION — enables Win+arrows and Aero snap
-                if not self.isMaximized():
-                    b = 6  # resize border width in pixels
-                    left   = x < r.left()   + b
-                    right  = x > r.right()  - b
-                    top    = y < r.top()    + b
-                    bottom = y > r.bottom() - b
-                    if top    and left:  return True, 13  # HTTOPLEFT
-                    if top    and right: return True, 14  # HTTOPRIGHT
-                    if bottom and left:  return True, 16  # HTBOTTOMLEFT
-                    if bottom and right: return True, 17  # HTBOTTOMRIGHT
-                    if left:             return True, 10  # HTLEFT
-                    if right:            return True, 11  # HTRIGHT
-                    if top:              return True, 12  # HTTOP
-                    if bottom:           return True, 15  # HTBOTTOM
+                hit_test = native_hit_test(self, msg.lParam)
+                if hit_test is not None:
+                    return True, hit_test
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:

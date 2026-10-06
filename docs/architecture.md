@@ -26,12 +26,17 @@ User action -> Qt Signal -> Widget method -> Repository -> Database.conn -> comm
 
 [../src/horizon/__main__.py](../src/horizon/__main__.py):
 
-1. Loads preferences.
-2. Opens/initializes the database.
-3. Creates the `QApplication`.
-4. Starts the local API server.
-5. Creates and shows `MainWindow`.
-6. Stops the API and closes the DB on exit.
+1. Acquires a global named mutex (`Global\Horizon-SingleInstance-Mutex`); if another instance
+   already holds it, shows a warning and exits.
+2. Loads preferences.
+3. Opens/initializes the database.
+4. Creates the `QApplication`.
+5. Starts the local API server.
+6. Creates and shows `MainWindow`.
+7. Stops the API, closes the DB and releases the mutex on exit.
+
+[../Lancer-Horizon.bat](../Lancer-Horizon.bat) is a convenience launcher: it bootstraps `.venv`
+if needed and starts `pythonw -m horizon` without a console.
 
 ---
 
@@ -47,6 +52,24 @@ User action -> Qt Signal -> Widget method -> Repository -> Database.conn -> comm
 - Pin/topmost hotkey integration
 
 Widgets should emit signals and keep local UI state. Repositories should own data access and persistence.
+
+Top of the window, from top to bottom:
+
+- `TitleBar` ([../src/horizon/titlebar.py](../src/horizon/titlebar.py)): custom dark title bar
+  (icon, title, min/max/close). It holds no search field.
+- `CommandBar` ([../src/horizon/widgets/project.py](../src/horizon/widgets/project.py)): main
+  navigation buttons (Board, Notes, Tags, Deliverables, Media, ArchiMate, Debug) plus the global
+  search field and its mode selector (all terms / any term). It emits `search_requested(query,
+  mode)`, which `MainWindow._on_search` routes to `SearchRepository`. `Escape` clears the field.
+
+### Frameless windows and DPI
+
+`MainWindow` and `NoteWindow` hide the native frame (`WM_NCCALCSIZE`) and answer
+`WM_NCHITTEST` themselves through `native_hit_test()` in `titlebar.py`. `WM_NCHITTEST`
+coordinates are physical pixels while Qt geometry is logical, so the hit-test compares against
+`GetWindowRect` and scales the title bar height, control-button width and resize border by
+`GetDpiForWindow`. Comparing against `frameGeometry()` instead misplaces the resize edges at any
+scaling other than 100% (e.g. a resize cursor over the right-hand panel at 150%).
 
 ---
 
