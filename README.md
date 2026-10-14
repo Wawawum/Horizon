@@ -13,7 +13,7 @@ Manage notes, tasks, projects, deliverables, and calendar — all in one place, 
 - **Deliverables** — Track work outputs with templates and state lifecycle
 - **Tags** — Auto-extracted `#hashtags` from note/task body, searchable globally
 - **Full-text search** — FTS5-powered search across notes, tasks, and projects
-- **Calendar** — Outlook calendar integration (reads meetings via `win32com`)
+- **Calendar** — Outlook calendar integration (reads meetings via `win32com`), with day-by-day navigation
 - **Themes** — Single built-in theme (`terminal`), defined as JSON in `src/horizon/themes/`
 - **HTTP API** — Local REST API for external integrations (port stored in `~/.horizon/api.port`)
 - **MCP server** — Model Context Protocol server for AI agent integration

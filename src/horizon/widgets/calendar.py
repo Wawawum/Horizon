@@ -1,9 +1,9 @@
 from dataclasses import dataclass, field
-from datetime import datetime as _datetime
+from datetime import date as _date, datetime as _datetime, timedelta as _timedelta
 
 from PySide6.QtCore import Qt, Signal, QThread, QTimer, QTime
 from PySide6.QtGui import QColor, QPainter, QPainterPath, QPen, QBrush
-from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QScrollArea, QVBoxLayout, QWidget
+from PySide6.QtWidgets import QFrame, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea, QVBoxLayout, QWidget
 from PySide6.QtCore import QRect, QRectF
 
 from horizon import theme as _theme
@@ -33,28 +33,30 @@ class CalendarMeeting:
 
 
 class OutlookFetchWorker(QThread):
-    meetings_ready = Signal(list)   # list[CalendarMeeting]
-    fetch_failed = Signal(str)
+    meetings_ready = Signal(object, list)   # day, list[CalendarMeeting]
+    fetch_failed = Signal(object, str)      # day, message
+
+    def __init__(self, day: _date, parent=None) -> None:
+        super().__init__(parent)
+        self._day = day
 
     def run(self) -> None:
         if not _OUTLOOK_AVAILABLE:
-            self.fetch_failed.emit("pywin32 not installed")
+            self.fetch_failed.emit(self._day, "pywin32 not installed")
             return
         try:
             self._fetch()
         except Exception as exc:
-            self.fetch_failed.emit(str(exc))
+            self.fetch_failed.emit(self._day, str(exc))
 
     def _fetch(self) -> None:
-        from datetime import date
         _pythoncom.CoInitialize()
         try:
             outlook = _win32com.Dispatch("Outlook.Application")
             ns = outlook.GetNamespace("MAPI")
             cal = ns.GetDefaultFolder(9)  # olFolderCalendar
-            today = date.today()
-            start_str = today.strftime("%m/%d/%Y 12:00 AM")
-            end_str = today.strftime("%m/%d/%Y 11:59 PM")
+            start_str = self._day.strftime("%m/%d/%Y 12:00 AM")
+            end_str = self._day.strftime("%m/%d/%Y 11:59 PM")
             items = cal.Items
             items.IncludeRecurrences = True
             items.Sort("[Start]")
@@ -73,7 +75,7 @@ class OutlookFetchWorker(QThread):
                     ))
                 except Exception:
                     continue
-            self.meetings_ready.emit(meetings)
+            self.meetings_ready.emit(self._day, meetings)
         finally:
             _pythoncom.CoUninitialize()
 
@@ -89,6 +91,7 @@ class CalendarTimelineWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._meetings: list[CalendarMeeting] = []
+        self._day = _date.today()
         self._layout_cache: list[tuple] = []  # list of (CalendarMeeting, QRect)
         self.setFixedHeight((self.END_HOUR - self.START_HOUR) * self.HOUR_HEIGHT)
         self._repaint_timer = QTimer(self)
@@ -96,8 +99,9 @@ class CalendarTimelineWidget(QWidget):
         self._repaint_timer.timeout.connect(self.update)
         self._repaint_timer.start()
 
-    def set_meetings(self, meetings: list[CalendarMeeting]) -> None:
+    def set_meetings(self, meetings: list[CalendarMeeting], day: _date) -> None:
         self._meetings = meetings
+        self._day = day
         self._layout_cache = []
         self.update()
 
@@ -204,7 +208,7 @@ class CalendarTimelineWidget(QWidget):
 
         now = QTime.currentTime()
         current_frac = now.hour() + now.minute() / 60.0
-        if self.START_HOUR <= current_frac <= self.END_HOUR:
+        if self._day == _date.today() and self.START_HOUR <= current_frac <= self.END_HOUR:
             cy = int((current_frac - self.START_HOUR) * self.HOUR_HEIGHT)
             painter.setPen(QPen(QColor(t.calendar_now_line), 1))
             painter.drawLine(self.LABEL_WIDTH, cy, w, cy)
@@ -240,16 +244,43 @@ class MeetingsWidget(QWidget):
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
         self._worker: OutlookFetchWorker | None = None
+        self._pending_refresh = False
+        self._day = _date.today()
 
         outer = QVBoxLayout(self)
         outer.setContentsMargins(0, 8, 0, 0)
         outer.setSpacing(4)
 
-        header = QLabel("Today")
-        font = header.font()
+        nav = QHBoxLayout()
+        nav.setContentsMargins(0, 0, 0, 0)
+        nav.setSpacing(4)
+
+        self._prev_btn = QPushButton("‹")
+        self._prev_btn.setToolTip("Previous day")
+        self._prev_btn.setFixedWidth(28)
+        self._prev_btn.clicked.connect(lambda: self._set_day(self._day - _timedelta(days=1)))
+        nav.addWidget(self._prev_btn)
+
+        self._date_label = QLabel()
+        font = self._date_label.font()
         font.setBold(True)
-        header.setFont(font)
-        outer.addWidget(header)
+        self._date_label.setFont(font)
+        self._date_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        nav.addWidget(self._date_label, stretch=1)
+
+        self._today_btn = QPushButton("Today")
+        self._today_btn.setToolTip("Back to today")
+        self._today_btn.clicked.connect(lambda: self._set_day(_date.today()))
+        nav.addWidget(self._today_btn)
+
+        self._next_btn = QPushButton("›")
+        self._next_btn.setToolTip("Next day")
+        self._next_btn.setFixedWidth(28)
+        self._next_btn.clicked.connect(lambda: self._set_day(self._day + _timedelta(days=1)))
+        nav.addWidget(self._next_btn)
+
+        outer.addLayout(nav)
+        self._update_nav()
 
         self._timeline = CalendarTimelineWidget()
         self._timeline.create_note_requested.connect(self.create_note_requested)
@@ -271,26 +302,52 @@ class MeetingsWidget(QWidget):
         self._timer.start()
         self.refresh()
 
+    def _update_nav(self) -> None:
+        is_today = self._day == _date.today()
+        label = self._day.strftime("%a %d %b %Y")
+        self._date_label.setText(f"Today · {label}" if is_today else label)
+        self._today_btn.setVisible(not is_today)
+
+    def _set_day(self, day: _date) -> None:
+        self._day = day
+        self._update_nav()
+        self.refresh()
+
     def refresh(self) -> None:
+        self._update_nav()
         if self._worker is not None and self._worker.isRunning():
+            self._pending_refresh = True
             return
-        self._worker = OutlookFetchWorker(self)
+        self._worker = OutlookFetchWorker(self._day, self)
         self._worker.meetings_ready.connect(self._on_meetings_ready)
         self._worker.fetch_failed.connect(self._on_fetch_failed)
+        self._worker.finished.connect(self._on_worker_finished)
         self._worker.start()
 
-    def _on_meetings_ready(self, meetings: list) -> None:
-        self._status_label.hide()
-        self._timeline.set_meetings(meetings)
-        QTimer.singleShot(0, self._scroll_to_now)
+    def _on_worker_finished(self) -> None:
+        if self._pending_refresh:
+            self._pending_refresh = False
+            self.refresh()
 
-    def _on_fetch_failed(self, message: str) -> None:
-        self._timeline.set_meetings([])
+    def _on_meetings_ready(self, day: _date, meetings: list) -> None:
+        if day != self._day:
+            return
+        self._status_label.hide()
+        self._timeline.set_meetings(meetings, day)
+        QTimer.singleShot(0, self._scroll_to_relevant_hour)
+
+    def _on_fetch_failed(self, day: _date, message: str) -> None:
+        if day != self._day:
+            return
+        self._timeline.set_meetings([], day)
         self._status_label.setText(f"Outlook unavailable\n{message}")
         self._status_label.show()
 
-    def _scroll_to_now(self) -> None:
-        now = QTime.currentTime()
-        frac = now.hour() + now.minute() / 60.0
+    def _scroll_to_relevant_hour(self) -> None:
+        if self._day == _date.today():
+            now = QTime.currentTime()
+            frac = now.hour() + now.minute() / 60.0
+        else:
+            frac = 8.0
         y = int((frac - CalendarTimelineWidget.START_HOUR) * CalendarTimelineWidget.HOUR_HEIGHT)
         self._scroll.verticalScrollBar().setValue(max(0, y - 30))
