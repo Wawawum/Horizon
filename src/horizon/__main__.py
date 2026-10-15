@@ -1,4 +1,3 @@
-import ctypes
 import sys
 
 from PySide6.QtWidgets import QApplication, QMessageBox
@@ -8,28 +7,23 @@ from horizon.api_server import ApiServer
 from horizon.app import MainWindow
 from horizon.database import DB_PATH, Database
 from horizon.preferences import Preferences
-
-# Nom global (toutes sessions Windows) : une seule instance d'Horizon, quel que soit
-# le dépôt ou l'environnement virtuel depuis lequel elle est lancée.
-_SINGLE_INSTANCE_MUTEX_NAME = "Global\\Horizon-SingleInstance-Mutex"
-_ERROR_ALREADY_EXISTS = 183
-
-# use_last_error=True : le code d'erreur est capturé juste après CreateMutexW,
-# sans qu'un autre appel Win32 puisse l'écraser.
-_kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+from horizon.single_instance import ActivationServer, acquire_mutex, notify_running_instance, release_mutex
 
 
 def main() -> None:
     # Le mutex vit aussi longtemps que le processus ; Windows le libère à sa fin.
-    mutex = _kernel32.CreateMutexW(None, False, _SINGLE_INSTANCE_MUTEX_NAME)
-    if ctypes.get_last_error() == _ERROR_ALREADY_EXISTS:
+    mutex = acquire_mutex()
+    if mutex is None:
         app = QApplication(sys.argv)
-        QMessageBox.warning(
-            None,
-            "Horizon est déjà ouvert",
-            "Horizon est déjà en cours d'exécution.\n"
-            "Vous ne pouvez pas lancer une seconde instance de l'application.",
-        )
+        # Horizon tourne déjà : on réaffiche sa fenêtre. Repli sur un avertissement si
+        # l'instance existante ne répond pas (figée, ou ouverte dans une autre session).
+        if not notify_running_instance():
+            QMessageBox.warning(
+                None,
+                "Horizon est déjà ouvert",
+                "Horizon est déjà en cours d'exécution.\n"
+                "Vous ne pouvez pas lancer une seconde instance de l'application.",
+            )
         sys.exit(0)
 
     prefs = Preferences()
@@ -41,11 +35,16 @@ def main() -> None:
 
     window = MainWindow(db)
     window.show()
+
+    activation = ActivationServer(app)
+    activation.activationRequested.connect(window.bring_to_front)
+    activation.listen()
+
     result = app.exec()
 
     api.stop()
     db.close()
-    _kernel32.CloseHandle(mutex)
+    release_mutex(mutex)
     sys.exit(result)
 
 

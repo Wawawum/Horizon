@@ -52,6 +52,7 @@ _SWP_NOSIZE     = 0x0001
 _SWP_NOMOVE     = 0x0002
 _SWP_NOACTIVATE = 0x0010
 _PIN_HOTKEY_ID  = 1
+_SW_RESTORE     = 9
 
 _MOD_MAP = {"alt": _MOD_ALT, "ctrl": _MOD_CONTROL, "shift": _MOD_SHIFT, "win": _MOD_WIN}
 
@@ -531,6 +532,19 @@ class MainWindow(QMainWindow):
             self._show_deliverables()
         elif self._current_project is not None:
             self._show_project(self._current_project)
+
+    def bring_to_front(self) -> None:
+        """Réaffiche la fenêtre au premier plan (relance de l'exécutable)."""
+        hwnd = int(self.winId())
+        user32 = ctypes.windll.user32
+        if user32.IsIconic(hwnd):
+            # SW_RESTORE rend l'état d'avant la minimisation (maximisé ou normal).
+            user32.ShowWindow(hwnd, _SW_RESTORE)
+        else:
+            self.show()
+        self.raise_()
+        self.activateWindow()
+        user32.SetForegroundWindow(hwnd)
 
     def changeEvent(self, event) -> None:
         if event.type() == QEvent.Type.WindowStateChange and hasattr(self, "_title_bar"):
