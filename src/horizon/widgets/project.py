@@ -60,6 +60,7 @@ from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import TASK_STATE_GLYPHS, SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 from horizon.widgets.deliverables import ProjectDeliverablesPanel
+from horizon.widgets.task_filters import TaskFilterBar, TaskFilterModel
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
 
@@ -69,6 +70,8 @@ _PROJECT_MIME       = "application/x-horizon-project-id"
 _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
+_TASK_VIEW_LIST     = 0  # index du QStackedWidget des tâches d'un projet
+_TASK_VIEW_BOARD    = 1
 _CHECK_SVG          = ":/icons/check_black.svg"
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE     = QSize(12, 12)
@@ -1169,11 +1172,16 @@ class KanbanBoardWidget(QWidget):
 
 
 class HomeWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, task_filter_model: TaskFilterModel, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._subtask_repo = subtask_repo
         self._project_repo = project_repo
+        self._task_filter_model = task_filter_model
+        self._task_filter_model.changed.connect(self.load)
+
+        self._filter_bar = TaskFilterBar(task_filter_model, show_projects=True, parent=self)
+        self._filter_bar.set_projects(self._project_filter_options())
 
         self._board = KanbanBoardWidget()
         self._board.task_edit_requested.connect(self._on_task_edit_requested)
@@ -1209,6 +1217,7 @@ class HomeWidget(QWidget):
         board_header.setContentsMargins(0, 0, 0, 0)
         board_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
         board_header.addStretch()
+        board_header.addWidget(self._filter_bar)
         board_header.addWidget(self._show_archived_cb)
         board_header.addWidget(self._move_up_btn)
         board_header.addWidget(self._move_down_btn)
@@ -1229,10 +1238,18 @@ class HomeWidget(QWidget):
         layout.addWidget(board_frame, stretch=1)
 
     def load(self) -> None:
+        self._filter_bar.set_projects(self._project_filter_options())
         projects = self._project_repo.list_all()
         project_names = {p.id: p.name for p in projects}
         project_colors = {p.id: p.color for p in projects}
-        self._board.populate(self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()), project_names=project_names, project_colors=project_colors, subtask_repo=self._subtask_repo)
+        self._board.populate(self._visible_tasks(), project_names=project_names, project_colors=project_colors, subtask_repo=self._subtask_repo)
+
+    def _visible_tasks(self) -> list:
+        tasks = self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked())
+        return [t for t in tasks if self._task_filter_model.matches(t)]
+
+    def _project_filter_options(self) -> list[tuple[str, int]]:
+        return [(p.name, p.id) for p in self._project_repo.list_all(archived_only=False)]
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
@@ -1247,7 +1264,7 @@ class HomeWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        bucket_tasks = [t for t in self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked()) if t.bucket == task.bucket]
+        bucket_tasks = [t for t in self._visible_tasks() if t.bucket == task.bucket]
         idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
         if idx is None:
             return
@@ -1590,7 +1607,7 @@ class ProjectDetailWidget(QWidget):
     document_open_requested = Signal(str)    # emits url
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, document_repo: DocumentRepository, prefs=None, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, document_repo: DocumentRepository, task_filter_model: TaskFilterModel, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
@@ -1600,6 +1617,8 @@ class ProjectDetailWidget(QWidget):
         self._deliverable_repo = deliverable_repo
         self._tmpl_repo = tmpl_repo
         self._document_repo = document_repo
+        self._task_filter_model = task_filter_model
+        self._task_filter_model.changed.connect(self._on_task_filter_changed)
         self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
@@ -1692,6 +1711,11 @@ class ProjectDetailWidget(QWidget):
         tasks_header.setContentsMargins(0, 0, 0, 0)
         tasks_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
         tasks_header.addStretch()
+
+        # Filtres Status / Priority du board (le filtre projet n'a pas de sens ici).
+        self._task_filter_bar = TaskFilterBar(task_filter_model, show_projects=False, parent=self)
+        self._task_filter_bar.setVisible(False)
+        tasks_header.addWidget(self._task_filter_bar)
 
         self._view_selector = QComboBox()
         self._view_selector.addItem("List")
@@ -1956,6 +1980,7 @@ class ProjectDetailWidget(QWidget):
 
     def _on_view_changed(self, index: int) -> None:
         self._task_view_stack.setCurrentIndex(index)
+        self._task_filter_bar.setVisible(index == _TASK_VIEW_BOARD)
         if self._prefs is not None and self._current_project_id is not None:
             self._prefs.set_project_view(self._current_project_id, index)
             self._prefs.save()
@@ -1964,7 +1989,17 @@ class ProjectDetailWidget(QWidget):
         tasks = self._task_repo.list_for_project(project_id, archived_only=False)
         self._populate_table(tasks)
         project_colors = {project_id: self._current_project.color} if self._current_project else None
-        self._kanban_board.populate(tasks, project_colors=project_colors, subtask_repo=self._subtask_repo)
+        self._kanban_board.populate(
+            [t for t in tasks if self._board_filter_matches(t)],
+            project_colors=project_colors, subtask_repo=self._subtask_repo,
+        )
+
+    def _board_filter_matches(self, task) -> bool:
+        return self._task_filter_model.matches(task, include_projects=False)
+
+    def _on_task_filter_changed(self) -> None:
+        if self._current_project_id is not None:
+            self._load_tasks(self._current_project_id)
 
     def _populate_table(self, tasks: list) -> None:
         self._task_table.setRowCount(0)
@@ -2038,7 +2073,7 @@ class ProjectDetailWidget(QWidget):
     def _on_move(self, direction: int) -> None:
         if self._current_project_id is None:
             return
-        if self._task_view_stack.currentIndex() == 0:  # List view
+        if self._task_view_stack.currentIndex() == _TASK_VIEW_LIST:
             row = self._task_table.currentRow()
             if row < 0:
                 return
@@ -2054,6 +2089,9 @@ class ProjectDetailWidget(QWidget):
             t for t in self._task_repo.list_for_project(self._current_project_id)
             if t.bucket == task.bucket
         ]
+        if self._task_view_stack.currentIndex() == _TASK_VIEW_BOARD:
+            # Sur le board, ne permuter qu'avec une tâche visible.
+            bucket_tasks = [t for t in bucket_tasks if self._board_filter_matches(t)]
         idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
         if idx is None:
             return
@@ -2433,4 +2471,5 @@ class ProjectDetailWidget(QWidget):
                 self._view_selector.setCurrentIndex(view_index)
                 self._view_selector.blockSignals(False)
                 self._task_view_stack.setCurrentIndex(view_index)
+                self._task_filter_bar.setVisible(view_index == _TASK_VIEW_BOARD)
             self._stack.setCurrentIndex(1)

@@ -85,6 +85,8 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/note.py](src/horizon/note.py) | Canonical `Note` dataclass + `NoteRepository` |
 | [src/horizon/note_task.py](src/horizon/note_task.py) | `{task: …}` block syntax, `NoteTaskRepository`, note→task sync |
 | [src/horizon/task.py](src/horizon/task.py) | Canonical enum-backed `Task` + `TaskRepository` |
+| [src/horizon/task_filter.py](src/horizon/task_filter.py) | `TaskFilter` (JSON in `task_filters`); one `Default` row today, future saved views |
+| [src/horizon/widgets/task_filters.py](src/horizon/widgets/task_filters.py) | `TaskFilterModel` (shared selection, 5 s debounced save) + `TaskFilterBar` used by the ALL TASKS and project boards |
 | [src/horizon/note_window.py](src/horizon/note_window.py) | Detached note window, windowed and sticky (pinned) modes |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
