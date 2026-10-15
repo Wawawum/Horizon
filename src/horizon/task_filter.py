@@ -16,10 +16,11 @@ class TaskFilter:
     project_ids: list[int]          = field(default_factory=list)
     priorities:  list[TaskPriority] = field(default_factory=list)
 
-    def matches(self, task: Task) -> bool:
+    def matches(self, task: Task, include_projects: bool = True) -> bool:
+        # include_projects=False : board d'un projet, où le filtre projet ne s'applique pas.
         if self.states and task.state not in self.states:
             return False
-        if self.project_ids and task.project_id not in self.project_ids:
+        if include_projects and self.project_ids and task.project_id not in self.project_ids:
             return False
         if self.priorities and task.priority not in self.priorities:
             return False

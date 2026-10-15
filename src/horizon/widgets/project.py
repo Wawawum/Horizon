@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QPoint, QRect, QRectF, QSize, QTimer
+from PySide6.QtCore import Qt, Signal, QByteArray, QMimeData, QPoint, QRect, QRectF, QSize
 from PySide6.QtGui import (
     QColor,
     QDrag,
@@ -48,7 +48,6 @@ from PySide6.QtWidgets import (
     QTreeWidgetItemIterator,
     QVBoxLayout,
     QWidget,
-    QWidgetAction,
 )
 
 from horizon import theme as _theme
@@ -60,8 +59,8 @@ from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
 from horizon.task import TASK_STATE_GLYPHS, SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
-from horizon.task_filter import TaskFilterRepository
 from horizon.widgets.deliverables import ProjectDeliverablesPanel
+from horizon.widgets.task_filters import TaskFilterBar, TaskFilterModel
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
 
@@ -71,6 +70,8 @@ _PROJECT_MIME       = "application/x-horizon-project-id"
 _PRIORITY_ROLE      = Qt.ItemDataRole.UserRole + 1
 _PROJECT_ROLE       = Qt.ItemDataRole.UserRole + 2
 _SUBTASKS_ROLE      = Qt.ItemDataRole.UserRole + 3
+_TASK_VIEW_LIST     = 0  # index du QStackedWidget des tâches d'un projet
+_TASK_VIEW_BOARD    = 1
 _CHECK_SVG          = ":/icons/check_black.svg"
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE     = QSize(12, 12)
@@ -1170,129 +1171,17 @@ class KanbanBoardWidget(QWidget):
         self.tasks_reordered.emit(bucket, task_ids)
 
 
-class _MultiSelectDropdown(QToolButton):
-    """Liste déroulante à cases à cocher, précédée d'une entrée « All » (aucun filtre).
-
-    Fermée, elle affiche « All », la valeur cochée, ou les valeurs cochées séparées
-    par des virgules (élidées si trop longues ; la liste complète est en tooltip)."""
-
-    selection_changed = Signal()
-
-    _WIDTH = 150
-    _TEXT_PADDING = 30  # place réservée à l'indicateur de menu et aux marges
-
-    def __init__(self, parent=None) -> None:
-        super().__init__(parent)
-        self.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        self.setFixedWidth(self._WIDTH)
-        self._menu = QMenu(self)
-        self.setMenu(self._menu)
-        # Une QCheckBox dans un QWidgetAction garde le menu ouvert pendant les clics.
-        self._all_cb, _ = self._add_checkbox("All")
-        self._all_cb.setChecked(True)
-        self._all_cb.toggled.connect(self._on_all_toggled)
-        self._menu.addSeparator()
-        self._options: list[tuple[QCheckBox, object, QWidgetAction]] = []
-        self._refresh_text()
-
-    def _add_checkbox(self, label: str) -> tuple[QCheckBox, QWidgetAction]:
-        cb = QCheckBox(label, self._menu)
-        cb.setStyleSheet("QCheckBox { padding: 4px 12px; }")
-        action = QWidgetAction(self._menu)
-        action.setDefaultWidget(cb)
-        self._menu.addAction(action)
-        return cb, action
-
-    def set_options(self, options: list[tuple[str, object]]) -> None:
-        """Remplace les options ; la sélection est conservée pour les valeurs encore présentes."""
-        previous = set(self.selected())
-        for _, _, action in self._options:
-            self._menu.removeAction(action)
-            action.deleteLater()
-        self._options = []
-        for label, value in options:
-            cb, action = self._add_checkbox(label)
-            cb.setChecked(value in previous)
-            cb.toggled.connect(self._on_option_toggled)
-            self._options.append((cb, value, action))
-        self._set_all_checked(not self.selected())
-        self._refresh_text()
-
-    def set_selected(self, values: list) -> None:
-        wanted = set(values)
-        for cb, value, _ in self._options:
-            cb.blockSignals(True)
-            cb.setChecked(value in wanted)
-            cb.blockSignals(False)
-        self._set_all_checked(not self.selected())
-        self._refresh_text()
-
-    def selected(self) -> list:
-        return [value for cb, value, _ in self._options if cb.isChecked()]
-
-    def _set_all_checked(self, checked: bool) -> None:
-        self._all_cb.blockSignals(True)
-        self._all_cb.setChecked(checked)
-        self._all_cb.blockSignals(False)
-
-    def _on_all_toggled(self, checked: bool) -> None:
-        if not checked:
-            # « All » ne se décoche qu'en cochant une valeur.
-            self._set_all_checked(True)
-            return
-        for cb, _, _ in self._options:
-            cb.blockSignals(True)
-            cb.setChecked(False)
-            cb.blockSignals(False)
-        self._refresh_text()
-        self.selection_changed.emit()
-
-    def _on_option_toggled(self, _checked: bool) -> None:
-        self._set_all_checked(not self.selected())
-        self._refresh_text()
-        self.selection_changed.emit()
-
-    def _refresh_text(self) -> None:
-        labels = [cb.text() for cb, _, _ in self._options if cb.isChecked()]
-        full = ", ".join(labels) if labels else "All"
-        self.setToolTip(full)
-        self.setText(self.fontMetrics().elidedText(
-            full, Qt.TextElideMode.ElideRight, self._WIDTH - self._TEXT_PADDING
-        ))
-
-
 class HomeWidget(QWidget):
-    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, task_filter_repo: TaskFilterRepository, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, task_filter_model: TaskFilterModel, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._subtask_repo = subtask_repo
         self._project_repo = project_repo
-        self._task_filter_repo = task_filter_repo
-        self._filter = task_filter_repo.get_default()
-        self._filter_dirty = False
+        self._task_filter_model = task_filter_model
+        self._task_filter_model.changed.connect(self.load)
 
-        # Sauvegarde du filtre 5 s après le dernier changement de sélection.
-        self._filter_save_timer = QTimer(self)
-        self._filter_save_timer.setSingleShot(True)
-        self._filter_save_timer.setInterval(5000)
-        self._filter_save_timer.timeout.connect(self._save_filter)
-
-        self._state_filter = _MultiSelectDropdown(self)
-        self._state_filter.set_options([(s.value, s) for s in TaskState])
-        self._state_filter.set_selected(self._filter.states)
-        self._state_filter.selection_changed.connect(self._on_filter_changed)
-
-        self._project_filter = _MultiSelectDropdown(self)
-        self._project_filter.selection_changed.connect(self._on_filter_changed)
-
-        self._priority_filter = _MultiSelectDropdown(self)
-        self._priority_filter.set_options([(p.value, p) for p in TaskPriority])
-        self._priority_filter.set_selected(self._filter.priorities)
-        self._priority_filter.selection_changed.connect(self._on_filter_changed)
-
-        self._project_filter.set_options(self._project_filter_options())
-        self._project_filter.set_selected(self._filter.project_ids)
-        self._filter.project_ids = self._project_filter.selected()
+        self._filter_bar = TaskFilterBar(task_filter_model, show_projects=True, parent=self)
+        self._filter_bar.set_projects(self._project_filter_options())
 
         self._board = KanbanBoardWidget()
         self._board.task_edit_requested.connect(self._on_task_edit_requested)
@@ -1328,14 +1217,7 @@ class HomeWidget(QWidget):
         board_header.setContentsMargins(0, 0, 0, 0)
         board_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
         board_header.addStretch()
-        for label, dropdown in (
-            ("Status", self._state_filter),
-            ("Project", self._project_filter),
-            ("Priority", self._priority_filter),
-        ):
-            board_header.addWidget(QLabel(label, self))
-            board_header.addWidget(dropdown)
-            board_header.addSpacing(8)
+        board_header.addWidget(self._filter_bar)
         board_header.addWidget(self._show_archived_cb)
         board_header.addWidget(self._move_up_btn)
         board_header.addWidget(self._move_down_btn)
@@ -1356,7 +1238,7 @@ class HomeWidget(QWidget):
         layout.addWidget(board_frame, stretch=1)
 
     def load(self) -> None:
-        self._refresh_project_filter_options()
+        self._filter_bar.set_projects(self._project_filter_options())
         projects = self._project_repo.list_all()
         project_names = {p.id: p.name for p in projects}
         project_colors = {p.id: p.color for p in projects}
@@ -1364,33 +1246,10 @@ class HomeWidget(QWidget):
 
     def _visible_tasks(self) -> list:
         tasks = self._task_repo.list_all(archived_only=self._show_archived_cb.isChecked())
-        return [t for t in tasks if self._filter.matches(t)]
+        return [t for t in tasks if self._task_filter_model.matches(t)]
 
     def _project_filter_options(self) -> list[tuple[str, int]]:
         return [(p.name, p.id) for p in self._project_repo.list_all(archived_only=False)]
-
-    def _refresh_project_filter_options(self) -> None:
-        self._project_filter.set_options(self._project_filter_options())
-        # Un projet supprimé ou archivé disparaît de la sélection plutôt que de tout masquer.
-        self._filter.project_ids = self._project_filter.selected()
-
-    def _on_filter_changed(self) -> None:
-        self._filter.states = self._state_filter.selected()
-        self._filter.project_ids = self._project_filter.selected()
-        self._filter.priorities = self._priority_filter.selected()
-        self._filter_dirty = True
-        self._filter_save_timer.start()
-        self.load()
-
-    def _save_filter(self) -> None:
-        self._filter_save_timer.stop()
-        if not self._filter_dirty:
-            return
-        self._task_filter_repo.update(self._filter)
-        self._filter_dirty = False
-
-    def flush_and_save(self) -> None:
-        self._save_filter()
 
     def _on_move_up(self) -> None:
         self._on_move(-1)
@@ -1748,7 +1607,7 @@ class ProjectDetailWidget(QWidget):
     document_open_requested = Signal(str)    # emits url
     project_renamed = Signal()
 
-    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, document_repo: DocumentRepository, prefs=None, parent=None) -> None:
+    def __init__(self, task_repo: TaskRepository, project_repo: ProjectRepository, subtask_repo: SubtaskRepository, note_repo: NoteRepository, folder_repo: FolderRepository, deliverable_repo: DeliverableRepository, tmpl_repo: DeliverableTemplateRepository, document_repo: DocumentRepository, task_filter_model: TaskFilterModel, prefs=None, parent=None) -> None:
         super().__init__(parent)
         self._task_repo = task_repo
         self._project_repo = project_repo
@@ -1758,6 +1617,8 @@ class ProjectDetailWidget(QWidget):
         self._deliverable_repo = deliverable_repo
         self._tmpl_repo = tmpl_repo
         self._document_repo = document_repo
+        self._task_filter_model = task_filter_model
+        self._task_filter_model.changed.connect(self._on_task_filter_changed)
         self._prefs = prefs
         self._current_project = None
         self._current_project_id: int | None = None
@@ -1850,6 +1711,11 @@ class ProjectDetailWidget(QWidget):
         tasks_header.setContentsMargins(0, 0, 0, 0)
         tasks_header.addWidget(_SlashTitle("TASKS", point_size_delta=1, color=_BOARD_ACCENT_BLUE))
         tasks_header.addStretch()
+
+        # Filtres Status / Priority du board (le filtre projet n'a pas de sens ici).
+        self._task_filter_bar = TaskFilterBar(task_filter_model, show_projects=False, parent=self)
+        self._task_filter_bar.setVisible(False)
+        tasks_header.addWidget(self._task_filter_bar)
 
         self._view_selector = QComboBox()
         self._view_selector.addItem("List")
@@ -2114,6 +1980,7 @@ class ProjectDetailWidget(QWidget):
 
     def _on_view_changed(self, index: int) -> None:
         self._task_view_stack.setCurrentIndex(index)
+        self._task_filter_bar.setVisible(index == _TASK_VIEW_BOARD)
         if self._prefs is not None and self._current_project_id is not None:
             self._prefs.set_project_view(self._current_project_id, index)
             self._prefs.save()
@@ -2122,7 +1989,17 @@ class ProjectDetailWidget(QWidget):
         tasks = self._task_repo.list_for_project(project_id, archived_only=False)
         self._populate_table(tasks)
         project_colors = {project_id: self._current_project.color} if self._current_project else None
-        self._kanban_board.populate(tasks, project_colors=project_colors, subtask_repo=self._subtask_repo)
+        self._kanban_board.populate(
+            [t for t in tasks if self._board_filter_matches(t)],
+            project_colors=project_colors, subtask_repo=self._subtask_repo,
+        )
+
+    def _board_filter_matches(self, task) -> bool:
+        return self._task_filter_model.matches(task, include_projects=False)
+
+    def _on_task_filter_changed(self) -> None:
+        if self._current_project_id is not None:
+            self._load_tasks(self._current_project_id)
 
     def _populate_table(self, tasks: list) -> None:
         self._task_table.setRowCount(0)
@@ -2196,7 +2073,7 @@ class ProjectDetailWidget(QWidget):
     def _on_move(self, direction: int) -> None:
         if self._current_project_id is None:
             return
-        if self._task_view_stack.currentIndex() == 0:  # List view
+        if self._task_view_stack.currentIndex() == _TASK_VIEW_LIST:
             row = self._task_table.currentRow()
             if row < 0:
                 return
@@ -2212,6 +2089,9 @@ class ProjectDetailWidget(QWidget):
             t for t in self._task_repo.list_for_project(self._current_project_id)
             if t.bucket == task.bucket
         ]
+        if self._task_view_stack.currentIndex() == _TASK_VIEW_BOARD:
+            # Sur le board, ne permuter qu'avec une tâche visible.
+            bucket_tasks = [t for t in bucket_tasks if self._board_filter_matches(t)]
         idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
         if idx is None:
             return
@@ -2591,4 +2471,5 @@ class ProjectDetailWidget(QWidget):
                 self._view_selector.setCurrentIndex(view_index)
                 self._view_selector.blockSignals(False)
                 self._task_view_stack.setCurrentIndex(view_index)
+                self._task_filter_bar.setVisible(view_index == _TASK_VIEW_BOARD)
             self._stack.setCurrentIndex(1)

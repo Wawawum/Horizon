@@ -18,6 +18,7 @@ from horizon.search import SearchRepository
 from horizon.tag import TagRepository
 from horizon.task import SubtaskRepository, TaskRepository
 from horizon.task_filter import TaskFilterRepository
+from horizon.widgets.task_filters import TaskFilterModel
 from horizon.titlebar import TitleBar, native_hit_test
 from horizon.widgets import CalendarMeeting, CommandBar, HomeWidget, NoteDetailWidget, NotesListWidget, ProjectDetailWidget, ProjectListWidget, RightPanelWidget, SearchResultsWidget
 from horizon.widgets.tags import TagsWidget
@@ -99,7 +100,8 @@ class MainWindow(QMainWindow):
         task_repo = TaskRepository(db)
         self._task_repo = task_repo
         subtask_repo = SubtaskRepository(db)
-        task_filter_repo = TaskFilterRepository(db)
+        # Sélection de filtres « Default » partagée par le board ALL TASKS et celui des projets.
+        self._task_filter_model = TaskFilterModel(TaskFilterRepository(db), self)
         self._subtask_repo = subtask_repo
         self._note_repo = NoteRepository(db)
         self._note_version_repo = NoteVersionRepository(db)
@@ -126,10 +128,10 @@ class MainWindow(QMainWindow):
 
         self._right_stack = QStackedWidget()
 
-        self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo, task_filter_repo)
+        self._home_widget = HomeWidget(task_repo, subtask_repo, self._proj_repo, self._task_filter_model)
         self._right_stack.addWidget(self._home_widget)     # index 0
 
-        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._deliverable_repo, self._tmpl_repo, self._document_repo, self._prefs)
+        self._project_detail = ProjectDetailWidget(task_repo, self._proj_repo, subtask_repo, self._note_repo, self._folder_repo, self._deliverable_repo, self._tmpl_repo, self._document_repo, self._task_filter_model, self._prefs)
         self._right_stack.addWidget(self._project_detail)  # index 1
 
         self._notes_list = NotesListWidget(self._note_repo, self._proj_repo)
@@ -564,7 +566,7 @@ class MainWindow(QMainWindow):
     def closeEvent(self, event) -> None:
         for detail in (self._note_detail, self._deliverable_detail, self._template_detail):
             detail.flush_and_save()
-        self._home_widget.flush_and_save()
+        self._task_filter_model.flush_and_save()
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)
         for hwnd in list(self._pin_borders):
             self._close_pin_border(hwnd)
