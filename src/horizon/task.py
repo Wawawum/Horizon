@@ -13,6 +13,16 @@ class TaskState(Enum):
     Cancelled   = "Cancelled"
 
 
+# Status glyphs shared by the note renderer and the kanban cards
+TASK_STATE_GLYPHS = {
+    TaskState.New.value:         "○",
+    TaskState.In_Progress.value: "◐",
+    TaskState.On_Hold.value:     "⏸",
+    TaskState.Completed.value:   "●",
+    TaskState.Cancelled.value:   "✕",
+}
+
+
 class TaskPriority(Enum):
     Low    = "Low"
     Medium = "Medium"

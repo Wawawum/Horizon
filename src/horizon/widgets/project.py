@@ -58,7 +58,7 @@ from horizon.document import URL_SCHEMES, DocumentRepository, extract_document_l
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
 from horizon.project import ProjectRepository
-from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
+from horizon.task import TASK_STATE_GLYPHS, SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 from horizon.widgets.deliverables import ProjectDeliverablesPanel
 from PySide6.QtCore import QEvent
 from PySide6.QtGui import QTextCursor
@@ -104,7 +104,6 @@ _ARROW_ICON_SIZE    = QSize(10, 10)
 _BAND_WIDTH         = 5
 _TILE_RADIUS        = 0
 _TILE_MARGIN        = 2
-_PROJECT_COLOR_SQUARE = 10
 
 _RESOURCES_DIR = Path(__file__).parent.parent / "resources"
 
@@ -844,7 +843,8 @@ class KanbanCardWidget(QWidget):
     def __init__(self, task, subtasks, project_name, subtask_repo, project_color: str = "", parent=None) -> None:
         super().__init__(parent)
         self._priority = task.priority
-        self._project_color = project_color
+        self._state = task.state
+        self.setToolTip(task.state.value)
         t = _theme.current()
         self.setStyleSheet(f"""
             QLabel    {{ color: {t.tile_text}; background: transparent; }}
@@ -852,15 +852,34 @@ class KanbanCardWidget(QWidget):
         """)
 
         layout = QVBoxLayout(self)
-        layout.setContentsMargins(_BAND_WIDTH + 6, 10, 6, 10)
-        layout.setSpacing(2)
+        layout.setContentsMargins(_BAND_WIDTH + 14, 16, 16, 14)
+        layout.setSpacing(4)
+
+        # Project chip — top-left corner, tinted with the project color
+        if project_name:
+            chip_color = QColor(project_color) if project_color else QColor(t.tile_project_label)
+            chip = QLabel(project_name)
+            chip_font = QFont(chip.font())
+            chip_font.setBold(True)
+            chip_font.setPointSize(max(chip_font.pointSize() - 1, 7))
+            chip.setFont(chip_font)
+            chip.setStyleSheet(
+                f"color: {chip_color.name()};"
+                f" background-color: rgba({chip_color.red()}, {chip_color.green()}, {chip_color.blue()}, 40);"
+                " border-radius: 3px; padding: 2px 6px;"
+            )
+            layout.addWidget(chip, alignment=Qt.AlignmentFlag.AlignLeft)
+            layout.addSpacing(4)
 
         title = QLabel(task.title)
+        title_font = QFont(title.font())
+        title_font.setBold(True)
+        title.setFont(title_font)
         title.setWordWrap(True)
         layout.addWidget(title)
 
         for subtask in subtasks:
-            cb = QCheckBox(subtask.title)
+            cb = QCheckBox()
             cb.setChecked(subtask.completed)
             # Give the checkbox a light palette so the system style draws a
             # visible indicator (border + checkmark) on our white card background.
@@ -874,16 +893,32 @@ class KanbanCardWidget(QWidget):
                     sid, state == Qt.CheckState.Checked.value
                 )
             )
-            layout.addWidget(cb)
+            # QCheckBox cannot wrap its text, so the title lives in a wrapping
+            # label next to a text-less checkbox; clicking it toggles the box.
+            sub_label = QLabel(subtask.title)
+            sub_label.setWordWrap(True)
+            sub_label.mousePressEvent = lambda _event, box=cb: box.toggle()
+            row = QHBoxLayout()
+            row.setSpacing(4)
+            row.addWidget(cb, alignment=Qt.AlignmentFlag.AlignTop)
+            row.addWidget(sub_label, stretch=1)
+            layout.addLayout(row)
 
-        if project_name:
-            proj_label = QLabel(project_name)
-            proj_font = QFont(proj_label.font())
-            proj_font.setItalic(True)
-            proj_font.setPointSize(max(proj_font.pointSize() - 2, 7))
-            proj_label.setFont(proj_font)
-            proj_label.setStyleSheet(f"color: {t.tile_project_label}; background: transparent;")
-            layout.addWidget(proj_label)
+        # Task state glyph — bottom-left corner
+        glyph_color = QColor(t.accent_color)
+        if task.state == TaskState.New:
+            glyph_color.setAlphaF(0.55)
+        glyph_label = QLabel(TASK_STATE_GLYPHS.get(task.state.value, "○"))
+        glyph_font = QFont(glyph_label.font())
+        glyph_font.setPointSize(max(glyph_font.pointSize() + 8, 17))
+        glyph_label.setFont(glyph_font)
+        # The symbol fonts used for these glyphs reserve a tall line box, which
+        # leaves a gap under the glyph — pin the height to the glyph itself.
+        glyph_label.setFixedHeight(int(glyph_font.pointSize() * 1.35))
+        glyph_label.setAlignment(Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter)
+        glyph_label.setStyleSheet(f"color: {glyph_color.name(QColor.NameFormat.HexArgb)}; background: transparent;")
+        layout.addSpacing(4)
+        layout.addWidget(glyph_label, alignment=Qt.AlignmentFlag.AlignLeft)
 
     def paintEvent(self, event) -> None:
         t = _theme.current()
@@ -913,13 +948,6 @@ class KanbanCardWidget(QWidget):
         color = priority_colors.get(self._priority, QColor(t.priority_low))
         painter.fillRect(QRectF(tile_rect.x(), tile_rect.y(), _BAND_WIDTH, tile_rect.height()), color)
 
-        # Project color square — bottom-right corner
-        if self._project_color:
-            sq = _PROJECT_COLOR_SQUARE
-            sq_x = tile_rect.right() - sq - 4
-            sq_y = tile_rect.bottom() - sq - 4
-            painter.fillRect(QRectF(sq_x, sq_y, sq, sq), QColor(self._project_color))
-
         painter.setClipping(False)
 
         # Border
@@ -940,6 +968,25 @@ class KanbanColumnWidget(QListWidget):
         self.setDropIndicatorShown(True)
         self.setDragDropMode(QAbstractItemView.DragDropMode.InternalMove)
         self.setDefaultDropAction(Qt.DropAction.MoveAction)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._fit_item_heights()
+
+    def _fit_item_heights(self) -> None:
+        """Re-size each card to the height its wrapped text needs at the current width."""
+        width = self.viewport().width() - self.spacing() * 2
+        if width <= 0:
+            return
+        for i in range(self.count()):
+            item = self.item(i)
+            card = self.itemWidget(item)
+            if card is None:
+                continue
+            height = card.heightForWidth(width)
+            if height < 0:
+                height = card.sizeHint().height()
+            item.setSizeHint(QSize(0, height + _TILE_MARGIN * 2))
 
     def startDrag(self, supported_actions) -> None:
         item = self.currentItem()
@@ -1071,6 +1118,8 @@ class KanbanBoardWidget(QWidget):
             column = self._columns[task.bucket]
             column.addItem(item)
             column.setItemWidget(item, card)
+        for column in self._columns.values():
+            column._fit_item_heights()
         self._refresh_column_states()
 
     def _refresh_column_states(self) -> None:
