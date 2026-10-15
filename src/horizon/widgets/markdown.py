@@ -9,6 +9,7 @@ from PySide6.QtGui import QIcon, QTextDocument
 from horizon import theme as _theme
 from horizon.image import ImageRepository
 from horizon.note_task import split_title_description, sub_outside_code
+from horizon.task import TASK_STATE_GLYPHS
 
 _PLUS_ICON: QIcon | None = None
 _PLUS_ICON_SIZE = QSize(12, 12)
@@ -36,13 +37,6 @@ _TAG_PH_RE = re.compile(r'HORIZONTAG(\d+)END')
 
 # {task: …} blocks — the syntax itself lives in horizon.note_task
 _TASK_PH_RE = re.compile(r'HORIZONTASK(\d+)END')
-_TASK_STATE_GLYPHS = {
-    "New":         "○",
-    "In-Progress": "◐",
-    "On hold":     "⏸",
-    "Completed":   "●",
-    "Cancelled":   "✕",
-}
 
 _MERMAID_FENCE_RE = re.compile(
     r'^[ \t]*```[ \t]*mermaid[^\n]*\n(.*?)^[ \t]*```[ \t]*$',
@@ -334,7 +328,7 @@ def _extract_tasks(md: str, task_info: dict[int, tuple[str, str]]) -> tuple[str,
                 html = f'<span class="task-ref task-ref-missing">#{task_id}</span>'
             else:
                 title, state = info
-                glyph = _TASK_STATE_GLYPHS.get(state, "○")
+                glyph = TASK_STATE_GLYPHS.get(state, "○")
                 cls = "task-state-" + state.lower().replace(" ", "-")
                 html = (
                     f'<span class="task-ref {cls}">'
