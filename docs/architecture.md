@@ -27,13 +27,16 @@ User action -> Qt Signal -> Widget method -> Repository -> Database.conn -> comm
 [../src/horizon/__main__.py](../src/horizon/__main__.py):
 
 1. Acquires a global named mutex (`Global\Horizon-SingleInstance-Mutex`); if another instance
-   already holds it, shows a warning and exits.
+   already holds it, asks that instance to bring its window to the front (local socket
+   `Horizon-SingleInstance-Activate`) and exits — falling back to a warning if it does not answer.
 2. Loads preferences.
 3. Opens/initializes the database.
 4. Creates the `QApplication`.
 5. Starts the local API server.
-6. Creates and shows `MainWindow`.
+6. Creates and shows `MainWindow`, then starts the `ActivationServer` that restores it on request.
 7. Stops the API, closes the DB and releases the mutex on exit.
+
+Single-instance logic lives in [../src/horizon/single_instance.py](../src/horizon/single_instance.py).
 
 [../Lancer-Horizon.bat](../Lancer-Horizon.bat) is a convenience launcher: it bootstraps `.venv`
 if needed and starts `pythonw -m horizon` without a console.
