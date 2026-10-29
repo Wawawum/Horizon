@@ -7,7 +7,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 | Source | Output | Editor |
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
-| `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~923 KB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
+| `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
 
 ## Rebuilding
 

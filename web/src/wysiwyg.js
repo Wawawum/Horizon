@@ -9,7 +9,8 @@
 import {
   ClassicEditor, Essentials, Paragraph, Heading, Bold, Italic, Underline, Strikethrough,
   Code, List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
-  ImageToolbar, ImageCaption, ImageTextAlternative, HorizontalLine, Autoformat,
+  ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
+  HorizontalLine, Autoformat,
 } from "ckeditor5";
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
@@ -206,8 +207,8 @@ function createEditor(state) {
     plugins: [
       Essentials, Paragraph, Heading, Bold, Italic, Underline, Strikethrough, Code,
       List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
-      ImageToolbar, ImageCaption, ImageTextAlternative, HorizontalLine, Autoformat,
-      HorizonUploadAdapter,
+      ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
+      HorizontalLine, Autoformat, HorizonUploadAdapter,
     ],
     toolbar: {
       items: [
@@ -233,8 +234,16 @@ function createEditor(state) {
       allowedProtocols: ["https", "http", "ftp", "ftps", "mailto", "tel", "horizon"],
       defaultProtocol: "https://",
     },
-    table: { contentToolbar: ["tableColumn", "tableRow", "mergeTableCells"] },
-    image: { toolbar: ["imageTextAlternative", "toggleImageCaption"] },
+    // Block alignment: tables through the table properties balloon (alignment, plus
+    // borders, background and size), images through three buttons on their toolbar.
+    table: { contentToolbar: ["tableColumn", "tableRow", "mergeTableCells", "|", "tableProperties"] },
+    image: {
+      styles: { options: ["alignBlockLeft", "block", "alignBlockRight"] },
+      toolbar: [
+        "imageStyle:alignBlockLeft", "imageStyle:block", "imageStyle:alignBlockRight", "|",
+        "imageTextAlternative", "toggleImageCaption",
+      ],
+    },
     codeBlock: {
       languages: [
         { language: "plaintext", label: "Texte brut" },
