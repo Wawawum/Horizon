@@ -233,6 +233,11 @@ def _make_wysiwyg_html() -> str:
   .ck-content table td, .ck-content table th {{ border-color: {t.preview_border}; }}
   .ck-content table th {{ background: {t.preview_table_header_bg}; }}
   .ck-content hr {{ background: {t.preview_border}; }}
+  /* Blocs alignés à gauche par défaut : CKEditor n'écrit aucune classe pour le style par
+     défaut (voir image.styles / tableProperties dans wysiwyg.js). */
+  .ck-content figure.image:not([class*="image-style-"]),
+  .ck-content figure.table:not([class*="table-style-align-"]) {{ margin-left: 0; margin-right: auto; }}
+  .ck-content figure.image.image-style-block-center {{ margin-left: auto; margin-right: auto; }}
 </style>
 </head>
 <body>

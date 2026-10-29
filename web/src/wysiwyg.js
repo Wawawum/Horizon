@@ -10,7 +10,7 @@ import {
   ClassicEditor, Essentials, Paragraph, Heading, Bold, Italic, Underline, Strikethrough,
   Code, List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
   ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
-  HorizontalLine, Autoformat,
+  HorizontalLine, Autoformat, IconObjectLeft, IconObjectCenter,
 } from "ckeditor5";
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
@@ -236,11 +236,30 @@ function createEditor(state) {
     },
     // Block alignment: tables through the table properties balloon (alignment, plus
     // borders, background and size), images through three buttons on their toolbar.
-    table: { contentToolbar: ["tableColumn", "tableRow", "mergeTableCells", "|", "tableProperties"] },
+    // Left is the default for both: CKEditor writes nothing for a default style, so the
+    // page CSS (webeditor.py) left-aligns unclassed blocks — older notes included — and
+    // centring gets a class of its own.
+    table: {
+      contentToolbar: ["tableColumn", "tableRow", "mergeTableCells", "|", "tableProperties"],
+      tableProperties: { defaultProperties: { alignment: "left" } },
+    },
     image: {
-      styles: { options: ["alignBlockLeft", "block", "alignBlockRight"] },
+      styles: {
+        options: [
+          {
+            name: "alignBlockLeft", title: "Image alignée à gauche", icon: IconObjectLeft,
+            modelElements: ["imageBlock"], className: "image-style-block-align-left",
+            isDefault: true,
+          },
+          {
+            name: "blockCenter", title: "Image centrée", icon: IconObjectCenter,
+            modelElements: ["imageBlock"], className: "image-style-block-center",
+          },
+          "alignBlockRight",
+        ],
+      },
       toolbar: [
-        "imageStyle:alignBlockLeft", "imageStyle:block", "imageStyle:alignBlockRight", "|",
+        "imageStyle:alignBlockLeft", "imageStyle:blockCenter", "imageStyle:alignBlockRight", "|",
         "imageTextAlternative", "toggleImageCaption",
       ],
     },
