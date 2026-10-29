@@ -3,7 +3,7 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, QEvent, QPoint, QRectF, QSize, QTimer, QUrl, Qt
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtGui import QIcon, QPainter, QPixmap, QTextCursor
+from PySide6.QtGui import QColor, QFont, QIcon, QPainter, QPixmap, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QApplication,
@@ -81,6 +81,20 @@ def _render_desc_with_tags(widget: QTextEdit, desc_raw: str) -> None:
         )
 
     widget.setHtml(_TASK_TAG_RE.sub(replacer, html))
+
+
+def style_project_chip(chip: QLabel, project_color: str) -> None:
+    """Project chip look shared by the kanban cards and the task dialog."""
+    color = QColor(project_color) if project_color else QColor(_theme.current().tile_project_label)
+    font = QFont(chip.font())
+    font.setBold(True)
+    font.setPointSize(max(font.pointSize() - 1, 7))
+    chip.setFont(font)
+    chip.setStyleSheet(
+        f"color: {color.name()};"
+        f" background-color: rgba({color.red()}, {color.green()}, {color.blue()}, 40);"
+        " border-radius: 3px; padding: 2px 6px;"
+    )
 
 
 class _DragHandle(QLabel):
@@ -231,7 +245,6 @@ class NewProjectDialog(QDialog):
         layout.addWidget(content)
 
     def _pick_color(self) -> None:
-        from PySide6.QtGui import QColor
         initial = QColor(self._color) if self._color else QColor()
         chosen = QColorDialog.getColor(initial=initial, parent=self)
         if chosen.isValid():
@@ -399,8 +412,8 @@ class TaskDetailDialog(QDialog):
         self._duplicate_project_id: int | None = None
 
         # --- Project + advanced actions menu ---
-        self._project_label = QLabel()
-        self._update_project_label()
+        self._project_chip = QLabel()
+        self._update_project_chip()
 
         more_btn = QPushButton("⋯")
         more_btn.setFixedWidth(32)
@@ -408,7 +421,7 @@ class TaskDetailDialog(QDialog):
         more_btn.clicked.connect(lambda: self._show_actions_menu(more_btn))
 
         project_row = QHBoxLayout()
-        project_row.addWidget(self._project_label)
+        project_row.addWidget(self._project_chip)
         project_row.addStretch()
         project_row.addWidget(more_btn)
 
@@ -739,9 +752,10 @@ class TaskDetailDialog(QDialog):
             task_repo.duplicate(task, dialog.duplicate_project_id())
         return True
 
-    def _update_project_label(self) -> None:
+    def _update_project_chip(self) -> None:
         project = self._project_repo.get(self._project_id)
-        self._project_label.setText(f"Project: {project.name if project else '—'}")
+        self._project_chip.setText(project.name if project else "—")
+        style_project_chip(self._project_chip, project.color if project else "")
 
     def _active_projects(self) -> list:
         return self._project_repo.list_all(archived_only=False)
@@ -778,7 +792,7 @@ class TaskDetailDialog(QDialog):
         project_id = SelectProjectDialog.ask("Move Task", projects, parent=self)
         if project_id is not None:
             self._project_id = project_id
-            self._update_project_label()
+            self._update_project_chip()
 
     def _on_duplicate_clicked(self) -> None:
         project_id = SelectProjectDialog.ask(

@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 from horizon import theme as _theme
 from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
-from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog, style_project_chip
 from horizon.document import URL_SCHEMES, DocumentRepository, extract_document_link
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
@@ -860,17 +860,8 @@ class KanbanCardWidget(QWidget):
 
         # Project chip — top-left corner, tinted with the project color
         if project_name:
-            chip_color = QColor(project_color) if project_color else QColor(t.tile_project_label)
             chip = QLabel(project_name)
-            chip_font = QFont(chip.font())
-            chip_font.setBold(True)
-            chip_font.setPointSize(max(chip_font.pointSize() - 1, 7))
-            chip.setFont(chip_font)
-            chip.setStyleSheet(
-                f"color: {chip_color.name()};"
-                f" background-color: rgba({chip_color.red()}, {chip_color.green()}, {chip_color.blue()}, 40);"
-                " border-radius: 3px; padding: 2px 6px;"
-            )
+            style_project_chip(chip, project_color)
             layout.addWidget(chip, alignment=Qt.AlignmentFlag.AlignLeft)
             layout.addSpacing(4)
 
