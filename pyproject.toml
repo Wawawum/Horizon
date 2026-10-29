@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "horizon"
-version = "0.1.0"
+version = "0.2.0"
 requires-python = ">=3.11"
 # Horizon est une application, pas une bibliotheque : les bornes hautes sont
 # volontaires. Sans elles, une installation neuve resout la derniere version de
