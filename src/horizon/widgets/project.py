@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 from horizon import theme as _theme
 from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
-from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog
+from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog, style_project_chip
 from horizon.document import URL_SCHEMES, DocumentRepository, extract_document_link
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
@@ -860,17 +860,8 @@ class KanbanCardWidget(QWidget):
 
         # Project chip — top-left corner, tinted with the project color
         if project_name:
-            chip_color = QColor(project_color) if project_color else QColor(t.tile_project_label)
             chip = QLabel(project_name)
-            chip_font = QFont(chip.font())
-            chip_font.setBold(True)
-            chip_font.setPointSize(max(chip_font.pointSize() - 1, 7))
-            chip.setFont(chip_font)
-            chip.setStyleSheet(
-                f"color: {chip_color.name()};"
-                f" background-color: rgba({chip_color.red()}, {chip_color.green()}, {chip_color.blue()}, 40);"
-                " border-radius: 3px; padding: 2px 6px;"
-            )
+            style_project_chip(chip, project_color)
             layout.addWidget(chip, alignment=Qt.AlignmentFlag.AlignLeft)
             layout.addSpacing(4)
 
@@ -1278,18 +1269,7 @@ class HomeWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            if dialog.deleted():
-                self._task_repo.delete(task.id)
-            else:
-                task.title = dialog.title()
-                task.description = dialog.description()
-                task.state = dialog.state()
-                task.priority = dialog.priority()
-                task.bucket = dialog.bucket()
-                task.archived = dialog.archived()
-                self._task_repo.update(task)
+        if TaskDetailDialog.edit(task, self._task_repo, self._subtask_repo, self._project_repo, parent=self):
             self.load()
 
     def _on_bucket_changed(self, task_id: int, new_bucket) -> None:
@@ -2014,36 +1994,19 @@ class ProjectDetailWidget(QWidget):
 
     def _on_task_double_clicked(self, row: int, _col: int) -> None:
         task_id = self._task_table.item(row, 0).data(Qt.ItemDataRole.UserRole)
-        task = self._task_repo.get(task_id)
-        if task is None:
-            return
-        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            task.title = dialog.title()
-            task.description = dialog.description()
-            task.state = dialog.state()
-            task.priority = dialog.priority()
-            task.bucket = dialog.bucket()
-            task.archived = dialog.archived()
-            self._task_repo.update(task)
-            self._load_tasks(self._current_project_id)
+        self._edit_task(task_id)
 
     def open_task(self, task_id: int) -> None:
         self._on_kanban_task_edit_requested(task_id)
 
     def _on_kanban_task_edit_requested(self, task_id: int) -> None:
+        self._edit_task(task_id)
+
+    def _edit_task(self, task_id: int) -> None:
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
-        if dialog.exec() == QDialog.DialogCode.Accepted:
-            task.title = dialog.title()
-            task.description = dialog.description()
-            task.state = dialog.state()
-            task.priority = dialog.priority()
-            task.bucket = dialog.bucket()
-            task.archived = dialog.archived()
-            self._task_repo.update(task)
+        if TaskDetailDialog.edit(task, self._task_repo, self._subtask_repo, self._project_repo, parent=self):
             self._load_tasks(self._current_project_id)
 
     def _on_kanban_tasks_reordered(self, bucket, task_ids: list[int]) -> None:
