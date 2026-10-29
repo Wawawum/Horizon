@@ -9,7 +9,7 @@ from pathlib import Path
 
 from horizon.database import open_connection
 from horizon.deliverable import Deliverable, DeliverableRepository, DeliverableState
-from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
+from horizon.note import Note, NoteFormat, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.project import Project, ProjectRepository
 from horizon.search import SearchRepository
 from horizon.task import (
@@ -39,6 +39,7 @@ class _Db:
 
 def _version_to_dict(v: NoteVersion) -> dict:
     return {"id": v.id, "note_id": v.note_id, "title": v.title, "body": v.body,
+            "format": v.format.value,
             "version_dt": v.version_dt.isoformat(), "is_current": v.is_current}
 
 
@@ -50,6 +51,8 @@ def _note_to_dict(note: Note, *, include_body: bool = True) -> dict:
         "title": note.title,
         "dt": note.dt.isoformat(),
         "archived": note.archived,
+        # "markdown" ou "html" : le corps est renvoyé tel qu'il est stocké, jamais converti.
+        "format": note.format.value,
     }
     if include_body:
         d["body"] = note.body
@@ -316,6 +319,10 @@ class _Handler(BaseHTTPRequestHandler):
         except ValueError:
             self._send_json(400, {"error": "invalid dt format, expected ISO-8601"})
             return
+        fmt, err = _parse_enum(NoteFormat, body.get("format", NoteFormat.Markdown.value), "format")
+        if err:
+            self._send_json(400, {"error": err})
+            return
         conn = open_connection(self._db_path)
         try:
             db = _Db(conn)
@@ -325,6 +332,7 @@ class _Handler(BaseHTTPRequestHandler):
                 body=body.get("body", ""),
                 dt=dt,
                 folder_id=body.get("folder_id"),
+                format=fmt,
             )
             NoteVersionRepository(db).create_version(note)
             self._send_json(201, _note_to_dict(note))
@@ -363,7 +371,24 @@ class _Handler(BaseHTTPRequestHandler):
                 except ValueError:
                     self._send_json(400, {"error": "invalid dt format, expected ISO-8601"})
                     return
+            convert = False
+            if "format" in body:
+                fmt, err = _parse_enum(NoteFormat, body["format"], "format")
+                if err:
+                    self._send_json(400, {"error": err})
+                    return
+                if note.format is NoteFormat.Html and fmt is NoteFormat.Markdown:
+                    self._send_json(400, {"error": "an html note cannot be converted back to markdown"})
+                    return
+                if note.format is NoteFormat.Markdown and fmt is NoteFormat.Html:
+                    # Pas de conversion côté serveur : le client fournit le HTML.
+                    if "body" not in body:
+                        self._send_json(400, {"error": "converting to html requires the html body"})
+                        return
+                    convert = True
             repo.update(note)
+            if convert:
+                repo.convert_to_html(note, note.body)
             NoteVersionRepository(_Db(conn)).create_version(note)
             self._send_json(200, _note_to_dict(note))
         except Exception:
