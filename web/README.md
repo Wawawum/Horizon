@@ -1,8 +1,13 @@
-# web/ — source of the CodeMirror 6 editor bundle
+# web/ — source of the note editor bundles
 
 This directory is **build-time only**. `python -m horizon` never invokes Node: it loads the
-committed artifact `src/horizon/resources/horizon-editor.bundle.js` as a plain static file,
-exactly like `mermaid.min.js` and `highlight.min.js`.
+committed artifacts under `src/horizon/resources/` as plain static files, exactly like
+`mermaid.min.js` and `highlight.min.js`.
+
+| Source | Output | Editor |
+|---|---|---|
+| `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
+| `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~923 KB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
 
 ## Rebuilding
 
@@ -12,11 +17,11 @@ npm install
 npm run build
 ```
 
-Output: `src/horizon/resources/horizon-editor.bundle.js` (~702 KB minified).
-Commit that file alongside your `src/editor.js` change — the Python side has no fallback.
+`npm run build` builds both bundles; `npm run build:markdown` and `npm run build:wysiwyg`
+build one. Commit the output alongside your source change — the Python side has no fallback.
 
-`npm run build:dev` writes an unminified build with an inline sourcemap to the same path,
-for local debugging. **Do not commit that output.**
+`npm run build:dev` writes unminified builds with inline sourcemaps to the same paths, for
+local debugging. **Do not commit that output.**
 
 ## Constraints — read before changing the build
 
@@ -35,18 +40,40 @@ dynamic `import()`, which esbuild cannot code-split in IIFE format — it would 
 grammar it knows and roughly triple the bundle. Fenced-code sublanguages are instead listed
 explicitly in the `codeLanguages` array at the top of `src/editor.js`; add imports there.
 
+**CKEditor 5 is pinned to an exact version and used under the GPL** (`licenseKey: 'GPL'`).
+Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plugins listed in
+`src/wysiwyg.js` are bundled; esbuild tree-shakes the rest of the `ckeditor5` package.
+
 ## Contract with the Python side
 
-`src/horizon/widgets/webeditor.py` owns the other half. The bundle exposes `window.HorizonEditor`
+`src/horizon/widgets/webeditor.py` owns the other half (`WebMarkdownEditor` and
+`WebHtmlEditor`, on a shared `_WebEditorBase`). Both bundles expose `window.HorizonEditor`
 (`setText`, `readDoc`, `setReadOnly`, `setFontSize`, `setPlaceholder`, `focusEditor`, plus the
-toolbar commands) and talks back through the `bridge` object registered on the QWebChannel
-(`push_text`, `mark_dirty`, `editor_blurred`, `editor_ready`, `store_image`, `set_font_size`,
-`shortcut`, `image_upload_started/finished`).
+markdown toolbar commands in `editor.js`) and talk back through the `bridge` object registered
+on the QWebChannel (`push_text`, `mark_dirty`, `editor_blurred`, `editor_ready`, `store_image`,
+`set_font_size`, `shortcut`, `image_upload_started/finished`, and `open_link` for the WYSIWYG
+editor).
 
-Two invariants worth preserving if you touch this:
+Invariants worth preserving if you touch this:
 
 - **The generation counter.** `setText` bumps it; `push_text` carries it back and Python drops
   any push whose generation is stale. This is what replaces Qt's `blockSignals` and what stops
   a programmatic load (opening a historical version) from looking like a user edit.
 - **`blur` pushes synchronously before signalling.** QWebChannel preserves call order, so
   Python's mirror is exact by the time its `editing_finished` handler runs.
+
+WYSIWYG specifics:
+
+- **CKEditor starts asynchronously.** `window.HorizonEditor` only exists once it has; the page
+  then pulls `get_initial_state()` a second time so that a note loaded meanwhile is not lost.
+  `call_js()` is guarded and lands nowhere before that — the bridge carries the state.
+- **`setText(html, gen, normalize)`.** With `normalize`, the page pushes CKEditor's own
+  serialisation straight back. Used only after a markdown → HTML conversion, whose stored HTML
+  comes from `QTextDocument`; on an ordinary load it would look like an edit.
+- **Images are references, not data.** Pasted images go to `ImageRepository` through
+  `store_image`; the document keeps `<img src="horizon-image://<id>">`, served by the
+  `_ImageSchemeHandler` installed on the editor profile. The scheme is registered in
+  `__main__` before `QApplication` exists, with the `LocalScheme` flag so the `file://` page
+  may load it.
+- **The page never navigates.** Ctrl+click on a link in the text, or a click on the link in
+  CKEditor's balloon, is sent to Python through `open_link`.
