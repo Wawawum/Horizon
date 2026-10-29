@@ -129,6 +129,37 @@ The renderer resolves titles and states **when the note is opened**, not on ever
 
 ---
 
+## Note Formats: Markdown And WYSIWYG
+
+`notes.format` (and `note_versions.format`) is `'markdown'` or `'html'` — `NoteFormat` in
+[../src/horizon/note.py](../src/horizon/note.py). The format is chosen when the note is created
+(`NoteFormatDialog`, shown by every "New Note" entry point; cancelling creates nothing) and
+changes in one direction only.
+
+| | Markdown | WYSIWYG (`html`) |
+|---|---|---|
+| Editor | `WebMarkdownEditor` (CodeMirror) + preview + formatting column | `WebHtmlEditor` (CKEditor 5), single pane |
+| Présentation / `⋯` menu | yes | no |
+| `{#tag}` | tags | tags (still literal text in the HTML) |
+| `{task: …}` / `[[link]]` | synced / rendered | plain `horizon://task/N` / `horizon://note/N` links, Ctrl+click; no task sync |
+| Images | `![](horizon-image://N)` | `<img src="horizon-image://N">` |
+| Search index | body | body stripped of tags (`html_to_text`) |
+
+`NoteDetailWidget` holds both editors in a `QStackedWidget` and `load_note` picks the page; the
+sticky and windowed modes follow, with CKEditor's toolbar hidden in sticky mode.
+
+**Conversion** (`⋯ → Convert to WYSIWYG`, after a confirmation) is irreversible: a full save
+first (task blocks become ids), a version of the last markdown state, then
+`markdown_to_storage_html` ([../src/horizon/widgets/markdown.py](../src/horizon/widgets/markdown.py))
+and `NoteRepository.convert_to_html`. `NoteRepository.update()` never writes `format`, so a
+stale `Note` cannot turn an HTML note back into markdown. In the history of a converted note,
+markdown versions are converted on the fly for display.
+
+The REST API and MCP return the body as stored, with its `format`; `PUT` refuses
+`html → markdown` and needs the HTML body for `markdown → html`.
+
+---
+
 ## Note Windows And Sticky Notes
 
 [../src/horizon/note_window.py](../src/horizon/note_window.py) hosts a `NoteDetailWidget` in a
