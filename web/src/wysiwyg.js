@@ -14,7 +14,13 @@ import {
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
 
-const PUSH_DEBOUNCE_MS = 120;
+// Unlike CodeMirror's doc.toString(), CKEditor's getData() serialises the whole model to
+// HTML on the main thread: ~5 ms on a short note, ~100 ms on a long one. Pushed after every
+// keystroke (people type slower than a 120 ms debounce), it froze rendering and made the
+// last typed letter vanish and come back. So the mirror is only refreshed on a real pause,
+// when the browser is idle; blur, Ctrl+S and Python's flush() still read it at once.
+const PUSH_IDLE_MS = 1500;
+const PUSH_IDLE_TIMEOUT_MS = 1000;
 const DEFAULT_FONT_SIZE = 13;
 const MIN_FONT_SIZE = 8;
 const MAX_FONT_SIZE = 32;
@@ -23,23 +29,36 @@ let editor = null;
 let bridge = null;
 let generation = 0;
 let pushTimer = null;
+let pushIdle = null;
 let dirtySinceLastPush = false;
 let fromPython = false;
 let fontSize = DEFAULT_FONT_SIZE;
 
-function pushNow() {
+function cancelScheduledPush() {
   if (pushTimer !== null) {
     clearTimeout(pushTimer);
     pushTimer = null;
   }
-  if (!bridge || !editor) return;
+  if (pushIdle !== null) {
+    cancelIdleCallback(pushIdle);
+    pushIdle = null;
+  }
+}
+
+function pushNow() {
+  cancelScheduledPush();
+  // Nothing new since the last push: skip the serialisation (blur, Ctrl+S on a clean doc).
+  if (!bridge || !editor || !dirtySinceLastPush) return;
   bridge.push_text(editor.getData(), generation);
   dirtySinceLastPush = false;
 }
 
 function schedulePush() {
-  if (pushTimer !== null) clearTimeout(pushTimer);
-  pushTimer = setTimeout(pushNow, PUSH_DEBOUNCE_MS);
+  cancelScheduledPush();
+  pushTimer = setTimeout(() => {
+    pushTimer = null;
+    pushIdle = requestIdleCallback(pushNow, { timeout: PUSH_IDLE_TIMEOUT_MS });
+  }, PUSH_IDLE_MS);
 }
 
 function onDataChanged() {
@@ -283,10 +302,7 @@ function installApi() {
   window.HorizonEditor = {
     setText(text, gen, normalize) {
       generation = gen;
-      if (pushTimer !== null) {
-        clearTimeout(pushTimer);
-        pushTimer = null;
-      }
+      cancelScheduledPush();
       dirtySinceLastPush = false;
       fromPython = true;
       try {
@@ -305,6 +321,10 @@ function installApi() {
       }
     },
     readDoc() {
+      // Python's flush() takes this as the mirror: the pending idle push would only
+      // serialise the same document a second time.
+      cancelScheduledPush();
+      dirtySinceLastPush = false;
       return editor.getData();
     },
     setReadOnly(ro) {

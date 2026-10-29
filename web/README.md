@@ -67,6 +67,10 @@ WYSIWYG specifics:
 - **CKEditor starts asynchronously.** `window.HorizonEditor` only exists once it has; the page
   then pulls `get_initial_state()` a second time so that a note loaded meanwhile is not lost.
   `call_js()` is guarded and lands nowhere before that — the bridge carries the state.
+- **The mirror is pushed on a pause, not per keystroke.** CKEditor's `getData()` serialises
+  the whole document on the main thread (~100 ms on a long note); pushing it after every
+  keystroke froze typing. The page pushes after 1.5 s of inactivity, in an idle callback;
+  blur, Ctrl+S and `flush()` (`readDoc`) still read the document at once.
 - **`setText(html, gen, normalize)`.** With `normalize`, the page pushes CKEditor's own
   serialisation straight back. Used only after a markdown → HTML conversion, whose stored HTML
   comes from `QTextDocument`; on an ordinary load it would look like an edit.
