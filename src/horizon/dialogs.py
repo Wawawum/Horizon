@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
@@ -33,7 +34,8 @@ from PySide6.QtWidgets import (
 )
 
 from horizon import theme as _theme
-from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskState
+from horizon.project import ProjectRepository
+from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 from horizon.titlebar import TitleBar
 
 _PLUS_ICON: QIcon | None = None
@@ -334,8 +336,55 @@ class NewTaskDialog(QDialog):
         return self._bucket_combo.currentData()
 
 
+class SelectProjectDialog(QDialog):
+    """Dialog frameless de choix d'un projet (liste déroulante)."""
+
+    def __init__(self, title: str, projects, current_id: int | None = None, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle(title)
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(360)
+
+        self._project_combo = QComboBox()
+        for project in projects:
+            self._project_combo.addItem(project.name, userData=project.id)
+        current_idx = self._project_combo.findData(current_id)
+        if current_idx >= 0:
+            self._project_combo.setCurrentIndex(current_idx)
+
+        btn_box = QDialogButtonBox(
+            QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel
+        )
+        btn_box.accepted.connect(self.accept)
+        btn_box.rejected.connect(self.reject)
+        btn_box.button(QDialogButtonBox.StandardButton.Ok).setEnabled(self._project_combo.count() > 0)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addWidget(QLabel("Project"))
+        content_layout.addWidget(self._project_combo)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle=title, show_min_max=False))
+        layout.addWidget(content)
+
+    def project_id(self) -> int | None:
+        return self._project_combo.currentData()
+
+    @staticmethod
+    def ask(title: str, projects, current_id: int | None = None, parent=None) -> int | None:
+        dlg = SelectProjectDialog(title, projects, current_id, parent)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg.project_id()
+        return None
+
+
 class TaskDetailDialog(QDialog):
-    def __init__(self, task, subtask_repo: SubtaskRepository, parent=None) -> None:
+    def __init__(self, task, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("Task Details")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
@@ -343,6 +392,25 @@ class TaskDetailDialog(QDialog):
 
         self._task_id: int = task.id
         self._subtask_repo = subtask_repo
+        self._project_repo = project_repo
+        self._project_id: int = task.project_id
+        self._archived: bool = task.archived
+        self._deleted = False
+        self._duplicate_project_id: int | None = None
+
+        # --- Project + advanced actions menu ---
+        self._project_label = QLabel()
+        self._update_project_label()
+
+        more_btn = QPushButton("⋯")
+        more_btn.setFixedWidth(32)
+        more_btn.setToolTip("More actions")
+        more_btn.clicked.connect(lambda: self._show_actions_menu(more_btn))
+
+        project_row = QHBoxLayout()
+        project_row.addWidget(self._project_label)
+        project_row.addStretch()
+        project_row.addWidget(more_btn)
 
         self._title_edit = QLineEdit(task.title)
         self._title_edit.setMaxLength(255)
@@ -396,16 +464,6 @@ class TaskDetailDialog(QDialog):
         self._new_subtask_edit.setVisible(False)
         self._new_subtask_edit.installEventFilter(self)
 
-        self._archive_cb = QCheckBox("Archive")
-        self._archive_cb.setChecked(task.archived)
-        self._archive_cb.stateChanged.connect(self._on_archive_changed)
-
-        self._delete_btn = QPushButton("Delete")
-        self._delete_btn.setStyleSheet(f"color: {_theme.current().delete_btn_text}; background-color: {_theme.current().delete_btn_bg};")
-        self._delete_btn.setVisible(task.archived)
-        self._delete_btn.clicked.connect(self._on_delete_clicked)
-        self._deleted = False
-
         btn_box = QDialogButtonBox(
             QDialogButtonBox.StandardButton.Ok
             | QDialogButtonBox.StandardButton.Cancel
@@ -416,6 +474,7 @@ class TaskDetailDialog(QDialog):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(12, 8, 12, 12)
+        content_layout.addLayout(project_row)
         content_layout.addWidget(QLabel("Title"))
         content_layout.addWidget(self._title_edit)
         content_layout.addWidget(QLabel("Description"))
@@ -429,11 +488,6 @@ class TaskDetailDialog(QDialog):
         content_layout.addLayout(subtasks_header)
         content_layout.addWidget(self._subtask_list)
         content_layout.addWidget(self._new_subtask_edit)
-        archive_row = QHBoxLayout()
-        archive_row.addWidget(self._archive_cb)
-        archive_row.addWidget(self._delete_btn)
-        archive_row.addStretch()
-        content_layout.addLayout(archive_row)
         content_layout.addWidget(btn_box)
 
         layout = QVBoxLayout(self)
@@ -651,14 +705,91 @@ class TaskDetailDialog(QDialog):
     def bucket(self) -> TaskBucket:
         return self._bucket_combo.currentData()
 
+    def project_id(self) -> int:
+        return self._project_id
+
     def archived(self) -> bool:
-        return self._archive_cb.isChecked()
+        return self._archived
 
     def deleted(self) -> bool:
         return self._deleted
 
-    def _on_archive_changed(self) -> None:
-        self._delete_btn.setVisible(self._archive_cb.isChecked())
+    def duplicate_project_id(self) -> int | None:
+        return self._duplicate_project_id
+
+    @staticmethod
+    def edit(task, task_repo: TaskRepository, subtask_repo: SubtaskRepository, project_repo: ProjectRepository, parent=None) -> bool:
+        """Open the dialog on `task` and persist its outcome. Returns True if anything was saved."""
+        dialog = TaskDetailDialog(task, subtask_repo, project_repo, parent)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
+            return False
+        if dialog.deleted():
+            # note_tasks rows for this task go with it, through the FK cascade
+            task_repo.delete(task.id)
+            return True
+        task.project_id = dialog.project_id()
+        task.title = dialog.title()
+        task.description = dialog.description()
+        task.state = dialog.state()
+        task.priority = dialog.priority()
+        task.bucket = dialog.bucket()
+        task.archived = dialog.archived()
+        task_repo.update(task)
+        if dialog.duplicate_project_id() is not None:
+            task_repo.duplicate(task, dialog.duplicate_project_id())
+        return True
+
+    def _update_project_label(self) -> None:
+        project = self._project_repo.get(self._project_id)
+        self._project_label.setText(f"Project: {project.name if project else '—'}")
+
+    def _active_projects(self) -> list:
+        return self._project_repo.list_all(archived_only=False)
+
+    def _show_actions_menu(self, anchor: QPushButton) -> None:
+        menu = QMenu(self)
+        move_action = menu.addAction("Move to project…")
+        duplicate_action = menu.addAction("Duplicate…")
+        archive_action = menu.addAction("Unarchive task" if self._archived else "Archive task")
+        delete_action = None
+        if self._archived:
+            menu.addSeparator()
+            delete_action = menu.addAction("Delete task")
+        chosen = menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        if chosen is None:
+            return
+        if chosen is move_action:
+            self._on_move_clicked()
+        elif chosen is duplicate_action:
+            self._on_duplicate_clicked()
+        elif chosen is archive_action:
+            self._archived = not self._archived
+            self._on_accepted()
+            if self.result() != QDialog.DialogCode.Accepted:
+                self._archived = not self._archived
+        elif chosen is delete_action:
+            self._on_delete_clicked()
+
+    def _on_move_clicked(self) -> None:
+        projects = [p for p in self._active_projects() if p.id != self._project_id]
+        if not projects:
+            AlertDialog.warn("Move Task", "There is no other active project to move this task to.", self)
+            return
+        project_id = SelectProjectDialog.ask("Move Task", projects, parent=self)
+        if project_id is not None:
+            self._project_id = project_id
+            self._update_project_label()
+
+    def _on_duplicate_clicked(self) -> None:
+        project_id = SelectProjectDialog.ask(
+            "Duplicate Task", self._active_projects(), current_id=self._project_id, parent=self
+        )
+        if project_id is not None:
+            self._duplicate_project_id = project_id
+            self._on_accepted()
+            # Validation failed (blank title): forget the request so a later OK does not duplicate
+            if self.result() != QDialog.DialogCode.Accepted:
+                self._duplicate_project_id = None
 
     def _on_delete_clicked(self) -> None:
         if ConfirmDialog.ask(

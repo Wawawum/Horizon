@@ -620,20 +620,8 @@ class NoteDetailWidget(QWidget):
         task = self._task_repo.get(task_id)
         if task is None:
             return
-        dialog = TaskDetailDialog(task, self._subtask_repo, parent=self)
-        if dialog.exec() != QDialog.DialogCode.Accepted:
+        if not TaskDetailDialog.edit(task, self._task_repo, self._subtask_repo, self._project_repo, parent=self):
             return
-        if dialog.deleted():
-            # note_tasks rows for this task go with it, through the FK cascade
-            self._task_repo.delete(task.id)
-        else:
-            task.title = dialog.title()
-            task.description = dialog.description()
-            task.state = dialog.state()
-            task.priority = dialog.priority()
-            task.bucket = dialog.bucket()
-            task.archived = dialog.archived()
-            self._task_repo.update(task)
         self._refresh_task_cache(self._editor.text())
         self._do_render()
 

@@ -104,9 +104,9 @@ class TaskRepository:
 
     def update(self, task: Task) -> None:
         self._db.conn.execute(
-            "UPDATE tasks SET title=?, description=?, state=?, priority=?, bucket=?, archived=?"
+            "UPDATE tasks SET project_id=?, title=?, description=?, state=?, priority=?, bucket=?, archived=?"
             " WHERE id=?",
-            (task.title, task.description, task.state.value, task.priority.value, task.bucket.value, int(task.archived), task.id),
+            (task.project_id, task.title, task.description, task.state.value, task.priority.value, task.bucket.value, int(task.archived), task.id),
         )
         self._db.conn.execute(
             "DELETE FROM search_index WHERE type = 'task' AND entity_id = ?", (task.id,)
@@ -118,6 +118,37 @@ class TaskRepository:
         from horizon.tag import TagRepository
         TagRepository(self._db).set_for_task(task.id, _extract_tag_names(task.description))
         self._db.conn.commit()
+
+    def duplicate(self, task: Task, project_id: int) -> Task:
+        """Copy `task` (with its sub-tasks) into `project_id`, at the end of the order.
+
+        The copy takes the field values of `task` as given, so unsaved edits are kept.
+        It is never archived, even when the original is.
+        """
+        title = f"{task.title} (copy)"
+        row = self._db.conn.execute(
+            'SELECT COALESCE(MAX("order"), 0) + 1000 AS next_order FROM tasks'
+        ).fetchone()
+        next_order: int = row["next_order"]
+        cur = self._db.conn.execute(
+            'INSERT INTO tasks (project_id, title, description, state, priority, bucket, "order", archived)'
+            " VALUES (?, ?, ?, ?, ?, ?, ?, 0)",
+            (project_id, title, task.description, task.state.value, task.priority.value, task.bucket.value, next_order),
+        )
+        copy_id = cur.lastrowid
+        self._db.conn.execute(
+            "INSERT INTO search_index(type, entity_id, title, body) VALUES ('task', ?, ?, ?)",
+            (copy_id, title, task.description),
+        )
+        from horizon.tag import TagRepository
+        TagRepository(self._db).set_for_task(copy_id, _extract_tag_names(task.description))
+        self._db.conn.execute(
+            'INSERT INTO subtasks (task_id, title, completed, "order")'
+            ' SELECT ?, title, completed, "order" FROM subtasks WHERE task_id = ?',
+            (copy_id, task.id),
+        )
+        self._db.conn.commit()
+        return Task(copy_id, project_id, title, task.description, task.state, task.priority, task.bucket, next_order, False)
 
     def delete(self, task_id: int) -> None:
         self._db.conn.execute("DELETE FROM tasks WHERE id = ?", (task_id,))
