@@ -7,10 +7,11 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidg
 
 from horizon import theme as _theme
 from horizon.database import Database
+from horizon.dialogs import NoteFormatDialog
 from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
-from horizon.note import NoteRepository, NoteVersionRepository
+from horizon.note import NoteFormat, NoteRepository, NoteVersionRepository
 from horizon.note_task import NoteTaskRepository
 from horizon.preferences import Preferences
 from horizon.project import ProjectRepository
@@ -30,6 +31,7 @@ from horizon.widgets.deliverables import (
     DeliverableTemplatesListWidget,
     DeliverableTemplateDetailWidget,
 )
+from horizon.widgets.markdown import markdown_to_storage_html
 from horizon.widgets.media import MediaWidget
 from horizon.archimate import ArchimateModelRepository
 from horizon.widgets.archimate import ArchimateWidget
@@ -313,8 +315,13 @@ class MainWindow(QMainWindow):
     def _on_create_note_from_meeting(self, meeting: CalendarMeeting) -> None:
         subject = meeting.subject[:220]
         title = f"{meeting.start.strftime('%Y-%m-%d')} {subject}"
+        fmt = NoteFormatDialog.ask(self)
+        if fmt is None:
+            return
         body = _build_meeting_note_body(meeting)
-        note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start)
+        if fmt is NoteFormat.Html:
+            body = markdown_to_storage_html(body)
+        note = self._note_repo.create(project_id=None, title=title, body=body, dt=meeting.start, format=fmt)
         self._load_note_into_detail(note)
         self._right_stack.setCurrentIndex(3)
 

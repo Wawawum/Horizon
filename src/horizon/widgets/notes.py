@@ -12,10 +12,12 @@ from PySide6.QtWidgets import (
     QLineEdit,
     QListWidget,
     QListWidgetItem,
+    QMenu,
     QPlainTextEdit,
     QPushButton,
     QSizePolicy,
     QSplitter,
+    QStackedWidget,
     QTableWidget,
     QTableWidgetItem,
     QVBoxLayout,
@@ -25,10 +27,10 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
-from horizon.dialogs import ConfirmDialog, TaskDetailDialog
+from horizon.dialogs import ConfirmDialog, NoteFormatDialog, TaskDetailDialog
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
-from horizon.note import Note, NoteRepository, NoteVersion, NoteVersionRepository
+from horizon.note import Note, NoteFormat, NoteRepository, NoteVersion, NoteVersionRepository
 from horizon.note_task import NoteTaskRepository, build_task_render_map, sync_note_tasks
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
@@ -38,9 +40,10 @@ from horizon.widgets.markdown import (
     _RESOURCES_BASE_URL,
     _make_preview_html,
     _markdown_to_html,
+    markdown_to_storage_html,
     MarkdownBridge,
 )
-from horizon.widgets.webeditor import WebMarkdownEditor
+from horizon.widgets.webeditor import WebHtmlEditor, WebMarkdownEditor
 
 
 class NotesListWidget(QWidget):
@@ -114,7 +117,10 @@ class NotesListWidget(QWidget):
         projects = self._project_repo.list_all()
         if not projects:
             return
-        note = self._note_repo.create(project_id=projects[0].id, title="New Note")
+        fmt = NoteFormatDialog.ask(self)
+        if fmt is None:
+            return
+        note = self._note_repo.create(project_id=projects[0].id, title="New Note", format=fmt)
         self.load()
         self.note_edit_requested.emit(note.id)
 
@@ -250,6 +256,13 @@ class NoteDetailWidget(QWidget):
         self._presentation_btn.setToolTip("Cacher l'éditeur pour la présentation")
         self._presentation_btn.clicked.connect(self._on_toggle_presentation)
 
+        # Options avancées, même visuel que le menu ⋯ du détail d'une tâche. Seule une note
+        # markdown en a aujourd'hui (la conversion), donc le bouton est masqué en WYSIWYG.
+        self._more_btn = QPushButton("⋯")
+        self._more_btn.setFixedWidth(32)
+        self._more_btn.setToolTip("More actions")
+        self._more_btn.clicked.connect(lambda: self._show_actions_menu(self._more_btn))
+
         # Les deux rangées de chrome vivent dans un conteneur plutôt que dans une layout
         # nue, pour que le mode pense-bête les masque d'un seul setVisible().
         self._header_widget = QWidget(self)
@@ -275,21 +288,37 @@ class NoteDetailWidget(QWidget):
         project_row.addWidget(self._history_btn)
         project_row.addWidget(self._view_source_btn)
         project_row.addWidget(self._presentation_btn)
+        project_row.addWidget(self._more_btn)
 
         sep = QFrame()
         sep.setFrameShape(QFrame.Shape.HLine)
         sep.setFrameShadow(QFrame.Shadow.Sunken)
 
-        self._editor = WebMarkdownEditor(
+        # Un éditeur par format, empilés : le widget est réutilisé d'une note à l'autre et
+        # load_note choisit la page. Chacun ne crée son QWebEngineView qu'au premier
+        # affichage, donc l'éditeur d'un format jamais ouvert ne coûte rien.
+        self._md_editor = WebMarkdownEditor(
             image_repo, self,
             show_toolbar=not sticky,
             placeholder="Notes de réunion…" if sticky else "Write markdown here…",
             prefs=prefs,
         )
-        self._editor.editing_finished.connect(self._on_editing_finished)
-        self._editor.shortcut_pressed.connect(self._on_editor_shortcut)
-        self._editor.image_upload.connect(self._on_image_upload)
-        self._editor.editor_ready.connect(self.editor_ready)
+        self._html_editor = WebHtmlEditor(
+            image_repo, self,
+            show_toolbar=not sticky,
+            placeholder="Notes de réunion…" if sticky else "Écrivez ici…",
+            prefs=prefs,
+        )
+        for editor in (self._md_editor, self._html_editor):
+            editor.editing_finished.connect(self._on_editing_finished)
+            editor.shortcut_pressed.connect(self._on_editor_shortcut)
+            editor.image_upload.connect(self._on_image_upload)
+            editor.editor_ready.connect(self.editor_ready)
+            editor.text_changed.connect(self._on_editor_text_changed)
+        self._html_editor.link_clicked.connect(self._on_link_clicked)
+        self._editor_stack = QStackedWidget(self)
+        self._editor_stack.addWidget(self._md_editor)
+        self._editor_stack.addWidget(self._html_editor)
 
         self._bridge = MarkdownBridge(self)
         self._bridge.image_clicked.connect(self._on_image_clicked)
@@ -308,8 +337,6 @@ class NoteDetailWidget(QWidget):
             self._preview.page().setWebChannel(self._channel)
             self._preview.setHtml(_make_preview_html(), _RESOURCES_BASE_URL)
 
-        self._editor.text_changed.connect(self._on_editor_text_changed)
-
         self._history_panel = QWidget()
         _hp_layout = QVBoxLayout(self._history_panel)
         _hp_layout.setContentsMargins(8, 0, 0, 0)
@@ -322,7 +349,7 @@ class NoteDetailWidget(QWidget):
         self._history_panel.setVisible(False)
 
         self._body_splitter = QSplitter(Qt.Orientation.Horizontal)
-        self._body_splitter.addWidget(self._editor)
+        self._body_splitter.addWidget(self._editor_stack)
         if self._preview is not None:
             self._body_splitter.addWidget(self._preview)
         self._body_splitter.addWidget(self._history_panel)
@@ -359,11 +386,45 @@ class NoteDetailWidget(QWidget):
             # Les tailles sauvegardées valent pour le splitter à trois volets.
             self._restore_splitter_sizes()
 
+    @property
+    def _editor(self) -> WebMarkdownEditor | WebHtmlEditor:
+        """L'éditeur du format de la note courante."""
+        if self._is_html():
+            return self._html_editor
+        return self._md_editor
+
+    def _is_html(self) -> bool:
+        return self._current_note is not None and self._current_note.format is NoteFormat.Html
+
+    def _apply_format(self) -> None:
+        """Bascule le panneau sur l'éditeur du format de la note courante.
+
+        En WYSIWYG il n'y a ni aperçu, ni Présentation, ni menu ⋯ (sa seule action est la
+        conversion) ; la barre de formatage markdown disparaît avec l'éditeur markdown.
+        """
+        html = self._is_html()
+        was_html = self._editor_stack.currentWidget() is self._html_editor
+        self._editor_stack.setCurrentWidget(self._html_editor if html else self._md_editor)
+        self._presentation_btn.setVisible(not html)
+        self._more_btn.setVisible(not html)
+        if html and self._presentation_btn.isChecked():
+            self._presentation_btn.setChecked(False)
+            self._editor_stack.setVisible(True)
+        if self._preview is not None:
+            self._preview.setVisible(not html)
+            if was_html and not html and not self._restore_splitter_sizes():
+                # Masqué, l'aperçu était sorti des tailles du splitter ; sans tailles
+                # sauvegardées, éditeur et aperçu se partagent la largeur.
+                sizes = self._body_splitter.sizes()
+                half = max(sum(sizes[:2]) // 2, 1)
+                self._body_splitter.setSizes([half, half, *sizes[2:]])
+
     def _on_view_source(self) -> None:
-        """Open a dialog showing the raw HTML sent to the preview."""
-        html = self._bridge._current_html
+        """Open a dialog showing the raw HTML sent to the preview — or, for a WYSIWYG
+        note, the HTML stored as its body."""
+        html = self._editor.text() if self._is_html() else self._bridge._current_html
         dlg = QDialog(self)
-        dlg.setWindowTitle("Preview HTML source")
+        dlg.setWindowTitle("Note HTML source" if self._is_html() else "Preview HTML source")
         dlg.resize(800, 600)
         text = QPlainTextEdit(dlg)
         text.setReadOnly(True)
@@ -384,7 +445,8 @@ class NoteDetailWidget(QWidget):
             message = ""
         self._readonly_banner.setText(message)
         self._readonly_banner.setVisible(bool(message))
-        self._editor.set_read_only(bool(message))
+        for editor in (self._md_editor, self._html_editor):
+            editor.set_read_only(bool(message))
         # Réservé au verrou : consulter une version laisse ces contrôles actifs, comme avant.
         for widget in (self._title_edit, self._project_combo, self._folder_combo,
                        self._archive_cb, self._delete_btn, self._history_btn):
@@ -417,6 +479,7 @@ class NoteDetailWidget(QWidget):
         self._body_at_open = note.body
         self._viewing_version = None
         self._back_btn.setText("← Back")
+        self._apply_format()
         self._apply_readonly()
         if self._history_btn.isChecked():
             self._history_btn.setChecked(False)
@@ -519,9 +582,11 @@ class NoteDetailWidget(QWidget):
         rewritten = False
 
         # The body may be unchanged and still hold blocks an autosave persisted
-        # verbatim, so this cannot sit behind the "changed" check.
+        # verbatim, so this cannot sit behind the "changed" check. A WYSIWYG note has
+        # no {task: …} blocks to sync: its task references are plain links.
         if (
             sync_tasks
+            and not self._is_html()
             and self._task_repo is not None
             and self._note_task_repo is not None
             and self._current_note.project_id is not None
@@ -564,13 +629,13 @@ class NoteDetailWidget(QWidget):
             self._task_info = build_task_render_map(body, self._task_repo)
 
     def _on_editor_text_changed(self) -> None:
-        if not self._sticky:
+        if not self._sticky and not self._is_html():
             self._render_timer.start()
         if self._current_note is not None and self._viewing_version is None and not self._locked:
             self._autosave_timer.start()
 
     def _do_render(self) -> None:
-        if self._sticky:
+        if self._sticky or self._is_html():
             return  # pas d'aperçu à alimenter, et _markdown_to_html est le gros du coût
         # No flush(): this sits behind a 300 ms debounce, so a ~120 ms stale mirror
         # is invisible and a nested event loop here would be gratuitous.
@@ -626,14 +691,18 @@ class NoteDetailWidget(QWidget):
         self._do_render()
 
     def _on_splitter_moved(self, _pos: int, _index: int) -> None:
-        if self._prefs is not None:
+        # En WYSIWYG l'aperçu masqué vaut 0 : ces tailles-là ne doivent pas écraser
+        # celles du splitter à trois volets.
+        if self._prefs is not None and not self._is_html():
             self._prefs.note_splitter_sizes = self._body_splitter.sizes()
 
-    def _restore_splitter_sizes(self) -> None:
+    def _restore_splitter_sizes(self) -> bool:
         if self._prefs is not None:
             saved = self._prefs.note_splitter_sizes
             if saved:
                 self._body_splitter.setSizes(saved)
+                return True
+        return False
 
     def _on_open_in_window(self) -> None:
         if self._current_note is not None:
@@ -704,10 +773,7 @@ class NoteDetailWidget(QWidget):
             self._viewing_version = None
             self._back_btn.setText("← Back")
             self._apply_readonly()
-            self._editor.set_text(self._body_raw)
-            self._refresh_task_cache(self._body_raw)
-            self._bridge.push_html(_markdown_to_html(
-                self._body_raw, self._image_repo, self._note_repo, task_info=self._task_info))
+            self._show_body(self._body_raw, self._current_note.format)
             self._history_list.blockSignals(True)
             if self._history_list.count() > 0:
                 self._history_list.setCurrentRow(0)
@@ -726,11 +792,19 @@ class NoteDetailWidget(QWidget):
 
     def _on_toggle_history(self, checked: bool) -> None:
         self._history_panel.setVisible(checked)
+        sizes = self._body_splitter.sizes()
+        if checked and sizes[-1] == 0:
+            # Sans taille connue (aperçu masqué en WYSIWYG, préférences vides), le
+            # splitter laisserait le panneau à 0 px : on le prend sur l'éditeur.
+            want = self._history_panel.sizeHint().width()
+            sizes[0] = max(sizes[0] - want, 100)
+            sizes[-1] = want
+            self._body_splitter.setSizes(sizes)
         if checked and self._current_note is not None:
             self._load_history()
 
     def _on_toggle_presentation(self, checked: bool) -> None:
-        self._editor.setVisible(not checked)
+        self._editor_stack.setVisible(not checked)
 
     def _load_history(self) -> None:
         if self._version_repo is None or self._current_note is None:
@@ -756,15 +830,68 @@ class NoteDetailWidget(QWidget):
             self._viewing_version = None
             self._back_btn.setText("← Back")
             self._apply_readonly()
-            self._editor.set_text(self._body_raw)
-            self._refresh_task_cache(self._body_raw)
-            self._bridge.push_html(_markdown_to_html(
-                self._body_raw, self._image_repo, self._note_repo, task_info=self._task_info))
+            self._show_body(self._body_raw, self._current_note.format)
         else:
             self._viewing_version = version
             self._back_btn.setText("← Return to current")
             self._apply_readonly()
-            self._editor.set_text(version.body)
-            self._refresh_task_cache(version.body)
+            self._show_body(version.body, version.format)
+
+    def _show_body(self, body: str, fmt: NoteFormat) -> None:
+        """Affiche un corps — courant ou historique — dans l'éditeur de la note.
+
+        Une note WYSIWYG garde dans son historique les versions markdown d'avant la
+        conversion : elles sont converties à la volée pour s'afficher dans CKEditor.
+        """
+        self._refresh_task_cache(body)
+        if not self._is_html():
+            self._editor.set_text(body)
             self._bridge.push_html(_markdown_to_html(
-                version.body, self._image_repo, self._note_repo, task_info=self._task_info))
+                body, self._image_repo, self._note_repo, task_info=self._task_info))
+            return
+        if fmt is NoteFormat.Markdown:
+            body = markdown_to_storage_html(
+                body, self._note_title_to_id, self._note_id_exists, self._task_info)
+        self._editor.set_text(body)
+
+    def _show_actions_menu(self, anchor: QPushButton) -> None:
+        menu = QMenu(self)
+        convert_action = menu.addAction("Convert to WYSIWYG")
+        convert_action.setEnabled(not self._locked and self._viewing_version is None)
+        chosen = menu.exec(anchor.mapToGlobal(anchor.rect().bottomLeft()))
+        if chosen is convert_action:
+            self._on_convert_to_html()
+
+    def _on_convert_to_html(self) -> None:
+        if (self._current_note is None or self._is_html()
+                or self._locked or self._viewing_version is not None):
+            return
+        if not ConfirmDialog.ask(
+            "Convert to WYSIWYG",
+            "Le contenu Markdown de cette note va être converti en HTML et la note passera "
+            "dans l'éditeur WYSIWYG.\n\nCette conversion est irréversible : la note ne "
+            "pourra plus être éditée en Markdown. Continuer ?",
+            self,
+        ):
+            return
+        # Sauvegarde complète d'abord, synchro des tâches comprise : les blocs {task: …}
+        # encore en texte deviennent des ids, que la conversion sait changer en liens.
+        self.flush_and_save()
+        note = self._current_note
+        if self._version_repo is not None:
+            # L'historique garde le dernier état markdown, seule trace de l'original —
+            # y compris pour une note qui n'avait encore aucune version.
+            existing = self._version_repo.list_for_note(note.id)
+            if not existing or existing[0].body != self._body_raw:
+                self._version_repo.create_version(note)
+        self._refresh_note_cache()
+        self._refresh_task_cache(self._body_raw)
+        html = markdown_to_storage_html(
+            self._body_raw, self._note_title_to_id, self._note_id_exists, self._task_info)
+        self._note_repo.convert_to_html(note, html)
+        if self._version_repo is not None:
+            self._version_repo.create_version(note)
+        self.load_note(note, self._project_repo.list_all())
+        # Le HTML de QTextDocument est chargé tel quel ; CKEditor renvoie sa propre
+        # sérialisation, que l'autosave (ou la fermeture) enregistre à la place.
+        self._html_editor.set_text(note.body, normalize=True)
