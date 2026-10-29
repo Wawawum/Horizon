@@ -676,6 +676,11 @@ class NoteDetailWidget(QWidget):
                 return
             self._open_task_dialog(task_id)
             return
+        if not parsed.scheme():
+            # « www.exemple.com » saisi sans protocole : Windows ne sait pas l'ouvrir tel quel.
+            parsed = QUrl.fromUserInput(url)
+        if not parsed.isValid() or url.startswith("#"):
+            return
         from PySide6.QtGui import QDesktopServices
         QDesktopServices.openUrl(parsed)
 

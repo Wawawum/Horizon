@@ -227,7 +227,12 @@ function createEditor(state) {
         { model: "heading4", view: "h4", title: "Titre 4", class: "ck-heading_heading4" },
       ],
     },
-    link: { allowedProtocols: ["horizon"] },
+    // allowedProtocols replaces CKEditor's list rather than extending it: the usual web
+    // protocols must be restated, or their links are rendered with href="#" in the editor.
+    link: {
+      allowedProtocols: ["https", "http", "ftp", "ftps", "mailto", "tel", "horizon"],
+      defaultProtocol: "https://",
+    },
     table: { contentToolbar: ["tableColumn", "tableRow", "mergeTableCells"] },
     image: { toolbar: ["imageTextAlternative", "toggleImageCaption"] },
     codeBlock: {
