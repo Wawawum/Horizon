@@ -52,7 +52,7 @@ async def list_tools() -> list[types.Tool]:
         ),
         types.Tool(
             name="get_note",
-            description="Get the full content of a Horizon note by its ID.",
+            description="Get the full content of a Horizon note by its ID. The body is returned as stored: Markdown for format 'markdown', HTML for format 'html' (WYSIWYG notes).",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -68,7 +68,8 @@ async def list_tools() -> list[types.Tool]:
                 "type": "object",
                 "properties": {
                     "title":      {"type": "string",  "description": "Note title (required)"},
-                    "body":       {"type": "string",  "description": "Note content (Markdown)"},
+                    "body":       {"type": "string",  "description": "Note content: Markdown, or HTML when format is 'html'"},
+                    "format":     {"type": "string",  "enum": ["markdown", "html"], "description": "Editor of the note: 'markdown' (default) or 'html' (WYSIWYG)"},
                     "project_id": {"type": "integer", "description": "Optional project ID"},
                     "folder_id":  {"type": "integer", "description": "Optional folder ID"},
                     "dt":         {"type": "string",  "description": "ISO-8601 datetime (defaults to now)"},
@@ -84,7 +85,8 @@ async def list_tools() -> list[types.Tool]:
                 "properties": {
                     "note_id":    {"type": "integer", "description": "ID of the note to update"},
                     "title":      {"type": "string",  "description": "New title"},
-                    "body":       {"type": "string",  "description": "New content (Markdown)"},
+                    "body":       {"type": "string",  "description": "New content, in the note's format (Markdown, or HTML for an 'html' note)"},
+                    "format":     {"type": "string",  "enum": ["markdown", "html"], "description": "Set to 'html' to convert a Markdown note to WYSIWYG (body must then be the HTML). An 'html' note cannot go back to Markdown."},
                     "project_id": {"type": "integer", "description": "New project ID (null to unset)"},
                     "folder_id":  {"type": "integer", "description": "New folder ID (null to unset)"},
                     "archived":   {"type": "boolean", "description": "Archive or unarchive the note"},
@@ -306,7 +308,10 @@ async def _tool_get_note(client: httpx.AsyncClient, arguments: dict) -> list[typ
     if resp.status_code != 200:
         return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
     note = data
-    text = f"# {note['title']}\n\n{note['body']}\n\n---\nid: {note['id']} | dt: {note['dt']} | project_id: {note['project_id']}"
+    text = (
+        f"# {note['title']}\n\n{note['body']}\n\n---\n"
+        f"id: {note['id']} | dt: {note['dt']} | project_id: {note['project_id']} | format: {note['format']}"
+    )
     return [types.TextContent(type="text", text=text)]
 
 
@@ -314,7 +319,7 @@ async def _tool_create_note(client: httpx.AsyncClient, arguments: dict) -> list[
     title = arguments.get("title", "").strip()
     if not title:
         return [types.TextContent(type="text", text="Error: title is required")]
-    payload = {k: v for k, v in arguments.items() if k in ("title", "body", "project_id", "folder_id", "dt")}
+    payload = {k: v for k, v in arguments.items() if k in ("title", "body", "format", "project_id", "folder_id", "dt")}
     resp = await client.post("/notes", json=payload)
     data = resp.json()
     if resp.status_code != 201:
@@ -333,7 +338,11 @@ async def _tool_update_note(client: httpx.AsyncClient, arguments: dict) -> list[
         data = get_resp.json()
         return [types.TextContent(type="text", text=f"Error: {data.get('error', 'unknown')}")]
     payload = get_resp.json()
-    for key in ("title", "body", "project_id", "folder_id", "archived", "dt"):
+    # The payload already carries the current body: without this check, asking for
+    # format 'html' alone would relabel the Markdown text as HTML.
+    if arguments.get("format") == "html" and payload.get("format") != "html" and "body" not in arguments:
+        return [types.TextContent(type="text", text="Error: converting a note to html requires the HTML body")]
+    for key in ("title", "body", "format", "project_id", "folder_id", "archived", "dt"):
         if key in arguments:
             payload[key] = arguments[key]
     put_resp = await client.put(f"/notes/{note_id}", json=payload)

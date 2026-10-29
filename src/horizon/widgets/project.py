@@ -53,7 +53,7 @@ from PySide6.QtWidgets import (
 from horizon import theme as _theme
 from horizon.deliverable import DeliverableRepository
 from horizon.deliverable_template import DeliverableTemplateRepository
-from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, TaskDetailDialog, style_project_chip
+from horizon.dialogs import AlertDialog, ConfirmDialog, NewFolderDialog, NewProjectDialog, NewTaskDialog, NoteFormatDialog, TaskDetailDialog, style_project_chip
 from horizon.document import URL_SCHEMES, DocumentRepository, extract_document_link
 from horizon.folder import Folder, FolderRepository
 from horizon.note import NoteRepository
@@ -2394,10 +2394,14 @@ class ProjectDetailWidget(QWidget):
     def _on_new_note(self) -> None:
         if self._current_project_id is None:
             return
+        fmt = NoteFormatDialog.ask(self)
+        if fmt is None:
+            return
         note = self._note_repo.create(
             project_id=self._current_project_id,
             title="New Note",
             folder_id=self._note_selected_folder_id,
+            format=fmt,
         )
         self._load_notes(self._current_project_id)
         self.note_edit_requested.emit(note.id)

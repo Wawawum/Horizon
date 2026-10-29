@@ -34,6 +34,7 @@ from PySide6.QtWidgets import (
 )
 
 from horizon import theme as _theme
+from horizon.note import NoteFormat
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskBucket, TaskPriority, TaskRepository, TaskState
 from horizon.titlebar import TitleBar
@@ -393,6 +394,67 @@ class SelectProjectDialog(QDialog):
         dlg = SelectProjectDialog(title, projects, current_id, parent)
         if dlg.exec() == QDialog.DialogCode.Accepted:
             return dlg.project_id()
+        return None
+
+
+class NoteFormatDialog(QDialog):
+    """Dialog frameless de choix de l'éditeur d'une nouvelle note (Markdown / WYSIWYG).
+
+    La note n'est créée qu'une fois le choix fait : annuler ne crée rien.
+    """
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("New Note")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.setMinimumWidth(420)
+        self._format: NoteFormat | None = None
+
+        prompt = QLabel("Quel éditeur utiliser pour cette note ?")
+        prompt.setWordWrap(True)
+
+        choices = QHBoxLayout()
+        choices.setSpacing(12)
+        for fmt, label, detail in (
+            (NoteFormat.Markdown, "Markdown", "Texte Markdown,\navec un panneau d'aperçu"),
+            (NoteFormat.Html, "WYSIWYG", "Éditeur visuel CKEditor,\nun seul panneau"),
+        ):
+            btn = QPushButton(f"{label}\n\n{detail}")
+            btn.setMinimumSize(180, 96)
+            btn.clicked.connect(lambda _checked=False, f=fmt: self._choose(f))
+            choices.addWidget(btn)
+
+        hint = QLabel("Une note Markdown pourra être convertie en WYSIWYG plus tard, pas l'inverse.")
+        hint.setWordWrap(True)
+        hint.setStyleSheet("color: gray; font-size: 11px;")
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel)
+        btn_box.rejected.connect(self.reject)
+
+        content = QWidget()
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 12, 16, 16)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(prompt)
+        content_layout.addLayout(choices)
+        content_layout.addWidget(hint)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="New Note", show_min_max=False))
+        layout.addWidget(content)
+
+    def _choose(self, fmt: "NoteFormat") -> None:
+        self._format = fmt
+        self.accept()
+
+    @staticmethod
+    def ask(parent=None) -> "NoteFormat | None":
+        dlg = NoteFormatDialog(parent)
+        if dlg.exec() == QDialog.DialogCode.Accepted:
+            return dlg._format
         return None
 
 

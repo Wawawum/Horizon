@@ -13,6 +13,7 @@ licences respectives s'appliquent à ces fichiers, et leur texte intégral se tr
 | `highlight.min.js`, `highlight-{csharp,dockerfile,powershell}.min.js`, `highlight-{dark,light}.min.css` | [highlight.js](https://github.com/highlightjs/highlight.js) | 11.9.0 | [BSD-3-Clause](licenses/highlightjs-BSD-3-Clause.txt) |
 | `mermaid.min.js` | [Mermaid](https://github.com/mermaid-js/mermaid) | 11.14.0 | [MIT](licenses/mermaid-MIT.txt) |
 | `horizon-editor.bundle.js` | [CodeMirror 6](https://codemirror.net/) et [Lezer](https://lezer.codemirror.net/) | voir ci-dessous | [MIT](licenses/codemirror-MIT.txt) |
+| `horizon-wysiwyg.bundle.js`, `horizon-wysiwyg.bundle.css` | [CKEditor 5](https://ckeditor.com/ckeditor-5/) | 49.0.0 | [GPL-2.0-or-later](licenses/ckeditor5-GPL-2.0.txt) |
 
 ## Détail du bundle de l'éditeur
 
@@ -29,6 +30,23 @@ MIT, aux versions figées par [`web/package-lock.json`](web/package-lock.json) :
 Le copyright CodeMirror et Lezer est détenu par Marijn Haverbeke et les autres
 contributeurs ; le texte MIT reproduit dans `licenses/codemirror-MIT.txt` couvre
 l'ensemble de ces paquets.
+
+## Éditeur WYSIWYG (CKEditor 5, GPL)
+
+`horizon-wysiwyg.bundle.js` et `horizon-wysiwyg.bundle.css` sont produits par esbuild à
+partir de [`web/src/wysiwyg.js`](web/src/wysiwyg.js) et du paquet `ckeditor5` (version figée
+par [`web/package-lock.json`](web/package-lock.json)). Ils servent aux notes WYSIWYG.
+
+CKEditor 5 est © CKSource Holding sp. z o.o., distribué sous double licence : GPL version 2
+ou ultérieure, ou licence commerciale. Horizon l'utilise **sous la GPL** (`licenseKey:
+'GPL'`) ; le texte de la licence est reproduit dans `licenses/ckeditor5-GPL-2.0.txt`.
+CKEditor 5 intègre lui-même quelques bibliothèques sous licences MIT et ISC, listées dans le
+`LICENSE.md` du paquet `ckeditor5`.
+
+**Conséquence** : le code source de Horizon reste sous licence MIT, compatible avec la GPL,
+mais un exécutable qui embarque ce bundle — l'application gelée publiée en Release — forme
+une œuvre combinée et se redistribue selon les termes de la GPL 2 ou ultérieure, sources
+correspondantes (ce dépôt) à l'appui.
 
 ## Thèmes de coloration syntaxique
 

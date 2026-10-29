@@ -1,21 +1,30 @@
-"""Markdown editor backed by CodeMirror 6 running inside a QWebEngineView.
+"""Note editors running inside a QWebEngineView.
 
-The document itself stays plain markdown text; only the editing surface is web-based.
-Python keeps a synchronous mirror of the document (see `WebMarkdownEditor.text`) so that
-callers can save on close or on navigation without restructuring their control flow.
+`WebMarkdownEditor` is CodeMirror 6 editing plain markdown text; `WebHtmlEditor` is
+CKEditor 5 editing HTML (WYSIWYG notes). Only the editing surface is web-based: Python
+keeps a synchronous mirror of the document (see `_WebEditorBase.text`) so that callers
+can save on close or on navigation without restructuring their control flow.
 
-The JavaScript half lives in `web/src/editor.js` and is bundled to
-`resources/horizon-editor.bundle.js`; see `web/README.md`.
+The JavaScript halves live in `web/src/editor.js` and `web/src/wysiwyg.js`, bundled to
+`resources/horizon-editor.bundle.js` and `resources/horizon-wysiwyg.bundle.{js,css}`;
+see `web/README.md`.
 """
 
 import base64
+import ipaddress
 import json
 import sys
 from pathlib import Path
 
-from PySide6.QtCore import QEventLoop, QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtCore import QBuffer, QByteArray, QEventLoop, QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineUrlRequestJob,
+    QWebEngineUrlScheme,
+    QWebEngineUrlSchemeHandler,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
@@ -25,6 +34,8 @@ from horizon.image import ImageRepository
 _RESOURCES_DIR      = Path(__file__).parent.parent / "resources"
 _RESOURCES_BASE_URL = QUrl((_RESOURCES_DIR / "").as_uri())
 _EDITOR_BUNDLE_URL  = (_RESOURCES_DIR / "horizon-editor.bundle.js").as_uri()
+_WYSIWYG_BUNDLE_URL = (_RESOURCES_DIR / "horizon-wysiwyg.bundle.js").as_uri()
+_WYSIWYG_CSS_URL    = (_RESOURCES_DIR / "horizon-wysiwyg.bundle.css").as_uri()
 _JETBRAINS_MONO_URL = (_RESOURCES_DIR / "JetBrainsMono-Regular.ttf").as_uri()
 
 DEFAULT_FONT_SIZE = 13
@@ -32,7 +43,81 @@ DEFAULT_FONT_SIZE = 13
 _TOOLBAR_ICON_SIZE   = QSize(16, 16)
 _TOOLBAR_BUTTON_SIZE = QSize(26, 26)
 
+IMAGE_SCHEME = b"horizon-image"
+
 _PROFILE: QWebEngineProfile | None = None
+_IMAGE_HANDLER: "_ImageSchemeHandler | None" = None
+
+
+def register_image_scheme() -> None:
+    """Declare horizon-image:// to Chromium. Qt requires this before QApplication exists,
+    hence a function called from __main__ rather than an import-time side effect."""
+    scheme = QWebEngineUrlScheme(IMAGE_SCHEME)
+    # Path, not Host: with a host syntax Chromium reads the numeric id as an IPv4
+    # address and requests horizon-image://0.0.0.12/.
+    scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
+    # LocalScheme: the editor page is a file:// document, which may only load other
+    # local content (LocalContentCanAccessRemoteUrls is off) — without it Chromium
+    # blocks the image before the handler is even asked.
+    scheme.setFlags(
+        QWebEngineUrlScheme.Flag.SecureScheme
+        | QWebEngineUrlScheme.Flag.LocalScheme
+        | QWebEngineUrlScheme.Flag.LocalAccessAllowed
+    )
+    QWebEngineUrlScheme.registerScheme(scheme)
+
+
+def _image_mime(data: bytes) -> bytes:
+    if data.startswith(b"\xff\xd8"):
+        return b"image/jpeg"
+    if data.startswith(b"GIF8"):
+        return b"image/gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return b"image/webp"
+    return b"image/png"
+
+
+def _image_id_from_url(url: QUrl) -> int | None:
+    """Id of horizon-image://<id>. QUrl reads the bare number as an IPv4 host
+    (horizon-image://12 → host 0.0.0.12), so the dotted form is decoded back."""
+    raw = url.host() or url.path().strip("/")
+    if raw.isdigit():
+        return int(raw)
+    try:
+        return int(ipaddress.IPv4Address(raw))
+    except ValueError:
+        return None
+
+
+class _ImageSchemeHandler(QWebEngineUrlSchemeHandler):
+    """Serves horizon-image://<id> from the ImageRepository, so WYSIWYG notes keep a
+    reference to the image instead of a base64 copy of it."""
+
+    def __init__(self, image_repo: ImageRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._image_repo = image_repo
+
+    def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
+        image_id = _image_id_from_url(job.requestUrl())
+        data = self._image_repo.get(image_id) if image_id is not None else None
+        if not data:
+            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
+            return
+        buffer = QBuffer(job)  # owned by the job, freed with it
+        buffer.setData(QByteArray(data))
+        buffer.open(QBuffer.OpenModeFlag.ReadOnly)
+        job.reply(QByteArray(_image_mime(data)), buffer)
+
+
+def _install_image_handler(image_repo: ImageRepository | None) -> None:
+    global _IMAGE_HANDLER
+    if _IMAGE_HANDLER is not None or image_repo is None:
+        return
+    if not QWebEngineUrlScheme.schemeByName(QByteArray(IMAGE_SCHEME)).name():
+        return  # register_image_scheme() was not called: images just will not show
+    profile = _editor_profile()
+    _IMAGE_HANDLER = _ImageSchemeHandler(image_repo, profile)
+    profile.installUrlSchemeHandler(QByteArray(IMAGE_SCHEME), _IMAGE_HANDLER)
 
 
 def _editor_profile() -> QWebEngineProfile:
@@ -81,11 +166,93 @@ def _make_editor_html() -> str:
 </html>"""
 
 
+def _make_wysiwyg_html() -> str:
+    t = _theme.current()
+    return f"""<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<link rel="stylesheet" href="{_WYSIWYG_CSS_URL}">
+<style>
+{_theme.to_css_variables(t)}
+  @font-face {{
+    font-family: 'JetBrains Mono';
+    src: url('{_JETBRAINS_MONO_URL}');
+    font-weight: normal;
+    font-style: normal;
+  }}
+  :root {{
+    --ck-font-face: '{t.font_family}', sans-serif;
+    --ck-color-base-background: var(--hz-input-bg);
+    --ck-color-base-foreground: var(--hz-surface-alt-bg);
+    --ck-color-base-border: var(--hz-border);
+    --ck-color-text: var(--hz-text);
+    --ck-color-focus-border: var(--hz-accent-color);
+    --ck-color-toolbar-background: var(--hz-surface-alt-bg);
+    --ck-color-toolbar-border: var(--hz-border);
+    --ck-color-button-default-hover-background: var(--hz-button-hover);
+    --ck-color-button-on-background: var(--hz-list-selected-bg);
+    --ck-color-button-on-hover-background: var(--hz-button-hover);
+    --ck-color-button-on-color: var(--hz-accent-color);
+    --ck-color-dropdown-panel-background: var(--hz-surface-alt-bg);
+    --ck-color-dropdown-panel-border: var(--hz-border);
+    --ck-color-panel-background: var(--hz-surface-alt-bg);
+    --ck-color-panel-border: var(--hz-border);
+    --ck-color-input-background: var(--hz-input-bg);
+    --ck-color-input-border: var(--hz-border);
+    --ck-color-input-text: var(--hz-text);
+    --ck-color-list-background: var(--hz-surface-alt-bg);
+    --ck-color-list-button-hover-background: var(--hz-button-hover);
+    --ck-color-list-button-on-background: var(--hz-list-selected-bg);
+    --ck-color-list-button-on-text: var(--hz-text);
+    --ck-color-labeled-field-label-background: var(--hz-surface-alt-bg);
+    --ck-color-link-default: {t.preview_link};
+    --ck-color-image-caption-background: transparent;
+    --ck-color-image-caption-text: var(--hz-text);
+    --ck-border-radius: 4px;
+  }}
+  * {{ box-sizing: border-box; }}
+  html, body {{ height: 100%; margin: 0; overflow: hidden; background: var(--hz-input-bg); }}
+  .ck.ck-editor {{ height: 100%; display: flex; flex-direction: column; }}
+  .ck.ck-editor__main {{ flex: 1; min-height: 0; overflow-y: auto; }}
+  .ck.ck-editor__main > .ck-editor__editable {{
+    min-height: 100%;
+    font-size: var(--hz-editor-font-size, 13px);
+    line-height: 1.6;
+    color: var(--hz-text);
+    padding: 8px 20px;
+  }}
+  body.no-toolbar .ck.ck-editor__top {{ display: none; }}
+  body.no-toolbar .ck.ck-editor__main > .ck-editor__editable {{ border-radius: 0; }}
+  .ck-content a {{ color: {t.preview_link}; }}
+  .ck-content a[href^="horizon://note/"] {{ color: var(--hz-accent-color); text-decoration: none; border-bottom: 1px dashed var(--hz-accent-color); }}
+  .ck-content a[href^="horizon://task/"] {{ color: var(--hz-accent-color); text-decoration: none; border-left: 3px solid var(--hz-accent-color); padding-left: 4px; }}
+  .ck-content code {{ font-family: 'JetBrains Mono', monospace; background: {t.preview_code_bg}; border-radius: 3px; padding: 0.1em 0.35em; }}
+  .ck-content pre {{ font-family: 'JetBrains Mono', monospace; background: {t.preview_code_bg}; color: var(--hz-text); border: 1px solid {t.preview_border}; }}
+  .ck-content blockquote {{ border-left: 4px solid {t.preview_blockquote_border}; background: {t.preview_blockquote_bg}; color: {t.preview_blockquote_text}; font-style: normal; padding: 0.4em 1em; }}
+  .ck-content table td, .ck-content table th {{ border-color: {t.preview_border}; }}
+  .ck-content table th {{ background: {t.preview_table_header_bg}; }}
+  .ck-content hr {{ background: {t.preview_border}; }}
+  /* Blocs alignés à gauche par défaut : CKEditor n'écrit aucune classe pour le style par
+     défaut (voir image.styles / tableProperties dans wysiwyg.js). */
+  .ck-content figure.image:not([class*="image-style-"]),
+  .ck-content figure.table:not([class*="table-style-align-"]) {{ margin-left: 0; margin-right: auto; }}
+  .ck-content figure.image.image-style-block-center {{ margin-left: auto; margin-right: auto; }}
+</style>
+</head>
+<body>
+<div id="editor"></div>
+<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<script src="{_WYSIWYG_BUNDLE_URL}"></script>
+</body>
+</html>"""
+
+
 class _EditorBridge(QObject):
     """QWebChannel endpoint. Owns the authoritative text mirror and generation counter."""
 
-    # Python -> JS
-    set_text_requested = Signal(str, int)
+    # Python -> JS (the markdown page ignores the trailing `normalize` flag)
+    set_text_requested = Signal(str, int, bool)
 
     # JS -> Python (the widget listens to these)
     text_pushed      = Signal(str)
@@ -96,6 +263,7 @@ class _EditorBridge(QObject):
     shortcut_pushed  = Signal(str)
     image_started    = Signal()
     image_finished   = Signal(bool)
+    link_pushed      = Signal(str)
 
     def __init__(self, image_repo: ImageRepository | None, parent=None) -> None:
         super().__init__(parent)
@@ -105,15 +273,21 @@ class _EditorBridge(QObject):
         self._font_size = DEFAULT_FONT_SIZE
         self._placeholder = ""
         self._read_only = False
+        self._show_toolbar = True
+        self._normalize = False
 
     # ── Python-side API ───────────────────────────────────────────────────
-    def set_text(self, text: str) -> None:
+    def set_text(self, text: str, normalize: bool = False) -> None:
         """Load a document programmatically. Bumps the generation so that any push
         still in flight for the previous document is discarded rather than echoed
-        back as a user edit."""
+        back as a user edit.
+
+        `normalize` asks the WYSIWYG page to push back its own serialisation of the
+        document straight away (used after a markdown → HTML conversion)."""
         self._text = text
         self._generation += 1
-        self.set_text_requested.emit(text, self._generation)
+        self._normalize = normalize
+        self.set_text_requested.emit(text, self._generation, normalize)
 
     def text(self) -> str:
         return self._text
@@ -127,6 +301,9 @@ class _EditorBridge(QObject):
 
     def set_read_only(self, read_only: bool) -> None:
         self._read_only = read_only
+
+    def set_show_toolbar(self, show: bool) -> None:
+        self._show_toolbar = show
 
     def set_font_size(self, px: int) -> None:
         self._font_size = px
@@ -145,6 +322,8 @@ class _EditorBridge(QObject):
             "font_size": self._font_size,
             "placeholder": self._placeholder,
             "read_only": self._read_only,
+            "show_toolbar": self._show_toolbar,
+            "normalize": self._normalize,
         }
 
     @Slot(str, int)
@@ -184,6 +363,10 @@ class _EditorBridge(QObject):
     @Slot(bool)
     def image_upload_finished(self, ok: bool) -> None:
         self.image_finished.emit(ok)
+
+    @Slot(str)
+    def open_link(self, url: str) -> None:
+        self.link_pushed.emit(url)
 
     @Slot(str, result=int)
     def store_image(self, data_url: str) -> int:
@@ -278,11 +461,11 @@ class _WebMarkdownToolbar(QWidget):
         self._editor.call_js("insertBlock", "```python\nprint(\"Hello world\")\n```")
 
 
-class WebMarkdownEditor(QWidget):
-    """Drop-in-ish replacement for the old QPlainTextEdit-based MarkdownEditor.
+class _WebEditorBase(QWidget):
+    """Bridge, channel, lazily-built view and mirror shared by both note editors.
 
     Deliberately does NOT reuse Qt method names (`setPlainText`, `toPlainText`,
-    `blockSignals`): the semantics changed from synchronous to mirrored-async, and a
+    `blockSignals`): the semantics are mirrored-async, not synchronous, and a
     silently-inert `blockSignals(True)` would be a timing-dependent bug.
     """
 
@@ -292,14 +475,14 @@ class WebMarkdownEditor(QWidget):
     font_size_changed = Signal(int)
     flushed           = Signal()
     image_upload      = Signal(bool)  # True = started, False = finished
-    editor_ready      = Signal()      # CodeMirror is live; call_js() lands from here on
+    editor_ready      = Signal()      # the JS editor is live; call_js() lands from here on
+    link_clicked      = Signal(str)   # WYSIWYG only: Ctrl+click on a link
 
     def __init__(
         self,
         image_repo: ImageRepository | None,
         parent=None,
         *,
-        show_toolbar: bool = False,
         placeholder: str = "",
         prefs=None,
     ) -> None:
@@ -331,14 +514,14 @@ class WebMarkdownEditor(QWidget):
         self._bridge.shortcut_pushed.connect(self.shortcut_pressed)
         self._bridge.image_started.connect(lambda: self.image_upload.emit(True))
         self._bridge.image_finished.connect(lambda _ok: self.image_upload.emit(False))
-
-        self._toolbar = _WebMarkdownToolbar(self, self) if show_toolbar else None
+        self._bridge.link_pushed.connect(self.link_clicked)
 
         self._layout = QHBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
         self._layout.setSpacing(4)
-        if self._toolbar is not None:
-            self._layout.addWidget(self._toolbar)
+
+    def _page_html(self) -> str:
+        raise NotImplementedError
 
     def _ensure_view(self) -> None:
         if self._view is not None:
@@ -350,7 +533,7 @@ class WebMarkdownEditor(QWidget):
         # Chromium's menu offers Reload, which would destroy the editor state.
         self._view.setContextMenuPolicy(Qt.ContextMenuPolicy.NoContextMenu)
         self._layout.addWidget(self._view, stretch=1)
-        self._view.setHtml(_make_editor_html(), _RESOURCES_BASE_URL)
+        self._view.setHtml(self._page_html(), _RESOURCES_BASE_URL)
 
     def showEvent(self, event) -> None:
         self._ensure_view()
@@ -399,8 +582,6 @@ class WebMarkdownEditor(QWidget):
     def set_read_only(self, read_only: bool) -> None:
         self._bridge.set_read_only(read_only)
         self.call_js("setReadOnly", read_only)
-        if self._toolbar is not None:
-            self._toolbar.setEnabled(not read_only)
 
     def set_placeholder(self, text: str) -> None:
         self._bridge.set_placeholder(text)
@@ -425,7 +606,10 @@ class WebMarkdownEditor(QWidget):
             return  # not shown yet; state is carried by the bridge instead
         payload = ", ".join(json.dumps(a) for a in args)
         try:
-            self._view.page().runJavaScript(f"window.HorizonEditor.{fn}({payload});")
+            # Guarded: the WYSIWYG page installs HorizonEditor only once CKEditor has
+            # started; until then the bridge state, pulled on start, carries the call.
+            self._view.page().runJavaScript(
+                f"window.HorizonEditor && window.HorizonEditor.{fn}({payload});")
         except RuntimeError:
             pass  # the view was already torn down
 
@@ -444,3 +628,59 @@ class WebMarkdownEditor(QWidget):
         if self._prefs is not None:
             self._prefs.editor_font_size = px  # persisted by the closeEvent handlers
         self.font_size_changed.emit(px)
+
+
+class WebMarkdownEditor(_WebEditorBase):
+    """CodeMirror 6 markdown editor, with an optional column of formatting buttons."""
+
+    def __init__(
+        self,
+        image_repo: ImageRepository | None,
+        parent=None,
+        *,
+        show_toolbar: bool = False,
+        placeholder: str = "",
+        prefs=None,
+    ) -> None:
+        super().__init__(image_repo, parent, placeholder=placeholder, prefs=prefs)
+        self._toolbar = _WebMarkdownToolbar(self, self) if show_toolbar else None
+        if self._toolbar is not None:
+            self._layout.addWidget(self._toolbar)
+
+    def _page_html(self) -> str:
+        return _make_editor_html()
+
+    def set_read_only(self, read_only: bool) -> None:
+        super().set_read_only(read_only)
+        if self._toolbar is not None:
+            self._toolbar.setEnabled(not read_only)
+
+
+class WebHtmlEditor(_WebEditorBase):
+    """CKEditor 5 editing the HTML body of a WYSIWYG note.
+
+    `show_toolbar=False` hides CKEditor's own toolbar (sticky notes); formatting then
+    goes through keyboard shortcuts and autoformat.
+    """
+
+    def __init__(
+        self,
+        image_repo: ImageRepository | None,
+        parent=None,
+        *,
+        show_toolbar: bool = True,
+        placeholder: str = "",
+        prefs=None,
+    ) -> None:
+        super().__init__(image_repo, parent, placeholder=placeholder, prefs=prefs)
+        self._bridge.set_show_toolbar(show_toolbar)
+        _install_image_handler(image_repo)
+
+    def _page_html(self) -> str:
+        return _make_wysiwyg_html()
+
+    def set_text(self, text: str, normalize: bool = False) -> None:
+        """Load a document. Never emits `text_changed`, unless `normalize` is set and
+        CKEditor's own serialisation of `text` differs from it."""
+        self._js_dirty = False
+        self._bridge.set_text(text, normalize)

@@ -4,7 +4,7 @@ import re
 from pathlib import Path
 
 from PySide6.QtCore import QObject, QSize, Signal, Slot, QUrl
-from PySide6.QtGui import QIcon, QTextDocument
+from PySide6.QtGui import QFontDatabase, QIcon, QTextDocument
 
 from horizon import theme as _theme
 from horizon.image import ImageRepository
@@ -69,6 +69,7 @@ _BQ_GT_PREFIX_RE = re.compile(r'^[ \t]*>[ \t]?', re.MULTILINE)
 # Strip Qt inline styles from <p> so our CSS rules apply (used on both full and inner HTML)
 _BLOCK_STYLE_RE  = re.compile(r'(<(?:p|blockquote)\b[^>]*?) style="[^"]*"')
 # Locate <body>…</body> in Qt's full HTML output
+_QT_HEADING_RE   = re.compile(r'<h([1-6])\b[^>]*>.*?</h\1>', re.DOTALL)
 _QT_BODY_RE      = re.compile(r'<body[^>]*>(.*)</body>', re.DOTALL | re.IGNORECASE)
 # Detect lines that begin a block-level element (must not receive a line-break marker)
 _BLOCK_LINE_RE   = re.compile(r'^(#{1,6} |> ?|[-*+] |\d+\. |    |\t|```|~~~|\|)')
@@ -710,6 +711,93 @@ def _markdown_to_html(
 
     html = _inject_html_blocks(html, html_blocks)
 
+    return html
+
+
+def _extract_task_links(md: str, task_info: dict[int, tuple[str, str]]) -> tuple[str, list[str]]:
+    """{task: N} → simple lien horizon://task/N, que CKEditor sait garder.
+
+    Un bloc pas encore persisté (note sans projet) reste du texte : une note WYSIWYG
+    ne synchronise plus ses blocs, il n'y aurait rien pour le transformer en tâche.
+    """
+    items: list[str] = []
+
+    def replace(m: re.Match) -> str:
+        idx = len(items)
+        raw = m.group(1).strip()
+        info = task_info.get(int(raw)) if raw.isdigit() else None
+        if info is not None:
+            items.append(f'<a href="horizon://task/{int(raw)}">{_html_mod.escape(info[0])}</a>')
+        elif raw.isdigit():
+            items.append(f'#{int(raw)}')
+        else:
+            items.append(_html_mod.escape(m.group(0)))
+        return f'HORIZONTASK{idx}END'
+
+    return sub_outside_code(replace, md), items
+
+
+def markdown_to_storage_html(
+    markdown: str,
+    title_to_id: dict[str, int] | None = None,
+    id_exists: set[int] | None = None,
+    task_info: dict[int, tuple[str, str]] | None = None,
+) -> str:
+    """HTML enregistré quand une note markdown passe en WYSIWYG.
+
+    Même pipeline que _markdown_to_html, mais pour CKEditor et non pour l'aperçu :
+    les images gardent leur référence horizon-image:// (pas de base64), mermaid devient
+    un bloc de code, les {#tag} restent du texte pour continuer d'alimenter les tags,
+    et seul l'intérieur du <body> est gardé. Le style en ligne de QTextDocument est
+    laissé à CKEditor, qui le normalise au chargement.
+    """
+    images: list[tuple[int, str]] = []
+
+    def _extract_image(m: re.Match) -> str:
+        images.append((int(m.group(2)), m.group(1)))
+        return f"HORIZONIMG{len(images) - 1}END"
+
+    markdown = _MD_IMG_RE.sub(_extract_image, markdown)
+    markdown, html_blocks = _extract_html_blocks(markdown)
+    # ```mermaid est une clôture comme une autre : il ressort en bloc de code « mermaid ».
+    markdown, code_blocks = _extract_code_blocks(markdown)
+    markdown, tasks = _extract_task_links(markdown, task_info or {})
+    markdown, footnotes = _extract_footnotes(markdown)
+    markdown, wikilinks = _extract_wikilinks(markdown, title_to_id or {}, id_exists or set())
+    markdown, bq_list = _extract_blockquotes(markdown)
+    markdown = _add_hard_breaks(markdown)
+
+    doc = QTextDocument()
+    doc.setMarkdown(markdown)
+    raw = doc.toHtml()
+    body = _QT_BODY_RE.search(raw)
+    html = body.group(1).strip() if body else raw
+
+    html = _BLOCK_STYLE_RE.sub(r'\1', html)
+    # CKEditor reconnaît le gras/italique/barré portés en style, mais pas le code en ligne,
+    # que QTextDocument écrit avec la police fixe du système ('Courier New' sous Windows
+    # une fois les polices de l'application chargées, 'monospace' sinon).
+    fixed = {"monospace", QFontDatabase.systemFont(QFontDatabase.SystemFont.FixedFont).family()}
+    mono_span_re = re.compile(
+        r"<span style=\"([^\"]*)font-family:'(?:%s)';([^\"]*)\">(.*?)</span>"
+        % "|".join(re.escape(f) for f in fixed)
+    )
+    html = mono_span_re.sub(r'<code><span style="\1\2">\3</span></code>', html)
+    # Qt met chaque titre en gras explicite, que CKEditor garderait en <strong>.
+    html = _QT_HEADING_RE.sub(lambda m: m.group(0).replace(' font-weight:700;', ''), html)
+    html = _inject_blockquotes(html, bq_list)
+    html = _inject_code_blocks(html, code_blocks)
+    html = html.replace('HORIZONLBR ', '<br>').replace('HORIZONLBR', '<br>')
+    html = _inject_tasks(html, tasks)
+    html = _inject_wikilinks(html, wikilinks)
+    html = _inject_footnotes(html, footnotes)
+
+    def _inject_image(m: re.Match) -> str:
+        img_id, alt = images[int(m.group(1))]
+        return f'<img src="horizon-image://{img_id}" alt="{_html_mod.escape(alt)}">'
+
+    html = _HTML_PH_RE.sub(_inject_image, html)
+    html = _inject_html_blocks(html, html_blocks)
     return html
 
 

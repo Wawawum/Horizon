@@ -63,7 +63,8 @@ Detailed patterns: [docs/agent-patterns.md](docs/agent-patterns.md)
 
 - Searchable entities: notes, tasks, projects.
 - Tagged entities: notes, tasks.
-- Note↔task links: `note_tasks`, synced from the `{task: …}` blocks of a note body by `src/horizon/note_task.py`.
+- Note↔task links: `note_tasks`, synced from the `{task: …}` blocks of a note body by `src/horizon/note_task.py` (markdown notes only).
+- Note formats: `notes.format` is `markdown` or `html` (WYSIWYG, CKEditor 5). Only `NoteRepository.convert_to_html` changes it, one way; see [docs/architecture.md](docs/architecture.md).
 - Other repositories, such as deliverables, folders, images, and deliverable templates, still follow the repository pattern and commit mutations, but do not currently sync tags or `search_index`.
 
 ## Common Workflows
@@ -90,6 +91,7 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/note_window.py](src/horizon/note_window.py) | Detached note window, windowed and sticky (pinned) modes |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
+| [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` scheme |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |
 | [src/horizon/mcp_server.py](src/horizon/mcp_server.py) | MCP server entry point |
 | [pyproject.toml](pyproject.toml) | Dependencies and script entry points |
@@ -102,6 +104,6 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 - Do not silently swallow exceptions except in known migration cases.
 - Do not add columns to `_DDL` without a matching migration.
 - Do not hand-edit bundled minified resources unless explicitly requested.
-- Do not hand-edit `src/horizon/resources/*.bundle.js`; edit the source under `web/src/` and
+- Do not hand-edit `src/horizon/resources/*.bundle.{js,css}`; edit the source under `web/src/` and
   rebuild with `cd web && npm run build` (see [web/README.md](web/README.md)).
 - Do not run destructive checks against the user's real `~/.horizon/horizon.db`.
