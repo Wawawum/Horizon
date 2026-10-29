@@ -44,7 +44,8 @@ CREATE TABLE IF NOT EXISTS notes (
     project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL,
     title      TEXT    NOT NULL CHECK(length(title) <= 255),
     body       TEXT    NOT NULL DEFAULT '',
-    dt         TEXT    NOT NULL
+    dt         TEXT    NOT NULL,
+    format     TEXT    NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))
 );
 
 CREATE TABLE IF NOT EXISTS images (
@@ -96,7 +97,8 @@ CREATE TABLE IF NOT EXISTS note_versions (
     title      TEXT    NOT NULL,
     body       TEXT    NOT NULL DEFAULT '',
     version_dt TEXT    NOT NULL,
-    is_current INTEGER NOT NULL DEFAULT 0
+    is_current INTEGER NOT NULL DEFAULT 0,
+    format     TEXT    NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))
 );
 
 CREATE TABLE IF NOT EXISTS archimate_models (
@@ -150,6 +152,8 @@ _MIGRATIONS = [
     "CREATE TABLE IF NOT EXISTS documents (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE, folder_id INTEGER REFERENCES folders(id) ON DELETE SET NULL, name TEXT NOT NULL CHECK(length(name) <= 255), url TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL)",
     "CREATE TABLE IF NOT EXISTS note_tasks (note_id INTEGER NOT NULL REFERENCES notes(id) ON DELETE CASCADE, task_id INTEGER NOT NULL REFERENCES tasks(id) ON DELETE CASCADE, PRIMARY KEY (note_id, task_id))",
     "CREATE TABLE IF NOT EXISTS task_filters (id INTEGER PRIMARY KEY AUTOINCREMENT, title TEXT NOT NULL CHECK(length(title) <= 255), filter TEXT NOT NULL DEFAULT '{}')",
+    "ALTER TABLE notes ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))",
+    "ALTER TABLE note_versions ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))",
 ]
 
 

@@ -18,13 +18,20 @@ from PySide6.QtWidgets import (
 )
 
 from horizon.image import ImageRepository
-from horizon.note import NoteRepository
+from horizon.note import NoteFormat, NoteRepository
 from horizon.project import ProjectRepository
 from horizon.search import SearchRepository
 
 _THUMB_SIZE = 128
 _COLUMNS = 4
 _IMG_REF_RE = re.compile(r'!\[[^\]]*\]\(horizon-image://(\d+)\)')
+# Notes WYSIWYG : CKEditor enveloppe l'image dans une <figure> (légende comprise), qu'on retire
+# en entier ; une <img> nue, en ligne, est retirée seule.
+_HTML_FIGURE_REF_RE = re.compile(
+    r'<figure\b[^>]*>(?:(?!</figure>).)*?<img\b[^>]*\bsrc="horizon-image://(\d+)"(?:(?!</figure>).)*</figure>',
+    re.DOTALL | re.IGNORECASE,
+)
+_HTML_IMG_REF_RE = re.compile(r'<img\b[^>]*\bsrc="horizon-image://(\d+)"[^>]*>', re.IGNORECASE)
 
 
 class _MediaTile(QFrame):
@@ -148,10 +155,12 @@ class MediaWidget(QWidget):
             return
 
         for note in self._note_repo.find_referencing_image(image_id):
-            note.body = _IMG_REF_RE.sub(
-                lambda m, _id=image_id: "" if int(m.group(1)) == _id else m.group(0),
-                note.body,
-            )
+            def _drop(m, _id=image_id):
+                return "" if int(m.group(1)) == _id else m.group(0)
+            if note.format is NoteFormat.Html:
+                note.body = _HTML_IMG_REF_RE.sub(_drop, _HTML_FIGURE_REF_RE.sub(_drop, note.body))
+            else:
+                note.body = _IMG_REF_RE.sub(_drop, note.body)
             self._note_repo.update(note)
 
         self._image_repo.delete(image_id)
