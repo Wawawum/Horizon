@@ -143,6 +143,7 @@ changes in one direction only.
 | `{#tag}` | tags | tags (still literal text in the HTML) |
 | `{task: …}` / `[[link]]` | synced / rendered | plain `horizon://task/N` / `horizon://note/N` links, Ctrl+click; no task sync |
 | Images | `![](horizon-image://N)` | `<img src="horizon-image://N">` |
+| draw.io diagrams | — | `<figure class="horizon-diagram" data-diagram-id="N">`, see [Diagrams](#diagrams-drawio) |
 | Search index | body | body stripped of tags (`html_to_text`) |
 
 `NoteDetailWidget` holds both editors in a `QStackedWidget` and `load_note` picks the page; the
@@ -222,8 +223,8 @@ panel reloads the note from the database and unlocks.
 ## Diagrams (draw.io)
 
 [../src/horizon/diagram.py](../src/horizon/diagram.py) stores diagrams in `diagrams`: title,
-optional `project_id`, the draw.io XML, a small PNG `thumbnail` and `archived`. Diagrams are
-neither searchable nor tagged.
+optional `project_id`, the draw.io XML, a small PNG `thumbnail` (the list), an `svg` rendering (the
+notes) and `archived`. Diagrams are neither searchable nor tagged.
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) does not bundle draw.io: a local
 wrapper page loads the online embed (`https://embed.diagrams.net/?embed=1&proto=json…`) in an
@@ -231,13 +232,37 @@ wrapper page loads the online embed (`https://embed.diagrams.net/?embed=1&proto=
 over a QWebChannel, accepting only messages from that origin and frame. `DrawioEditor` answers `init`
 with a `load` action (`autosave: 1`), keeps a synchronous XML mirror fed by `autosave` events — ignored
 between a `load` action and its `load` event, since one instance is reused across diagrams — and renders
-thumbnails with an `export` action (`format: png`) awaited in a nested event loop. Without an `init`
+thumbnails and SVG with an `export` action (`format: png` / `svg`) awaited in a nested event loop. Without an `init`
 within 20 s it emits `unavailable` and the editor shows a retry banner; the stored XML is then left
 untouched.
 
 [../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
-(`DiagramsListWidget`) and the editor panel (`DiagramEditorWidget`): XML autosaved 2 s after a change,
-thumbnail refreshed on Back and on application close (`flush_and_save`).
+(`DiagramsListWidget`), the editor panel (`DiagramEditorWidget`) and the picker of the WYSIWYG editor
+(`DiagramPickerDialog`): XML autosaved 2 s after a change, thumbnail and SVG re-exported on Back and on
+application close (`flush_and_save`) when the XML changed or one of them is missing — then
+`diagram_changed` is emitted.
+
+### Diagrams in WYSIWYG notes
+
+A note embeds a diagram **by reference**: CKEditor's `HorizonDiagram` plugin
+([../web/src/wysiwyg.js](../web/src/wysiwyg.js)) stores
+`<figure class="horizon-diagram" data-diagram-id="N"><img src="horizon-diagram://N"></figure>` and
+shows it as a widget whose image is served by `_DiagramSchemeHandler`
+([../src/horizon/widgets/webeditor.py](../src/horizon/widgets/webeditor.py)): the `svg` column, its
+draw.io adaptive colours (`light-dark()`) pinned to Horizon's theme, or the PNG thumbnail for a
+diagram not exported to SVG yet. A note therefore always shows the diagram as it is now; a deleted
+diagram shows its `alt` text.
+
+- **Insert:** the toolbar button calls `bridge.pick_diagram()`; `NoteDetailWidget` opens
+  `DiagramPickerDialog` (thumbnails, title search ignoring case and accents) and calls
+  `WebHtmlEditor.insert_diagram(id)`.
+- **Edit:** a double-click calls `bridge.open_diagram(id)`; `MainWindow` opens the diagram editor
+  (bringing the main window forward when the note is in a detached window), and `← Back` returns to
+  the view it left, the note still loaded.
+- **Refresh:** Chromium caches images by URL for the life of the page, which outlives many notes,
+  so the editing view loads `horizon-diagram://N?v=<page nonce>.<revision>`. On `diagram_changed`,
+  `MainWindow` calls `refresh_diagram(id)` on the main note panel and every note window; the page
+  bumps the revision and reconverts the widgets — not an edit, the stored HTML is unchanged.
 
 ---
 

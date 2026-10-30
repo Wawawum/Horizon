@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
+from horizon.diagram import DiagramRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
 from horizon.note import NoteRepository, NoteVersionRepository
@@ -19,6 +20,7 @@ from horizon.widgets.notes import NoteDetailWidget
 class NoteWindow(QMainWindow):
     closed = Signal(int)  # emits note_id, once the body has been flushed to the database
     note_changed = Signal(int, int)  # emits (previous_note_id, new_note_id)
+    diagram_open_requested = Signal(int)  # emits diagram_id
 
     def __init__(
         self,
@@ -31,6 +33,7 @@ class NoteWindow(QMainWindow):
         task_repo: TaskRepository | None = None,
         subtask_repo: SubtaskRepository | None = None,
         note_task_repo: NoteTaskRepository | None = None,
+        diagram_repo: DiagramRepository | None = None,
         sticky: bool = False,
         parent=None,
     ) -> None:
@@ -55,12 +58,14 @@ class NoteWindow(QMainWindow):
             task_repo=task_repo,
             subtask_repo=subtask_repo,
             note_task_repo=note_task_repo,
+            diagram_repo=diagram_repo,
             windowed=True,
             sticky=sticky,
         )
         self._note_detail.back_requested.connect(self.close)
         self._note_detail.note_link_clicked.connect(self.load_note)
         self._note_detail.title_changed.connect(self._on_title_changed)
+        self._note_detail.diagram_open_requested.connect(self.diagram_open_requested)
         if sticky:
             # call_js() est inerte tant que CodeMirror n'a pas signalé qu'il est prêt, donc
             # le focus ne peut pas être posé juste après show().
@@ -93,6 +98,9 @@ class NoteWindow(QMainWindow):
         previous, self._note_id = self._note_id, note_id
         if previous is not None and previous != note_id:
             self.note_changed.emit(previous, note_id)
+
+    def refresh_diagram(self, diagram_id: int) -> None:
+        self._note_detail.refresh_diagram(diagram_id)
 
     def _on_title_changed(self, title: str) -> None:
         self.setWindowTitle(f"{title} — Horizon")

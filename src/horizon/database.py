@@ -132,7 +132,8 @@ CREATE TABLE IF NOT EXISTS diagrams (
     thumbnail  BLOB,
     created_at TEXT    NOT NULL,
     updated_at TEXT    NOT NULL,
-    archived   INTEGER NOT NULL DEFAULT 0
+    archived   INTEGER NOT NULL DEFAULT 0,
+    svg        TEXT
 );
 """
 
@@ -166,6 +167,7 @@ _MIGRATIONS = [
     "ALTER TABLE notes ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))",
     "ALTER TABLE note_versions ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))",
     "CREATE TABLE IF NOT EXISTS diagrams (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL, title TEXT NOT NULL CHECK(length(title) <= 255), xml TEXT NOT NULL DEFAULT '', thumbnail BLOB, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)",
+    "ALTER TABLE diagrams ADD COLUMN svg TEXT",
 ]
 
 

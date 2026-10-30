@@ -1,8 +1,12 @@
+import unicodedata
+
 from PySide6.QtCore import Qt, QTimer, Signal
 from PySide6.QtGui import QAction, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
+    QDialog,
+    QDialogButtonBox,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -12,6 +16,7 @@ from PySide6.QtWidgets import (
     QPushButton,
     QScrollArea,
     QSizePolicy,
+    QStackedWidget,
     QVBoxLayout,
     QWidget,
 )
@@ -20,6 +25,7 @@ from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog
 from horizon.diagram import Diagram, DiagramRepository
 from horizon.project import ProjectRepository
+from horizon.titlebar import TitleBar
 from horizon.widgets.drawio import DrawioEditor, make_thumbnail
 from horizon.widgets.markdown import _plus_icon, _PLUS_ICON_SIZE
 
@@ -29,18 +35,25 @@ _TILE_WIDTH   = _THUMB_WIDTH + 16
 _GRID_SPACING = 12
 
 
+def _fold(text: str) -> str:
+    """Casse et accents ignorés, pour que « etat » trouve « État »."""
+    decomposed = unicodedata.normalize("NFKD", text.casefold())
+    return "".join(c for c in decomposed if not unicodedata.combining(c))
+
+
 class _DiagramTile(QFrame):
     clicked = Signal(int)  # emits diagram_id
 
-    def __init__(self, diagram: Diagram, parent=None) -> None:
+    def __init__(self, diagram: Diagram, parent=None, *, context_menu: bool = True) -> None:
         super().__init__(parent)
         self._diagram_id = diagram.id
         self.setFixedSize(_TILE_WIDTH, _THUMB_HEIGHT + 40)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
         self.setToolTip(diagram.title)
-        self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.customContextMenuRequested.connect(self._show_context_menu)
+        if context_menu:
+            self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+            self.customContextMenuRequested.connect(self._show_context_menu)
 
         thumb_label = QLabel(self)
         thumb_label.setFixedSize(_THUMB_WIDTH, _THUMB_HEIGHT)
@@ -82,6 +95,140 @@ class _DiagramTile(QFrame):
         menu.exec(self.mapToGlobal(pos))
 
 
+class _DiagramGrid(QScrollArea):
+    """Thumbnail tiles on as many columns as the visible width allows."""
+
+    diagram_clicked = Signal(int)  # emits diagram_id
+
+    def __init__(self, parent=None, *, context_menu: bool = True) -> None:
+        super().__init__(parent)
+        self._context_menu = context_menu
+        self._tiles: list[_DiagramTile] = []
+        self._columns = 0
+
+        self._grid_widget = QWidget(self)
+        self._grid_layout = QGridLayout(self._grid_widget)
+        self._grid_layout.setContentsMargins(0, 0, 0, 0)
+        self._grid_layout.setSpacing(_GRID_SPACING)
+        self._grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+
+        self.setWidgetResizable(True)
+        self.setWidget(self._grid_widget)
+
+    def set_diagrams(self, diagrams: list[Diagram]) -> None:
+        for tile in self._tiles:
+            self._grid_layout.removeWidget(tile)
+            tile.deleteLater()
+        self._tiles = []
+        for diagram in diagrams:
+            tile = _DiagramTile(diagram, self._grid_widget, context_menu=self._context_menu)
+            tile.clicked.connect(self.diagram_clicked)
+            self._tiles.append(tile)
+        self._columns = 0  # force the placement below
+        self._relayout()
+
+    def _relayout(self) -> None:
+        width = self.viewport().width()
+        columns = max(1, (width + _GRID_SPACING) // (_TILE_WIDTH + _GRID_SPACING))
+        if columns == self._columns:
+            return
+        self._columns = columns
+        for tile in self._tiles:
+            self._grid_layout.removeWidget(tile)
+        for i, tile in enumerate(self._tiles):
+            row, col = divmod(i, columns)
+            self._grid_layout.addWidget(tile, row, col)
+
+    def resizeEvent(self, event) -> None:
+        super().resizeEvent(event)
+        self._relayout()
+
+
+class DiagramPickerDialog(QDialog):
+    """Dialog frameless de choix d'un diagramme à insérer dans une note WYSIWYG.
+
+    Un clic sur une miniature la choisit ; Entrée dans la recherche prend la première.
+    """
+
+    def __init__(self, diagram_repo: DiagramRepository, parent=None) -> None:
+        super().__init__(parent)
+        self.setWindowTitle("Insérer un diagramme")
+        self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
+        self.resize(4 * (_TILE_WIDTH + _GRID_SPACING) + 48, 560)
+        self._diagrams = diagram_repo.list_all()
+        self._shown: list[Diagram] = []
+        self._diagram_id: int | None = None
+
+        self._search_edit = QLineEdit(self)
+        self._search_edit.setPlaceholderText("Rechercher un diagramme par son nom…")
+        self._search_edit.setClearButtonEnabled(True)
+        self._search_edit.textChanged.connect(self._apply_filter)
+        self._search_edit.returnPressed.connect(self._choose_first)
+
+        self._grid = _DiagramGrid(self, context_menu=False)
+        self._grid.diagram_clicked.connect(self._choose)
+
+        self._empty_label = QLabel(self)
+        self._empty_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._empty_label.setWordWrap(True)
+        self._empty_label.setStyleSheet("color: gray;")
+
+        self._stack = QStackedWidget(self)
+        self._stack.addWidget(self._grid)
+        self._stack.addWidget(self._empty_label)
+
+        btn_box = QDialogButtonBox(QDialogButtonBox.StandardButton.Cancel, self)
+        btn_box.rejected.connect(self.reject)
+
+        content = QWidget(self)
+        content_layout = QVBoxLayout(content)
+        content_layout.setContentsMargins(16, 12, 16, 16)
+        content_layout.setSpacing(12)
+        content_layout.addWidget(self._search_edit)
+        content_layout.addWidget(self._stack, stretch=1)
+        content_layout.addWidget(btn_box)
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(0)
+        layout.addWidget(TitleBar(self, subtitle="Insérer un diagramme", show_min_max=False))
+        layout.addWidget(content, stretch=1)
+
+        self._apply_filter("")
+        self._search_edit.setFocus()
+
+    def _apply_filter(self, text: str) -> None:
+        query = _fold(text.strip())
+        self._shown = [d for d in self._diagrams if query in _fold(d.title)]
+        self._grid.set_diagrams(self._shown)
+        if self._shown:
+            self._stack.setCurrentWidget(self._grid)
+            return
+        if self._diagrams:
+            self._empty_label.setText(f"Aucun diagramme ne correspond à « {text.strip()} ».")
+        else:
+            self._empty_label.setText("Aucun diagramme pour l'instant : créez-en un dans le module Diagrams.")
+        self._stack.setCurrentWidget(self._empty_label)
+
+    def _choose(self, diagram_id: int) -> None:
+        self._diagram_id = diagram_id
+        self.accept()
+
+    def _choose_first(self) -> None:
+        if self._shown:
+            self._choose(self._shown[0].id)
+
+    @staticmethod
+    def ask(diagram_repo: DiagramRepository, parent=None) -> int | None:
+        dlg = DiagramPickerDialog(diagram_repo, parent)
+        try:
+            if dlg.exec() == QDialog.DialogCode.Accepted:
+                return dlg._diagram_id
+            return None
+        finally:
+            dlg.deleteLater()  # its tiles hold every thumbnail; the editor outlives many picks
+
+
 class DiagramsListWidget(QWidget):
     diagram_edit_requested = Signal(int)  # emits diagram_id
 
@@ -89,8 +236,6 @@ class DiagramsListWidget(QWidget):
         super().__init__(parent)
         self._diagram_repo = diagram_repo
         self._project_repo = project_repo
-        self._tiles: list[_DiagramTile] = []
-        self._columns = 0
 
         title = QLabel("Diagrams")
         font = title.font()
@@ -112,50 +257,17 @@ class DiagramsListWidget(QWidget):
         header_layout.addWidget(self._show_archived_cb)
         header_layout.addWidget(new_btn)
 
-        self._grid_widget = QWidget()
-        self._grid_layout = QGridLayout(self._grid_widget)
-        self._grid_layout.setContentsMargins(0, 0, 0, 0)
-        self._grid_layout.setSpacing(_GRID_SPACING)
-        self._grid_layout.setAlignment(Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
-
-        self._scroll = QScrollArea()
-        self._scroll.setWidgetResizable(True)
-        self._scroll.setWidget(self._grid_widget)
+        self._grid = _DiagramGrid(self)
+        self._grid.diagram_clicked.connect(self.diagram_edit_requested)
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(16, 16, 16, 16)
         layout.setSpacing(8)
         layout.addLayout(header_layout)
-        layout.addWidget(self._scroll, stretch=1)
+        layout.addWidget(self._grid, stretch=1)
 
     def load(self) -> None:
-        for tile in self._tiles:
-            self._grid_layout.removeWidget(tile)
-            tile.deleteLater()
-        self._tiles = []
-        for diagram in self._diagram_repo.list_all(archived_only=self._show_archived_cb.isChecked()):
-            tile = _DiagramTile(diagram, self._grid_widget)
-            tile.clicked.connect(self.diagram_edit_requested)
-            self._tiles.append(tile)
-        self._columns = 0  # force the placement below
-        self._relayout()
-
-    def _relayout(self) -> None:
-        """Place the tiles on as many columns as the visible width allows."""
-        width = self._scroll.viewport().width()
-        columns = max(1, (width + _GRID_SPACING) // (_TILE_WIDTH + _GRID_SPACING))
-        if columns == self._columns:
-            return
-        self._columns = columns
-        for tile in self._tiles:
-            self._grid_layout.removeWidget(tile)
-        for i, tile in enumerate(self._tiles):
-            row, col = divmod(i, columns)
-            self._grid_layout.addWidget(tile, row, col)
-
-    def resizeEvent(self, event) -> None:
-        super().resizeEvent(event)
-        self._relayout()
+        self._grid.set_diagrams(self._diagram_repo.list_all(archived_only=self._show_archived_cb.isChecked()))
 
     def _on_new_diagram(self) -> None:
         diagram = self._diagram_repo.create(title="New Diagram")
@@ -165,6 +277,7 @@ class DiagramsListWidget(QWidget):
 
 class DiagramEditorWidget(QWidget):
     back_requested = Signal()
+    diagram_changed = Signal(int)  # emits diagram_id once its rendering was redone, or it was deleted
 
     def __init__(self, diagram_repo: DiagramRepository, project_repo: ProjectRepository, parent=None) -> None:
         super().__init__(parent)
@@ -287,7 +400,8 @@ class DiagramEditorWidget(QWidget):
         self._editor.load_xml(diagram.xml)
 
     def flush_and_save(self) -> None:
-        """Persist the diagram and refresh its thumbnail if it changed.
+        """Persist the diagram and redo its renderings (list thumbnail, SVG shown in
+        notes) if it changed, or if one of them is missing.
 
         Called on Back and from closeEvent, where the debounced autosave would never fire.
         """
@@ -295,17 +409,21 @@ class DiagramEditorWidget(QWidget):
         if self._current is None:
             return
         self._save_xml()
-        if self._current.xml == self._xml_at_open and self._current.thumbnail is not None:
+        rendered = self._current.thumbnail is not None and self._current.svg is not None
+        if self._current.xml == self._xml_at_open and rendered:
             return
         if not self._current.xml:
             return  # never drawn in: the tile keeps its placeholder
         png = self._editor.export_png()
         thumbnail = make_thumbnail(png) if png else None
-        if thumbnail is None:
-            return  # draw.io unreachable: keep the previous thumbnail
+        svg = self._editor.export_svg() if thumbnail is not None else None
+        if svg is None:
+            return  # draw.io unreachable: keep the previous renderings
         self._current.thumbnail = thumbnail
+        self._current.svg = svg
         self._diagram_repo.update(self._current)
         self._xml_at_open = self._current.xml
+        self.diagram_changed.emit(self._current.id)
 
     def _save_xml(self, show_status: bool = False) -> None:
         if self._current is None:
@@ -348,8 +466,10 @@ class DiagramEditorWidget(QWidget):
             self,
         ):
             self._autosave_timer.stop()
-            self._diagram_repo.delete(self._current.id)
+            diagram_id = self._current.id
+            self._diagram_repo.delete(diagram_id)
             self._current = None
+            self.diagram_changed.emit(diagram_id)
             self.back_requested.emit()
 
     def _on_retry(self) -> None:

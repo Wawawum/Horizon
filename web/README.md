@@ -51,8 +51,9 @@ Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plug
 (`setText`, `readDoc`, `setReadOnly`, `setFontSize`, `setPlaceholder`, `focusEditor`, plus the
 markdown toolbar commands in `editor.js`) and talk back through the `bridge` object registered
 on the QWebChannel (`push_text`, `mark_dirty`, `editor_blurred`, `editor_ready`, `store_image`,
-`set_font_size`, `shortcut`, `image_upload_started/finished`, and `open_link` for the WYSIWYG
-editor).
+`set_font_size`, `shortcut`, `image_upload_started/finished`, and `open_link`, `pick_diagram`,
+`open_diagram` for the WYSIWYG editor, whose `HorizonEditor` also has `insertDiagram` and
+`refreshDiagram`).
 
 Invariants worth preserving if you touch this:
 
@@ -77,7 +78,12 @@ WYSIWYG specifics:
 - **Images are references, not data.** Pasted images go to `ImageRepository` through
   `store_image`; the document keeps `<img src="horizon-image://<id>">`, served by the
   `_ImageSchemeHandler` installed on the editor profile. The scheme is registered in
-  `__main__` before `QApplication` exists, with the `LocalScheme` flag so the `file://` page
-  may load it.
+  `__main__` (`register_schemes`) before `QApplication` exists, with the `LocalScheme` flag so
+  the `file://` page may load it.
+- **draw.io diagrams are references too.** The `HorizonDiagram` plugin stores
+  `<figure class="horizon-diagram" data-diagram-id="<id>">` and renders it as a widget showing
+  `horizon-diagram://<id>`, served by `_DiagramSchemeHandler`. The editing view adds a
+  `?v=<page nonce>.<revision>` cache buster that `refreshDiagram` bumps; the data view does not,
+  so a refresh is never an edit. See docs/architecture.md, "Diagrams in WYSIWYG notes".
 - **The page never navigates.** Ctrl+click on a link in the text, or a click on the link in
   CKEditor's balloon, is sent to Python through `open_link`.

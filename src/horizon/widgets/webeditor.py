@@ -29,6 +29,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QHBoxLayout, QSizePolicy, QToolButton, QVBoxLayout, QWidget
 
 from horizon import theme as _theme
+from horizon.diagram import DiagramRepository
 from horizon.image import ImageRepository
 
 _RESOURCES_DIR      = Path(__file__).parent.parent / "resources"
@@ -43,28 +44,31 @@ DEFAULT_FONT_SIZE = 13
 _TOOLBAR_ICON_SIZE   = QSize(16, 16)
 _TOOLBAR_BUTTON_SIZE = QSize(26, 26)
 
-IMAGE_SCHEME = b"horizon-image"
+IMAGE_SCHEME   = b"horizon-image"
+DIAGRAM_SCHEME = b"horizon-diagram"
 
 _PROFILE: QWebEngineProfile | None = None
-_IMAGE_HANDLER: "_ImageSchemeHandler | None" = None
+_SCHEME_HANDLERS: dict[bytes, QWebEngineUrlSchemeHandler] = {}
 
 
-def register_image_scheme() -> None:
-    """Declare horizon-image:// to Chromium. Qt requires this before QApplication exists,
-    hence a function called from __main__ rather than an import-time side effect."""
-    scheme = QWebEngineUrlScheme(IMAGE_SCHEME)
-    # Path, not Host: with a host syntax Chromium reads the numeric id as an IPv4
-    # address and requests horizon-image://0.0.0.12/.
-    scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
-    # LocalScheme: the editor page is a file:// document, which may only load other
-    # local content (LocalContentCanAccessRemoteUrls is off) — without it Chromium
-    # blocks the image before the handler is even asked.
-    scheme.setFlags(
-        QWebEngineUrlScheme.Flag.SecureScheme
-        | QWebEngineUrlScheme.Flag.LocalScheme
-        | QWebEngineUrlScheme.Flag.LocalAccessAllowed
-    )
-    QWebEngineUrlScheme.registerScheme(scheme)
+def register_schemes() -> None:
+    """Declare horizon-image:// and horizon-diagram:// to Chromium. Qt requires this
+    before QApplication exists, hence a function called from __main__ rather than an
+    import-time side effect."""
+    for name in (IMAGE_SCHEME, DIAGRAM_SCHEME):
+        scheme = QWebEngineUrlScheme(name)
+        # Path, not Host: with a host syntax Chromium reads the numeric id as an IPv4
+        # address and requests horizon-image://0.0.0.12/.
+        scheme.setSyntax(QWebEngineUrlScheme.Syntax.Path)
+        # LocalScheme: the editor page is a file:// document, which may only load other
+        # local content (LocalContentCanAccessRemoteUrls is off) — without it Chromium
+        # blocks the image before the handler is even asked.
+        scheme.setFlags(
+            QWebEngineUrlScheme.Flag.SecureScheme
+            | QWebEngineUrlScheme.Flag.LocalScheme
+            | QWebEngineUrlScheme.Flag.LocalAccessAllowed
+        )
+        QWebEngineUrlScheme.registerScheme(scheme)
 
 
 def _image_mime(data: bytes) -> bytes:
@@ -77,9 +81,10 @@ def _image_mime(data: bytes) -> bytes:
     return b"image/png"
 
 
-def _image_id_from_url(url: QUrl) -> int | None:
-    """Id of horizon-image://<id>. QUrl reads the bare number as an IPv4 host
-    (horizon-image://12 → host 0.0.0.12), so the dotted form is decoded back."""
+def _id_from_url(url: QUrl) -> int | None:
+    """Id of horizon-image://<id> or horizon-diagram://<id>. QUrl reads the bare number
+    as an IPv4 host (horizon-image://12 → host 0.0.0.12), so the dotted form is decoded
+    back. A query string (the diagrams' cache buster) is ignored."""
     raw = url.host() or url.path().strip("/")
     if raw.isdigit():
         return int(raw)
@@ -87,6 +92,13 @@ def _image_id_from_url(url: QUrl) -> int | None:
         return int(ipaddress.IPv4Address(raw))
     except ValueError:
         return None
+
+
+def _reply(job: QWebEngineUrlRequestJob, data: bytes, mime: bytes) -> None:
+    buffer = QBuffer(job)  # owned by the job, freed with it
+    buffer.setData(QByteArray(data))
+    buffer.open(QBuffer.OpenModeFlag.ReadOnly)
+    job.reply(QByteArray(mime), buffer)
 
 
 class _ImageSchemeHandler(QWebEngineUrlSchemeHandler):
@@ -98,26 +110,53 @@ class _ImageSchemeHandler(QWebEngineUrlSchemeHandler):
         self._image_repo = image_repo
 
     def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
-        image_id = _image_id_from_url(job.requestUrl())
+        image_id = _id_from_url(job.requestUrl())
         data = self._image_repo.get(image_id) if image_id is not None else None
         if not data:
             job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
             return
-        buffer = QBuffer(job)  # owned by the job, freed with it
-        buffer.setData(QByteArray(data))
-        buffer.open(QBuffer.OpenModeFlag.ReadOnly)
-        job.reply(QByteArray(_image_mime(data)), buffer)
+        _reply(job, data, _image_mime(data))
 
 
-def _install_image_handler(image_repo: ImageRepository | None) -> None:
-    global _IMAGE_HANDLER
-    if _IMAGE_HANDLER is not None or image_repo is None:
+def _pin_color_scheme(svg: str) -> str:
+    """draw.io exports adaptive colours (light-dark() under `color-scheme: light dark`),
+    which would follow the OS preference; pin them to Horizon's theme instead, as the
+    draw.io editor itself is (dark=1)."""
+    scheme = "dark" if _theme.current().is_dark else "light"
+    return svg.replace("color-scheme: light dark", f"color-scheme: {scheme}", 1)
+
+
+class _DiagramSchemeHandler(QWebEngineUrlSchemeHandler):
+    """Serves horizon-diagram://<id>: the SVG rendering of a draw.io diagram, so that a
+    WYSIWYG note shows the diagram as it is now, not a copy taken when it was inserted.
+    Falls back on the list thumbnail for a diagram not rendered to SVG yet."""
+
+    def __init__(self, diagram_repo: DiagramRepository, parent=None) -> None:
+        super().__init__(parent)
+        self._diagram_repo = diagram_repo
+
+    def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
+        diagram_id = _id_from_url(job.requestUrl())
+        diagram = self._diagram_repo.get(diagram_id) if diagram_id is not None else None
+        if diagram is not None and diagram.svg:
+            _reply(job, _pin_color_scheme(diagram.svg).encode("utf-8"), b"image/svg+xml")
+        elif diagram is not None and diagram.thumbnail:
+            _reply(job, diagram.thumbnail, b"image/png")
+        else:
+            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
+
+
+def _install_scheme_handler(scheme: bytes, make_handler) -> None:
+    """Install the handler of `scheme` on the editor profile, once for the application.
+    `make_handler(parent)` builds it."""
+    if scheme in _SCHEME_HANDLERS:
         return
-    if not QWebEngineUrlScheme.schemeByName(QByteArray(IMAGE_SCHEME)).name():
-        return  # register_image_scheme() was not called: images just will not show
+    if not QWebEngineUrlScheme.schemeByName(QByteArray(scheme)).name():
+        return  # register_schemes() was not called: the content just will not show
     profile = _editor_profile()
-    _IMAGE_HANDLER = _ImageSchemeHandler(image_repo, profile)
-    profile.installUrlSchemeHandler(QByteArray(IMAGE_SCHEME), _IMAGE_HANDLER)
+    handler = make_handler(profile)
+    _SCHEME_HANDLERS[scheme] = handler
+    profile.installUrlSchemeHandler(QByteArray(scheme), handler)
 
 
 def _editor_profile() -> QWebEngineProfile:
@@ -238,6 +277,9 @@ def _make_wysiwyg_html() -> str:
   .ck-content figure.image:not([class*="image-style-"]),
   .ck-content figure.table:not([class*="table-style-align-"]) {{ margin-left: 0; margin-right: auto; }}
   .ck-content figure.image.image-style-block-center {{ margin-left: auto; margin-right: auto; }}
+  /* Diagrammes draw.io : rendu SVG, aligné à gauche comme les images ; double-clic = éditeur. */
+  .ck-content figure.horizon-diagram {{ display: table; margin: 0.9em auto 0.9em 0; min-width: 50px; cursor: default; }}
+  .ck-content figure.horizon-diagram img {{ display: block; max-width: 100%; height: auto; }}
 </style>
 </head>
 <body>
@@ -264,6 +306,8 @@ class _EditorBridge(QObject):
     image_started    = Signal()
     image_finished   = Signal(bool)
     link_pushed      = Signal(str)
+    diagram_pick_pushed = Signal()
+    diagram_open_pushed = Signal(int)
 
     def __init__(self, image_repo: ImageRepository | None, parent=None) -> None:
         super().__init__(parent)
@@ -367,6 +411,14 @@ class _EditorBridge(QObject):
     @Slot(str)
     def open_link(self, url: str) -> None:
         self.link_pushed.emit(url)
+
+    @Slot()
+    def pick_diagram(self) -> None:
+        self.diagram_pick_pushed.emit()
+
+    @Slot(int)
+    def open_diagram(self, diagram_id: int) -> None:
+        self.diagram_open_pushed.emit(diagram_id)
 
     @Slot(str, result=int)
     def store_image(self, data_url: str) -> int:
@@ -661,20 +713,34 @@ class WebHtmlEditor(_WebEditorBase):
 
     `show_toolbar=False` hides CKEditor's own toolbar (sticky notes); formatting then
     goes through keyboard shortcuts and autoformat.
+
+    draw.io diagrams are embedded by reference (`<figure class="horizon-diagram"
+    data-diagram-id="…">`) and shown through horizon-diagram://, so a note always shows
+    the diagram as it is now.
     """
+
+    # Toolbar button: the owner picks a diagram, then calls insert_diagram().
+    diagram_insert_requested = Signal()
+    diagram_open_requested   = Signal(int)  # double-click on a diagram; emits diagram_id
 
     def __init__(
         self,
         image_repo: ImageRepository | None,
         parent=None,
         *,
+        diagram_repo: DiagramRepository | None = None,
         show_toolbar: bool = True,
         placeholder: str = "",
         prefs=None,
     ) -> None:
         super().__init__(image_repo, parent, placeholder=placeholder, prefs=prefs)
         self._bridge.set_show_toolbar(show_toolbar)
-        _install_image_handler(image_repo)
+        self._bridge.diagram_pick_pushed.connect(self.diagram_insert_requested)
+        self._bridge.diagram_open_pushed.connect(self.diagram_open_requested)
+        if image_repo is not None:
+            _install_scheme_handler(IMAGE_SCHEME, lambda p: _ImageSchemeHandler(image_repo, p))
+        if diagram_repo is not None:
+            _install_scheme_handler(DIAGRAM_SCHEME, lambda p: _DiagramSchemeHandler(diagram_repo, p))
 
     def _page_html(self) -> str:
         return _make_wysiwyg_html()
@@ -684,3 +750,12 @@ class WebHtmlEditor(_WebEditorBase):
         CKEditor's own serialisation of `text` differs from it."""
         self._js_dirty = False
         self._bridge.set_text(text, normalize)
+
+    def insert_diagram(self, diagram_id: int) -> None:
+        """Insert a diagram at the caret — an edit like any other."""
+        self.call_js("insertDiagram", diagram_id)
+
+    def refresh_diagram(self, diagram_id: int) -> None:
+        """Reload the rendering of a diagram that was redrawn or deleted. The page caches
+        images by URL, so it fetches the diagram under a new one; not an edit."""
+        self.call_js("refreshDiagram", diagram_id)

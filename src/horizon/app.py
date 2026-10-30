@@ -125,6 +125,9 @@ class MainWindow(QMainWindow):
         self._document_repo = DocumentRepository(db)
         self._diagram_repo = DiagramRepository(db)
         self._note_source: str = "notes"
+        # Vue à retrouver au retour de l'éditeur de diagrammes ouvert depuis une note ;
+        # None : retour à la liste des diagrammes.
+        self._diagram_return_index: int | None = None
         self._current_project = None
 
         self._splitter = QSplitter(Qt.Orientation.Horizontal)
@@ -149,6 +152,7 @@ class MainWindow(QMainWindow):
             version_repo=self._note_version_repo,
             task_repo=task_repo, subtask_repo=subtask_repo,
             note_task_repo=self._note_task_repo,
+            diagram_repo=self._diagram_repo,
         )
         self._right_stack.addWidget(self._note_detail)     # index 3
 
@@ -223,14 +227,16 @@ class MainWindow(QMainWindow):
         self._note_detail.note_link_clicked.connect(self._show_note_detail)
         self._note_detail.open_in_window_requested.connect(self._open_note_in_window)
         self._note_detail.open_as_sticky_requested.connect(self._open_note_as_sticky)
+        self._note_detail.diagram_open_requested.connect(self._open_diagram_from_note)
         self._deliverable_detail.back_requested.connect(self._go_back_from_deliverable)
         self._deliverables_widget.show_templates_requested.connect(self._show_templates_list)
         self._deliverables_widget.deliverable_edit_requested.connect(self._open_deliverable_from_list)
         self._templates_list.back_requested.connect(self._show_deliverables)
         self._templates_list.template_edit_requested.connect(self._open_template)
         self._template_detail.back_requested.connect(self._show_templates_list)
-        self._diagrams_list.diagram_edit_requested.connect(self._open_diagram)
-        self._diagram_editor.back_requested.connect(self._show_diagrams)
+        self._diagrams_list.diagram_edit_requested.connect(self._open_diagram_from_list)
+        self._diagram_editor.back_requested.connect(self._go_back_from_diagram)
+        self._diagram_editor.diagram_changed.connect(self._on_diagram_changed)
 
         self._show_home()  # default view on startup
 
@@ -388,12 +394,45 @@ class MainWindow(QMainWindow):
         self._diagrams_list.load()
         self._right_stack.setCurrentIndex(13)
 
-    def _open_diagram(self, diagram_id: int) -> None:
+    def _open_diagram(self, diagram_id: int) -> bool:
         diagram = self._diagram_repo.get(diagram_id)
         if diagram is None:
-            return
+            return False
+        if self._right_stack.currentWidget() is self._diagram_editor:
+            # Double-clic dans une note détachée pendant l'édition d'un autre diagramme.
+            self._diagram_editor.flush_and_save()
         self._diagram_editor.load_diagram(diagram, self._proj_repo.list_all())
         self._right_stack.setCurrentIndex(14)
+        return True
+
+    def _open_diagram_from_list(self, diagram_id: int) -> None:
+        self._diagram_return_index = None
+        self._open_diagram(diagram_id)
+
+    def _open_diagram_from_note(self, diagram_id: int) -> None:
+        """Double-clic sur un diagramme d'une note : l'éditeur s'ouvre dans la fenêtre
+        principale, et ← Back ramène à la vue quittée (la note reste chargée, rien n'est
+        relu)."""
+        index = self._right_stack.currentIndex()
+        if self._open_diagram(diagram_id) and index != 14:
+            self._diagram_return_index = index
+
+    def _open_diagram_from_note_window(self, diagram_id: int) -> None:
+        self._open_diagram_from_note(diagram_id)
+        self.bring_to_front()
+
+    def _go_back_from_diagram(self) -> None:
+        index, self._diagram_return_index = self._diagram_return_index, None
+        if index is None:
+            self._show_diagrams()
+        else:
+            self._right_stack.setCurrentIndex(index)
+
+    def _on_diagram_changed(self, diagram_id: int) -> None:
+        """Le rendu d'un diagramme a changé : les notes ouvertes qui l'affichent le relisent."""
+        self._note_detail.refresh_diagram(diagram_id)
+        for win in self._note_windows.values():
+            win.refresh_diagram(diagram_id)
 
     def _show_debug(self) -> None:
         self._project_list.clear_selection()
@@ -484,11 +523,13 @@ class MainWindow(QMainWindow):
             self._image_repo, self._note_version_repo, self._prefs,
             task_repo=self._task_repo, subtask_repo=self._subtask_repo,
             note_task_repo=self._note_task_repo,
+            diagram_repo=self._diagram_repo,
             sticky=sticky,
         )
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
         win.closed.connect(self._on_note_window_closed)
         win.note_changed.connect(self._on_note_window_note_changed)
+        win.diagram_open_requested.connect(self._open_diagram_from_note_window)
         # Filet pour une destruction sans closeEvent. Par identité et non par id de note :
         # après un [[lien]] la fenêtre a changé de clé, et une clé périmée retirerait du
         # registre une autre fenêtre légitimement rouverte entre-temps.

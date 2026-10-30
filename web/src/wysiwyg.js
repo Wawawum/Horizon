@@ -10,7 +10,8 @@ import {
   ClassicEditor, Essentials, Paragraph, Heading, Bold, Italic, Underline, Strikethrough,
   Code, List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
   ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
-  HorizontalLine, Autoformat, IconObjectLeft, IconObjectCenter,
+  HorizontalLine, Autoformat, IconObjectLeft, IconObjectCenter, Widget, toWidget, Command,
+  ButtonView,
 } from "ckeditor5";
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
@@ -118,6 +119,122 @@ function HorizonUploadAdapter(ed) {
   });
 }
 
+// ── Diagrams ────────────────────────────────────────────────────────────────
+// A draw.io diagram is embedded by reference: the stored HTML is
+// <figure class="horizon-diagram" data-diagram-id="12"><img src="horizon-diagram://12"></figure>,
+// and the page shows whatever Python's scheme handler serves for that id — the diagram
+// as it is now. Picking one (toolbar button) and editing one (double-click) are Python's.
+
+const DIAGRAM_ICON =
+  '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20">' +
+  '<rect x="1.75" y="2.75" width="7.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+  '<rect x="10.75" y="12.25" width="7.5" height="5" rx="1" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+  '<path d="M5.5 7.75v7h5.25" fill="none" stroke="currentColor" stroke-width="1.5"/>' +
+  "</svg>";
+
+// Chromium caches images by URL for the life of the page, and this page outlives many
+// notes. So the URL carries a per-page nonce and a per-diagram revision that
+// refreshDiagram() bumps once Python has redrawn the diagram.
+const PAGE_NONCE = Date.now().toString(36);
+const diagramRevisions = new Map();
+
+function diagramUrl(id) {
+  return "horizon-diagram://" + id + "?v=" + PAGE_NONCE + "." + (diagramRevisions.get(id) || 0);
+}
+
+class InsertDiagramCommand extends Command {
+  refresh() {
+    const model = this.editor.model;
+    const position = model.document.selection.getFirstPosition();
+    this.isEnabled = model.schema.findAllowedParent(position, "horizonDiagram") !== null;
+  }
+
+  execute({ diagramId }) {
+    const model = this.editor.model;
+    model.change((writer) => {
+      const diagram = writer.createElement("horizonDiagram", { diagramId });
+      model.insertObject(diagram, null, null, { setSelection: "on" });
+    });
+  }
+}
+
+function HorizonDiagram(ed) {
+  ed.model.schema.register("horizonDiagram", {
+    inheritAllFrom: "$blockObject",
+    allowAttributes: ["diagramId"],
+  });
+
+  // The <img> inside the figure is not converted: it would otherwise become an image.
+  ed.conversion.for("upcast").add((dispatcher) => {
+    dispatcher.on(
+      "element:figure",
+      (evt, data, conversionApi) => {
+        const figure = data.viewItem;
+        if (!figure.hasClass("horizon-diagram")) return;
+        const diagramId = parseInt(figure.getAttribute("data-diagram-id"), 10);
+        if (!(diagramId > 0) || !conversionApi.consumable.test(figure, { name: true })) return;
+        const diagram = conversionApi.writer.createElement("horizonDiagram", { diagramId });
+        if (!conversionApi.safeInsert(diagram, data.modelCursor)) return;
+        conversionApi.consumable.consume(figure, { name: true });
+        conversionApi.updateConversionResult(diagram, data);
+      },
+      { priority: "high" }
+    );
+  });
+
+  ed.conversion.for("dataDowncast").elementToElement({
+    model: "horizonDiagram",
+    view: (modelElement, { writer }) => {
+      const id = modelElement.getAttribute("diagramId");
+      return writer.createContainerElement(
+        "figure",
+        { class: "horizon-diagram", "data-diagram-id": String(id) },
+        [writer.createEmptyElement("img", { src: "horizon-diagram://" + id, alt: "Diagramme #" + id })]
+      );
+    },
+  });
+
+  ed.conversion.for("editingDowncast").elementToElement({
+    model: "horizonDiagram",
+    view: (modelElement, { writer }) => {
+      const id = modelElement.getAttribute("diagramId");
+      const figure = writer.createContainerElement(
+        "figure",
+        {
+          class: "horizon-diagram",
+          "data-diagram-id": String(id),
+          title: "Double-cliquer pour modifier le diagramme",
+        },
+        // alt only shows when the image fails: the diagram was deleted.
+        [writer.createEmptyElement("img", { src: diagramUrl(id), alt: "Diagramme #" + id + " introuvable" })]
+      );
+      return toWidget(figure, writer, { label: "Diagramme draw.io" });
+    },
+  });
+
+  ed.commands.add("insertHorizonDiagram", new InsertDiagramCommand(ed));
+
+  ed.ui.componentFactory.add("insertDiagram", (locale) => {
+    const button = new ButtonView(locale);
+    button.set({ label: "Insérer un diagramme draw.io", icon: DIAGRAM_ICON, tooltip: true });
+    button.bind("isEnabled").to(ed.commands.get("insertHorizonDiagram"), "isEnabled");
+    button.on("execute", () => {
+      if (bridge) bridge.pick_diagram();
+    });
+    return button;
+  });
+}
+
+function diagramHandlers(ed) {
+  ed.ui.getEditableElement().addEventListener("dblclick", (e) => {
+    const figure = e.target.closest && e.target.closest("figure.horizon-diagram");
+    if (!figure) return;
+    e.preventDefault();
+    const id = parseInt(figure.getAttribute("data-diagram-id"), 10);
+    if (id > 0 && bridge) bridge.open_diagram(id);
+  });
+}
+
 // ── Links ───────────────────────────────────────────────────────────────────
 // The page must never navigate: Ctrl+click in the text, or a click on the link shown
 // in CKEditor's balloon, is handed to Python, which opens notes, tasks and URLs.
@@ -208,13 +325,13 @@ function createEditor(state) {
       Essentials, Paragraph, Heading, Bold, Italic, Underline, Strikethrough, Code,
       List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
       ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
-      HorizontalLine, Autoformat, HorizonUploadAdapter,
+      HorizontalLine, Autoformat, Widget, HorizonUploadAdapter, HorizonDiagram,
     ],
     toolbar: {
       items: [
         "undo", "redo", "|", "heading", "|", "bold", "italic", "underline",
         "strikethrough", "code", "|", "bulletedList", "numberedList", "blockQuote", "|",
-        "link", "insertTable", "codeBlock", "uploadImage", "horizontalLine",
+        "link", "insertTable", "codeBlock", "uploadImage", "insertDiagram", "horizontalLine",
       ],
       shouldNotGroupWhenFull: false,
     },
@@ -315,6 +432,7 @@ function init() {
             if (bridge) bridge.editor_blurred();
           });
           linkHandlers(editor);
+          diagramHandlers(editor);
           installApi();
           // Pulled again: CKEditor starts asynchronously, and Python may have loaded
           // another note or toggled read-only (call_js lands nowhere) in the meantime.
@@ -374,6 +492,26 @@ function installApi() {
     },
     focusEditor() {
       editor.editing.view.focus();
+    },
+    insertDiagram(id) {
+      editor.execute("insertHorizonDiagram", { diagramId: id });
+      editor.editing.view.focus();
+    },
+    refreshDiagram(id) {
+      diagramRevisions.set(id, (diagramRevisions.get(id) || 0) + 1);
+      const root = editor.model.document.getRoot();
+      // Reconverting re-renders the widget under the new URL; the data is unchanged, so
+      // it must not look like an edit.
+      fromPython = true;
+      try {
+        for (const item of editor.model.createRangeIn(root).getItems()) {
+          if (item.is("element", "horizonDiagram") && item.getAttribute("diagramId") === id) {
+            editor.editing.reconvertItem(item);
+          }
+        }
+      } finally {
+        fromPython = false;
+      }
     },
   };
 }
