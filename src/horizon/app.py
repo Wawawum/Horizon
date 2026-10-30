@@ -7,6 +7,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidg
 
 from horizon import theme as _theme
 from horizon.database import Database
+from horizon.diagram import DiagramRepository
 from horizon.dialogs import NoteFormatDialog
 from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
@@ -36,6 +37,7 @@ from horizon.widgets.media import MediaWidget
 from horizon.archimate import ArchimateModelRepository
 from horizon.widgets.archimate import ArchimateWidget
 from horizon.widgets.debug_drop import DebugDropWidget
+from horizon.widgets.diagrams import DiagramEditorWidget, DiagramsListWidget
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
 from horizon.note_window import NoteWindow
@@ -121,6 +123,7 @@ class MainWindow(QMainWindow):
         self._deliverable_repo = DeliverableRepository(db)
         self._archimate_repo = ArchimateModelRepository(db)
         self._document_repo = DocumentRepository(db)
+        self._diagram_repo = DiagramRepository(db)
         self._note_source: str = "notes"
         self._current_project = None
 
@@ -176,6 +179,12 @@ class MainWindow(QMainWindow):
         self._debug_widget = DebugDropWidget()
         self._right_stack.addWidget(self._debug_widget)           # index 12
 
+        self._diagrams_list = DiagramsListWidget(self._diagram_repo, self._proj_repo)
+        self._right_stack.addWidget(self._diagrams_list)          # index 13
+
+        self._diagram_editor = DiagramEditorWidget(self._diagram_repo, self._proj_repo)
+        self._right_stack.addWidget(self._diagram_editor)         # index 14
+
         self._splitter.addWidget(self._right_stack)
 
         self._right_panel = RightPanelWidget()
@@ -199,6 +208,7 @@ class MainWindow(QMainWindow):
         self._command_bar.deliverables_requested.connect(self._show_deliverables)
         self._command_bar.media_requested.connect(self._show_media)
         self._command_bar.archimate_requested.connect(self._show_archimate)
+        self._command_bar.diagrams_requested.connect(self._show_diagrams)
         self._command_bar.debug_requested.connect(self._show_debug)
         self._command_bar.search_requested.connect(self._on_search)
         self._media_widget.note_open_requested.connect(self._open_note_from_media)
@@ -219,6 +229,8 @@ class MainWindow(QMainWindow):
         self._templates_list.back_requested.connect(self._show_deliverables)
         self._templates_list.template_edit_requested.connect(self._open_template)
         self._template_detail.back_requested.connect(self._show_templates_list)
+        self._diagrams_list.diagram_edit_requested.connect(self._open_diagram)
+        self._diagram_editor.back_requested.connect(self._show_diagrams)
 
         self._show_home()  # default view on startup
 
@@ -369,6 +381,19 @@ class MainWindow(QMainWindow):
         self._command_bar.set_active("archimate")
         self._archimate_widget.load()
         self._right_stack.setCurrentIndex(11)
+
+    def _show_diagrams(self) -> None:
+        self._project_list.clear_selection()
+        self._command_bar.set_active("diagrams")
+        self._diagrams_list.load()
+        self._right_stack.setCurrentIndex(13)
+
+    def _open_diagram(self, diagram_id: int) -> None:
+        diagram = self._diagram_repo.get(diagram_id)
+        if diagram is None:
+            return
+        self._diagram_editor.load_diagram(diagram, self._proj_repo.list_all())
+        self._right_stack.setCurrentIndex(14)
 
     def _show_debug(self) -> None:
         self._project_list.clear_selection()
@@ -585,7 +610,7 @@ class MainWindow(QMainWindow):
         return super().nativeEvent(event_type, message)
 
     def closeEvent(self, event) -> None:
-        for detail in (self._note_detail, self._deliverable_detail, self._template_detail):
+        for detail in (self._note_detail, self._deliverable_detail, self._template_detail, self._diagram_editor):
             detail.flush_and_save()
         self._task_filter_model.flush_and_save()
         ctypes.windll.user32.UnregisterHotKey(int(self.winId()), _PIN_HOTKEY_ID)

@@ -443,7 +443,7 @@ class _SearchLineEdit(QLineEdit):
 
 class CommandBar(QWidget):
     """Barre de commandes horizontale (sous la barre de titre) regroupant la
-    navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate, Debug."""
+    navigation principale : Board, Notes, Tags, Deliverables, Media, ArchiMate, Diagrams, Debug."""
 
     home_requested = Signal()
     notes_requested = Signal()
@@ -451,6 +451,7 @@ class CommandBar(QWidget):
     deliverables_requested = Signal()
     media_requested = Signal()
     archimate_requested = Signal()
+    diagrams_requested = Signal()
     debug_requested = Signal()
     search_requested = Signal(str, str)  # (query, mode)
 
@@ -479,7 +480,10 @@ class CommandBar(QWidget):
         self._archimate_btn = _NavButton("ArchiMate", "06")
         self._archimate_btn.clicked.connect(self.archimate_requested)
 
-        self._debug_btn = _NavButton("Debug", "07")
+        self._diagrams_btn = _NavButton("Diagrams", "07")
+        self._diagrams_btn.clicked.connect(self.diagrams_requested)
+
+        self._debug_btn = _NavButton("Debug", "08")
         self._debug_btn.clicked.connect(self.debug_requested)
 
         self._buttons = {
@@ -489,6 +493,7 @@ class CommandBar(QWidget):
             "deliverables": self._deliverables_btn,
             "media": self._media_btn,
             "archimate": self._archimate_btn,
+            "diagrams": self._diagrams_btn,
             "debug": self._debug_btn,
         }
 

@@ -61,7 +61,7 @@ Top of the window, from top to bottom:
 - `TitleBar` ([../src/horizon/titlebar.py](../src/horizon/titlebar.py)): custom dark title bar
   (icon, title, min/max/close). It holds no search field.
 - `CommandBar` ([../src/horizon/widgets/project.py](../src/horizon/widgets/project.py)): main
-  navigation buttons (Board, Notes, Tags, Deliverables, Media, ArchiMate, Debug) plus the global
+  navigation buttons (Board, Notes, Tags, Deliverables, Media, ArchiMate, Diagrams, Debug) plus the global
   search field and its mode selector (all terms / any term). It emits `search_requested(query,
   mode)`, which `MainWindow._on_search` routes to `SearchRepository`. `Escape` clears the field.
 
@@ -216,6 +216,28 @@ into the panel (`_load_note_into_detail`) and whenever the set of windows change
 close (`NoteWindow.closed`, emitted after `flush_and_save()`), and when a window follows a
 `[[link]]` to another note (`NoteWindow.note_changed`, which re-keys the registry). On close the
 panel reloads the note from the database and unlocks.
+
+---
+
+## Diagrams (draw.io)
+
+[../src/horizon/diagram.py](../src/horizon/diagram.py) stores diagrams in `diagrams`: title,
+optional `project_id`, the draw.io XML, a small PNG `thumbnail` and `archived`. Diagrams are
+neither searchable nor tagged.
+
+[../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) does not bundle draw.io: a local
+wrapper page loads the online embed (`https://embed.diagrams.net/?embed=1&proto=json…`) in an
+`<iframe>`, so editing needs an Internet connection. The wrapper relays draw.io's JSON embed protocol
+over a QWebChannel, accepting only messages from that origin and frame. `DrawioEditor` answers `init`
+with a `load` action (`autosave: 1`), keeps a synchronous XML mirror fed by `autosave` events — ignored
+between a `load` action and its `load` event, since one instance is reused across diagrams — and renders
+thumbnails with an `export` action (`format: png`) awaited in a nested event loop. Without an `init`
+within 20 s it emits `unavailable` and the editor shows a retry banner; the stored XML is then left
+untouched.
+
+[../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
+(`DiagramsListWidget`) and the editor panel (`DiagramEditorWidget`): XML autosaved 2 s after a change,
+thumbnail refreshed on Back and on application close (`flush_and_save`).
 
 ---
 
