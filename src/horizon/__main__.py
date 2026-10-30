@@ -8,7 +8,7 @@ from horizon.app import MainWindow
 from horizon.database import DB_PATH, Database
 from horizon.preferences import Preferences
 from horizon.single_instance import ActivationServer, acquire_mutex, notify_running_instance, release_mutex
-from horizon.widgets.webeditor import register_image_scheme
+from horizon.widgets.webeditor import register_schemes
 
 
 def main() -> None:
@@ -29,7 +29,7 @@ def main() -> None:
 
     prefs = Preferences()
     db = Database()
-    register_image_scheme()  # avant QApplication : exigence de QtWebEngine
+    register_schemes()  # avant QApplication : exigence de QtWebEngine
     app = QApplication(sys.argv)
 
     api = ApiServer(port=prefs.api_port, db_path=DB_PATH)

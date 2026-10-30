@@ -204,7 +204,22 @@ class DrawioEditor(QWidget):
         return self._loaded
 
     def export_png(self, timeout_ms: int = _EXPORT_TIMEOUT_MS) -> bytes | None:
-        """Render the current diagram to PNG, or None if draw.io is not there to do it.
+        """Render the current diagram to PNG, or None if draw.io is not there to do it."""
+        return self._export("png", timeout_ms)
+
+    def export_svg(self, timeout_ms: int = _EXPORT_TIMEOUT_MS) -> str | None:
+        """Render the current diagram to SVG (shown in WYSIWYG notes), or None if
+        draw.io is not there to do it."""
+        data = self._export("svg", timeout_ms)
+        if data is None:
+            return None
+        try:
+            return data.decode("utf-8")
+        except UnicodeDecodeError:
+            return None
+
+    def _export(self, fmt: str, timeout_ms: int) -> bytes | None:
+        """Ask draw.io for an export and wait for it.
 
         Spins a nested QEventLoop, like _WebEditorBase.flush(): the answer comes back
         asynchronously through the channel. Not to be called from a handler of a draw.io
@@ -222,7 +237,7 @@ class DrawioEditor(QWidget):
 
         self._export_received.connect(_done)
         try:
-            self._post({"action": "export", "format": "png", "background": "#ffffff", "border": 10})
+            self._post({"action": "export", "format": fmt, "background": "#ffffff", "border": 10})
             QTimer.singleShot(timeout_ms, loop.quit)
             loop.exec()
         finally:

@@ -27,6 +27,7 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
+from horizon.diagram import DiagramRepository
 from horizon.dialogs import ConfirmDialog, NoteFormatDialog, TaskDetailDialog
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
@@ -34,6 +35,7 @@ from horizon.note import Note, NoteFormat, NoteRepository, NoteVersion, NoteVers
 from horizon.note_task import NoteTaskRepository, build_task_render_map, sync_note_tasks
 from horizon.project import ProjectRepository
 from horizon.task import SubtaskRepository, TaskRepository
+from horizon.widgets.diagrams import DiagramPickerDialog
 from horizon.widgets.markdown import (
     _plus_icon,
     _PLUS_ICON_SIZE,
@@ -150,14 +152,16 @@ class NoteDetailWidget(QWidget):
     open_as_sticky_requested = Signal(int)  # emits note_id
     title_changed = Signal(str)  # emits new title after save
     editor_ready = Signal()  # CodeMirror is live; focus_editor() lands from here on
+    diagram_open_requested = Signal(int)  # emits diagram_id (double-click on a diagram, WYSIWYG)
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, task_repo: TaskRepository | None = None, subtask_repo: SubtaskRepository | None = None, note_task_repo: NoteTaskRepository | None = None, windowed: bool = False, sticky: bool = False, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, task_repo: TaskRepository | None = None, subtask_repo: SubtaskRepository | None = None, note_task_repo: NoteTaskRepository | None = None, diagram_repo: DiagramRepository | None = None, windowed: bool = False, sticky: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
         self._folder_repo = folder_repo
         self._prefs = prefs
         self._image_repo = image_repo
+        self._diagram_repo = diagram_repo
         self._version_repo = version_repo
         self._task_repo = task_repo
         self._subtask_repo = subtask_repo
@@ -305,6 +309,7 @@ class NoteDetailWidget(QWidget):
         )
         self._html_editor = WebHtmlEditor(
             image_repo, self,
+            diagram_repo=diagram_repo,
             show_toolbar=not sticky,
             placeholder="Notes de réunion…" if sticky else "Écrivez ici…",
             prefs=prefs,
@@ -316,6 +321,8 @@ class NoteDetailWidget(QWidget):
             editor.editor_ready.connect(self.editor_ready)
             editor.text_changed.connect(self._on_editor_text_changed)
         self._html_editor.link_clicked.connect(self._on_link_clicked)
+        self._html_editor.diagram_insert_requested.connect(self._on_insert_diagram)
+        self._html_editor.diagram_open_requested.connect(self.diagram_open_requested)
         self._editor_stack = QStackedWidget(self)
         self._editor_stack.addWidget(self._md_editor)
         self._editor_stack.addWidget(self._html_editor)
@@ -658,6 +665,17 @@ class NoteDetailWidget(QWidget):
         from horizon.dialogs import MermaidViewerDialog
         dlg = MermaidViewerDialog(source, parent=self)
         dlg.show()
+
+    def _on_insert_diagram(self) -> None:
+        if self._diagram_repo is None:
+            return
+        diagram_id = DiagramPickerDialog.ask(self._diagram_repo, self)
+        if diagram_id is not None:
+            self._html_editor.insert_diagram(diagram_id)
+
+    def refresh_diagram(self, diagram_id: int) -> None:
+        """Show the new rendering of a diagram that was redrawn or deleted."""
+        self._html_editor.refresh_diagram(diagram_id)
 
     def _on_link_clicked(self, url: str) -> None:
         from PySide6.QtCore import QUrl

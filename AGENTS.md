@@ -91,8 +91,8 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/note_window.py](src/horizon/note_window.py) | Detached note window, windowed and sticky (pinned) modes |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
-| [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` scheme |
-| [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail) + `DiagramRepository` |
+| [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` and `horizon-diagram://` schemes |
+| [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
 | [src/horizon/widgets/drawio.py](src/horizon/widgets/drawio.py) | `DrawioEditor`: online draw.io embed in an iframe, JSON protocol over QWebChannel |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |
 | [src/horizon/mcp_server.py](src/horizon/mcp_server.py) | MCP server entry point |
