@@ -109,6 +109,20 @@ Resources resolved at runtime via `Path(__file__).parent` must be declared in
 read from disk (rather than through the Qt resource system in `resources.qrc`), add it to
 `datas` there too.
 
+### Updates
+
+A few seconds after startup, Horizon asks the GitHub API for the latest
+[Release](https://github.com/Wawawum/Horizon/releases/latest). When it is newer than the
+running version, a dialog offers to install it: the executable downloads
+`Horizon-<version>-win64.zip`, checks its SHA-256 against the release, extracts it next to
+the install folder, then quits; a detached PowerShell script swaps the folders and relaunches
+Horizon. The database and preferences live in `~/.horizon/`, outside the replaced folder.
+Run from source, Horizon only points to the release — update the repository with git.
+
+The running version comes from `src/horizon/VERSION`, written by CI from the tag before
+PyInstaller runs, so the updater depends on the asset name `Horizon-<version>-win64.zip`.
+Each step is logged to `~/.horizon/updates/update.log`.
+
 ---
 
 ## Architecture

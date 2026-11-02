@@ -1,14 +1,16 @@
 import ctypes
 import ctypes.wintypes
+from pathlib import Path
 
 from PySide6.QtCore import QEvent, Qt, QTimer
 from PySide6.QtGui import QFont, QFontDatabase, QIcon
 from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidget, QVBoxLayout, QWidget
 
 from horizon import theme as _theme
+from horizon import updater
 from horizon.database import Database
 from horizon.diagram import DiagramRepository
-from horizon.dialogs import NoteFormatDialog
+from horizon.dialogs import AlertDialog, NoteFormatDialog
 from horizon.document import DocumentRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
@@ -38,6 +40,7 @@ from horizon.archimate import ArchimateModelRepository
 from horizon.widgets.archimate import ArchimateWidget
 from horizon.widgets.debug_drop import DebugDropWidget
 from horizon.widgets.diagrams import DiagramEditorWidget, DiagramsListWidget
+from horizon.widgets.updates import UpdateCheckWorker, UpdateDialog
 from horizon.toast import ToastNotification
 from horizon.pin_border import PinBorderOverlay
 from horizon.note_window import NoteWindow
@@ -258,6 +261,35 @@ class MainWindow(QMainWindow):
         self._pin_toast: ToastNotification | None = None
         self._pin_borders: dict[int, PinBorderOverlay] = {}
         self._register_pin_hotkey()
+
+        updater.cleanup_previous_update()
+        self._update_check_worker: UpdateCheckWorker | None = None
+        # Différé : laisse l'interface et QtWebEngine démarrer avant d'aller sur le réseau.
+        QTimer.singleShot(5000, self._check_for_updates)
+
+    def _check_for_updates(self) -> None:
+        self._update_check_worker = UpdateCheckWorker(self)
+        self._update_check_worker.update_available.connect(self._on_update_available)
+        self._update_check_worker.start()
+
+    def _on_update_available(self, release: updater.ReleaseInfo) -> None:
+        dialog = UpdateDialog(release, self)
+        dialog.install_ready.connect(self._install_update)
+        dialog.exec()
+
+    def _install_update(self, staged: str) -> None:
+        """Confie le remplacement au script d'installation, puis quitte pour le laisser faire."""
+        try:
+            updater.launch_installer(Path(staged))
+        except OSError as exc:
+            updater.log(f"Impossible de lancer l'installation : {exc}")
+            AlertDialog.warn("Mise à jour", f"Impossible de lancer l'installation : {exc}", self)
+            return
+        # Fermées une à une pour qu'elles sauvegardent leur note ; quit() ne le ferait pas.
+        for win in list(self._note_windows.values()):
+            win.close()
+        self.close()
+        QApplication.quit()
 
     def _register_pin_hotkey(self) -> None:
         hk = self._prefs.pin_hotkey

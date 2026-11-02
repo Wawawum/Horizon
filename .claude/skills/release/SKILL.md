@@ -69,8 +69,14 @@ git checkout main && git pull origin main && git checkout -b release/v<VERSION>
 
 ### 2. Bumper le TOML
 
-Modifie la seule ligne `version = "..."` de `pyproject.toml`. Rien d'autre : aucun code ne
-lit cette valeur, `src/horizon/__init__.py` est vide et il n'y a pas de `__version__`.
+Modifie la seule ligne `version = "..."` de `pyproject.toml`. Rien d'autre : `src/horizon/version.py`
+la lit en mode source, et dans l'exécutable c'est le fichier `VERSION` gravé par le CI
+(depuis le tag) qui fait foi.
+
+C'est cette version gravée que l'updater intégré compare à la dernière Release : un tag
+qui ne correspond pas à ce qui est réellement livré ferait proposer une mise à jour en boucle
+ou jamais. Pour la même raison, le nom d'asset `Horizon-<VERSION>-win64.zip` est un contrat
+avec `src/horizon/updater.py` — ne le renomme pas dans le workflow sans adapter l'updater.
 
 Commite avec le style du dépôt — préfixe conventionnel, message en français :
 

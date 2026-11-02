@@ -214,6 +214,9 @@ node_modules/
 # draw.io embarque, telecharge par tools/fetch_drawio.py (~47 Mo, non versionne)
 src/horizon/resources/drawio/
 
+# Version gravee dans le bundle par le CI (horizon/version.py)
+src/horizon/VERSION
+
 # Archi (sauvegardes ecrites a chaque enregistrement d un modele)
 *.archimate.bak
 

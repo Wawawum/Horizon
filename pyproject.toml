@@ -21,6 +21,10 @@ dependencies = [
     "mcp>=1.27,<2",
     # httpx est en 0.x : pas de garantie de stabilite entre mineures
     "httpx>=0.28,<1",
+    # magasin de certificats de updater.py : celui de Windows, lu par l'OpenSSL de
+    # Python, ne remonte pas toujours la chaine Sectigo servie par api.github.com ;
+    # versionne par date, pas de borne haute utile
+    "certifi>=2024.2.2",
 ]
 
 [tool.hatch.build.targets.wheel]

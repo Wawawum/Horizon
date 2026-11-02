@@ -23,7 +23,8 @@ horizon-mcp
 ```
 
 - Database: auto-created at `~/.horizon/horizon.db` on first launch.
-- Preferences: stored in `src/horizon/preferences.json`.
+- Preferences: stored in `~/.horizon/preferences.json` (outside the app folder, which updates replace).
+  `src/horizon/preferences.json` is only read as a fallback until that file exists.
 - API port: written to `~/.horizon/api.port` while the app is running.
 - Tests: no automated test suite exists yet; validate changes manually and with lightweight checks.
 
@@ -93,6 +94,9 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/widgets/task_filters.py](src/horizon/widgets/task_filters.py) | `TaskFilterModel` (shared selection, 5 s debounced save) + `TaskFilterBar` used by the ALL TASKS and project boards |
 | [src/horizon/note_window.py](src/horizon/note_window.py) | Detached note window, windowed and sticky (pinned) modes |
 | [src/horizon/preferences.py](src/horizon/preferences.py) | Preferences properties and explicit persistence |
+| [src/horizon/version.py](src/horizon/version.py) | Running version: `VERSION` baked in by CI, else `pyproject.toml` |
+| [src/horizon/updater.py](src/horizon/updater.py) | Self-update from GitHub Releases: check, download + SHA-256, staging, detached PowerShell swap |
+| [src/horizon/widgets/updates.py](src/horizon/widgets/updates.py) | `UpdateCheckWorker`, `UpdateDownloadWorker`, `UpdateDialog` (startup check wired in `MainWindow`) |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
 | [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` and `horizon-diagram://` schemes |
 | [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
