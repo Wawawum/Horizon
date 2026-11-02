@@ -41,6 +41,9 @@ jobs:
             $version = python -c "import tomllib, pathlib; print(tomllib.loads(pathlib.Path('pyproject.toml').read_text(encoding='utf-8'))['project']['version'])"
           }
           "version=$version" >> $env:GITHUB_OUTPUT
+          # Lu par horizon/version.py dans le bundle : l'updater compare cette valeur
+          # a la derniere Release, elle doit donc etre celle du tag.
+          Set-Content -Path src/horizon/VERSION -Value $version -NoNewline -Encoding utf8NoBOM
           Write-Host "Version : $version"
 
       - name: Installer les dependances
@@ -68,6 +71,8 @@ jobs:
           $required = @(
             'dist/Horizon/Horizon.exe',
             'dist/Horizon/_internal/horizon/preferences.json',
+            'dist/Horizon/_internal/horizon/VERSION',
+            'dist/Horizon/_internal/certifi/cacert.pem',
             'dist/Horizon/_internal/horizon/themes/terminal.json',
             'dist/Horizon/_internal/horizon/resources/mermaid.min.js',
             'dist/Horizon/_internal/horizon/resources/horizon-editor.bundle.js',

@@ -21,6 +21,11 @@ PKG = ROOT / "src" / "horizon"
 _ico = ROOT / "build" / "horizon.ico"
 icon = str(_ico) if _ico.exists() else None
 
+# Ecrit par le CI (version du tag) ; absent -> version.py se rabat sur les
+# metadonnees du paquet installe.
+_version = PKG / "VERSION"
+version_datas = [(str(_version), "horizon")] if _version.exists() else []
+
 a = Analysis(
     [str(PKG / "__main__.py")],
     pathex=[str(ROOT / "src")],
@@ -34,7 +39,7 @@ a = Analysis(
         (str(PKG / "themes"), "horizon/themes"),
         # preferences.py
         (str(PKG / "preferences.json"), "horizon"),
-    ],
+    ] + version_datas,
     hiddenimports=[
         # importe pour son effet de bord (enregistrement des ressources Qt)
         "horizon.resources_rc",
