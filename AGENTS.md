@@ -23,7 +23,8 @@ horizon-mcp
 ```
 
 - Database: auto-created at `~/.horizon/horizon.db` on first launch.
-- Preferences: stored in `src/horizon/preferences.json`.
+- Preferences: stored in `~/.horizon/preferences.json` (outside the app folder, which updates replace).
+  `src/horizon/preferences.json` is only read as a fallback until that file exists.
 - API port: written to `~/.horizon/api.port` while the app is running.
 - Tests: no automated test suite exists yet; validate changes manually and with lightweight checks.
 
