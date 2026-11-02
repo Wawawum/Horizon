@@ -10,6 +10,9 @@ See [README.md](README.md) for the human-facing project overview and setup.
 # Install in editable mode
 pip install -e .
 
+# Fetch the embedded draw.io editor (not versioned; the Diagrams module needs it)
+python tools/fetch_drawio.py
+
 # Run the desktop app
 python -m horizon
 # or
@@ -93,7 +96,7 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
 | [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` and `horizon-diagram://` schemes |
 | [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
-| [src/horizon/widgets/drawio.py](src/horizon/widgets/drawio.py) | `DrawioEditor`: online draw.io embed in an iframe, JSON protocol over QWebChannel |
+| [src/horizon/widgets/drawio.py](src/horizon/widgets/drawio.py) | `DrawioEditor`: embedded draw.io (`resources/drawio/draw.war`, fetched by `tools/fetch_drawio.py`) served on `horizon-drawio://app`, JSON protocol over QWebChannel |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |
 | [src/horizon/mcp_server.py](src/horizon/mcp_server.py) | MCP server entry point |
 | [pyproject.toml](pyproject.toml) | Dependencies and script entry points |

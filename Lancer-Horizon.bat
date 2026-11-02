@@ -21,6 +21,11 @@ if errorlevel 1 (
     "%PY%" -m pip install -e "%REPO%." || goto :error
 )
 
+rem Editeur draw.io embarque : telecharge s'il manque ou n'est pas a la bonne version.
+rem Un echec (hors ligne) n'empeche pas le lancement ; seul le module Diagrams en patit.
+"%PY%" "%REPO%tools\fetch_drawio.py" >nul
+if errorlevel 1 echo Avertissement : draw.io n'a pas pu etre telecharge, le module Diagrams sera indisponible.
+
 start "" "%PYW%" -m horizon %*
 exit /b 0
 

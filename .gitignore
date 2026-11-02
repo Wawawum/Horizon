@@ -211,6 +211,9 @@ __marimo__/
 # Node (web/ build toolchain, see web/README.md)
 node_modules/
 
+# draw.io embarque, telecharge par tools/fetch_drawio.py (~47 Mo, non versionne)
+src/horizon/resources/drawio/
+
 # Archi (sauvegardes ecrites a chaque enregistrement d un modele)
 *.archimate.bak
 

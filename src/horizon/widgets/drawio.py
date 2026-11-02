@@ -1,8 +1,10 @@
 """draw.io (diagrams.net) editor running inside a QWebEngineView.
 
-The editor itself is the online embed of diagrams.net, loaded in an <iframe> by a small
-local wrapper page; nothing of draw.io is bundled, so editing needs an Internet
-connection. The wrapper relays draw.io's JSON embed protocol
+The editor is draw.io's own web application, embedded in Horizon: the release archive
+(`resources/drawio/draw.war`, fetched by `tools/fetch_drawio.py`) is served straight
+from the zip on the horizon-drawio://app origin, so editing needs no network — some
+corporate networks block embed.diagrams.net. A small wrapper page, served on the same
+origin, loads draw.io in an <iframe> and relays its JSON embed protocol
 (https://www.drawio.com/doc/faq/embed-mode) between the iframe and Python over a
 QWebChannel. As with the note editors, Python keeps a synchronous mirror of the
 document (`DrawioEditor.xml`), fed by draw.io's autosave events.
@@ -10,45 +12,95 @@ document (`DrawioEditor.xml`), fed by draw.io's autosave events.
 
 import base64
 import json
+import zipfile
+from pathlib import Path
 
-from PySide6.QtCore import QBuffer, QByteArray, QEventLoop, QObject, QSize, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QBuffer, QByteArray, QEventLoop, QFile, QObject, QSize, Qt, QTimer, QUrl, Signal, Slot
 from PySide6.QtGui import QImage
 from PySide6.QtWebChannel import QWebChannel
-from PySide6.QtWebEngineCore import QWebEnginePage, QWebEngineProfile, QWebEngineSettings
+from PySide6.QtWebEngineCore import (
+    QWebEnginePage,
+    QWebEngineProfile,
+    QWebEngineSettings,
+    QWebEngineUrlRequestInfo,
+    QWebEngineUrlRequestInterceptor,
+    QWebEngineUrlRequestJob,
+    QWebEngineUrlScheme,
+    QWebEngineUrlSchemeHandler,
+)
 from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWidgets import QVBoxLayout, QWidget
 
 from horizon import theme as _theme
-from horizon.widgets.webeditor import _RESOURCES_BASE_URL
+from horizon.widgets.webeditor import _RESOURCES_DIR, _reply
 
-DRAWIO_ORIGIN = "https://embed.diagrams.net"
+DRAWIO_SCHEME = b"horizon-drawio"
+DRAWIO_ORIGIN = "horizon-drawio://app"
 
-_INIT_TIMEOUT_MS   = 20000  # without draw.io's init by then, it is deemed unreachable
+_ARCHIVE      = _RESOURCES_DIR / "drawio" / "draw.war"
+_WRAPPER_PATH = "horizon.html"
+_CHANNEL_PATH = "qwebchannel.js"
+
+_INIT_TIMEOUT_MS   = 20000  # without draw.io's init by then, it is deemed broken
 _EXPORT_TIMEOUT_MS = 3000
 _THUMBNAIL_SIZE    = QSize(320, 240)
+
+# Requests the draw.io page may make; everything else (fonts, analytics, cloud pickers…)
+# is cut off, so that a network that blocks or stalls them changes nothing.
+_ALLOWED_SCHEMES = {DRAWIO_SCHEME.decode(), "data", "blob"}
+
+_MIME_TYPES = {
+    ".html": b"text/html;charset=utf-8",
+    ".js":   b"text/javascript;charset=utf-8",
+    ".css":  b"text/css;charset=utf-8",
+    ".json": b"application/json",
+    ".txt":  b"text/plain;charset=utf-8",
+    ".xml":  b"application/xml",
+    ".svg":  b"image/svg+xml",
+    ".png":  b"image/png",
+    ".gif":  b"image/gif",
+    ".jpg":  b"image/jpeg",
+    ".ico":  b"image/x-icon",
+    ".woff": b"font/woff",
+    ".woff2": b"font/woff2",
+    ".ttf":  b"font/ttf",
+    ".wasm": b"application/wasm",
+}
 
 _PROFILE: QWebEngineProfile | None = None
 
 
-def _drawio_profile() -> QWebEngineProfile:
-    """Off-the-record profile for the draw.io page.
+def register_drawio_scheme() -> None:
+    """Declare horizon-drawio:// to Chromium; like webeditor.register_schemes(), must
+    run before QApplication exists."""
+    scheme = QWebEngineUrlScheme(DRAWIO_SCHEME)
+    # Host, not Path: draw.io rebuilds its own URL from location.host at start-up (and
+    # redirects when the result differs), and a host gives the page a real origin for
+    # postMessage.
+    scheme.setSyntax(QWebEngineUrlScheme.Syntax.Host)
+    # SecureScheme: draw.io relies on secure-context APIs (clipboard, crypto).
+    # CorsEnabled / FetchApiAllowed: it loads its translations, stencils and plugins
+    # with XMLHttpRequest and fetch.
+    scheme.setFlags(
+        QWebEngineUrlScheme.Flag.SecureScheme
+        | QWebEngineUrlScheme.Flag.CorsEnabled
+        | QWebEngineUrlScheme.Flag.FetchApiAllowed
+    )
+    QWebEngineUrlScheme.registerScheme(scheme)
 
-    Not the note editors' profile: that one disables the HTTP cache, which suits
-    local pages but would download draw.io again on every open. The default
-    off-the-record cache is in memory, so draw.io is fetched once per session.
-    Created lazily because a QWebEngineProfile must not exist before QApplication.
-    """
-    global _PROFILE
-    if _PROFILE is None:
-        _PROFILE = QWebEngineProfile()  # unnamed == off-the-record
-    return _PROFILE
+
+def drawio_available() -> bool:
+    """Whether the embedded draw.io was fetched (tools/fetch_drawio.py)."""
+    return _ARCHIVE.is_file()
 
 
-def _drawio_url() -> str:
-    params = "embed=1&proto=json&spin=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0&libraries=1&lang=fr"
+def _drawio_query() -> str:
+    # stealth=1: draw.io's switch for "no external services"; pwa=0: no service worker.
+    params = ("embed=1&proto=json&spin=1&noSaveBtn=1&noExitBtn=1&saveAndExit=0"
+              "&libraries=1&lang=fr&stealth=1&pwa=0")
     if _theme.current().is_dark:
         params += "&dark=1"
-    return f"{DRAWIO_ORIGIN}/?{params}"
+    return params
 
 
 def _make_wrapper_html() -> str:
@@ -62,8 +114,8 @@ def _make_wrapper_html() -> str:
 </style>
 </head>
 <body>
-<iframe id="drawio" allow="clipboard-read; clipboard-write" src="{_drawio_url()}"></iframe>
-<script src="qrc:///qtwebchannel/qwebchannel.js"></script>
+<iframe id="drawio" allow="clipboard-read; clipboard-write" src="index.html?{_drawio_query()}"></iframe>
+<script src="{_CHANNEL_PATH}"></script>
 <script>
 (function () {{
   const ORIGIN = {json.dumps(DRAWIO_ORIGIN)};
@@ -92,6 +144,61 @@ def _make_wrapper_html() -> str:
 </html>"""
 
 
+class _DrawioSchemeHandler(QWebEngineUrlSchemeHandler):
+    """Serves horizon-drawio://app/<path>: draw.io's files straight from its release
+    archive, plus the wrapper page and qwebchannel.js, which have to share draw.io's
+    origin."""
+
+    def __init__(self, parent=None) -> None:
+        super().__init__(parent)
+        self._archive: zipfile.ZipFile | None = None
+
+    def requestStarted(self, job: QWebEngineUrlRequestJob) -> None:
+        path = job.requestUrl().path(QUrl.ComponentFormattingOption.FullyDecoded).lstrip("/")
+        if path == _WRAPPER_PATH:
+            _reply(job, _make_wrapper_html().encode("utf-8"), _MIME_TYPES[".html"])
+            return
+        if path == _CHANNEL_PATH:
+            source = QFile(":/qtwebchannel/qwebchannel.js")
+            if source.open(QFile.OpenModeFlag.ReadOnly):
+                _reply(job, bytes(source.readAll()), _MIME_TYPES[".js"])
+                return
+        data = self._read(path or "index.html")
+        if data is None:
+            job.fail(QWebEngineUrlRequestJob.Error.UrlNotFound)
+            return
+        _reply(job, data, _MIME_TYPES.get(Path(path).suffix.lower(), b"application/octet-stream"))
+
+    def _read(self, member: str) -> bytes | None:
+        try:
+            if self._archive is None:
+                self._archive = zipfile.ZipFile(_ARCHIVE)
+            return self._archive.read(member)
+        except (OSError, KeyError, zipfile.BadZipFile):
+            return None
+
+
+class _ExternalRequestBlocker(QWebEngineUrlRequestInterceptor):
+    def interceptRequest(self, info: QWebEngineUrlRequestInfo) -> None:
+        if info.requestUrl().scheme() not in _ALLOWED_SCHEMES:
+            info.block(True)
+
+
+def _drawio_profile() -> QWebEngineProfile:
+    """Off-the-record profile for the draw.io page, with the horizon-drawio:// handler
+    and the external-request blocker. Not the note editors' profile: those pages do not
+    need either. Created lazily because a QWebEngineProfile must not exist before
+    QApplication."""
+    global _PROFILE
+    if _PROFILE is None:
+        _PROFILE = QWebEngineProfile()  # unnamed == off-the-record
+        _PROFILE.setUrlRequestInterceptor(_ExternalRequestBlocker(_PROFILE))
+        if QWebEngineUrlScheme.schemeByName(QByteArray(DRAWIO_SCHEME)).name():
+            _PROFILE.installUrlSchemeHandler(QByteArray(DRAWIO_SCHEME), _DrawioSchemeHandler(_PROFILE))
+        # Otherwise register_drawio_scheme() was not called: draw.io never answers.
+    return _PROFILE
+
+
 def make_thumbnail(png: bytes) -> bytes | None:
     """Shrink an exported PNG to list-thumbnail size; None if it cannot be decoded."""
     image = QImage()
@@ -111,7 +218,7 @@ def make_thumbnail(png: bytes) -> bytes | None:
 
 class _DrawioBridge(QObject):
     """QWebChannel endpoint. Deliberately exposes a single slot: the page it serves
-    hosts remote content."""
+    hosts a third-party application."""
 
     message_received = Signal(str)
 
@@ -125,7 +232,7 @@ class DrawioEditor(QWidget):
 
     xml_changed = Signal()   # the mirror changed (draw.io autosave or Ctrl+S)
     ready       = Signal()   # draw.io answered and holds the current diagram
-    unavailable = Signal()   # draw.io never answered: offline, or diagrams.net down
+    unavailable = Signal()   # draw.io never answered: archive missing or broken
 
     _export_received = Signal(str)  # data URI, or "" when the export failed
 
@@ -148,8 +255,8 @@ class DrawioEditor(QWidget):
         self._init_timer.setInterval(_INIT_TIMEOUT_MS)
         self._init_timer.timeout.connect(self.unavailable)
 
-        # Built on first show, like the note editors: no Chromium frame (nor download of
-        # draw.io) for a session that never opens a diagram.
+        # Built on first show, like the note editors: no Chromium frame (nor 10 MB of
+        # draw.io to parse) for a session that never opens a diagram.
         self._view: QWebEngineView | None = None
 
         self._layout = QVBoxLayout(self)
@@ -161,8 +268,6 @@ class DrawioEditor(QWidget):
         page = QWebEnginePage(_drawio_profile(), self)
         page.setWebChannel(self._channel)
         settings = page.settings()
-        # The wrapper is a file:// page and draw.io an https:// iframe.
-        settings.setAttribute(QWebEngineSettings.WebAttribute.LocalContentCanAccessRemoteUrls, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanAccessClipboard, True)
         settings.setAttribute(QWebEngineSettings.WebAttribute.JavascriptCanPaste, True)
         self._view = QWebEngineView(self)
@@ -175,8 +280,13 @@ class DrawioEditor(QWidget):
     def _load_page(self) -> None:
         self._initialized = False
         self._loaded = False
+        if not drawio_available():
+            # No point waiting for the timeout; queued so that callers connected after
+            # the first show still hear it.
+            QTimer.singleShot(0, self.unavailable)
+            return
         self._init_timer.start()
-        self._view.setHtml(_make_wrapper_html(), _RESOURCES_BASE_URL)
+        self._view.load(QUrl(f"{DRAWIO_ORIGIN}/{_WRAPPER_PATH}"))
 
     def showEvent(self, event) -> None:
         self._ensure_view()

@@ -40,6 +40,9 @@ python -m venv venv
 
 # 3. Install in editable mode
 pip install -e .
+
+# 4. Fetch the embedded draw.io editor (~47 MB, not versioned; needed by the Diagrams module)
+python tools/fetch_drawio.py
 ```
 
 The SQLite database is created automatically on first launch at `~/.horizon/horizon.db`.  
@@ -60,7 +63,7 @@ python -m horizon
 On Windows you can also double-click [`Lancer-Horizon.bat`](Lancer-Horizon.bat) at the repo root.
 It launches the app without a console using the repo's `.venv`; on first run it creates that
 virtual environment and installs Horizon in editable mode (it reinstalls if `.venv` points at
-another checkout).
+another checkout), and it fetches draw.io when it is missing or outdated.
 
 Only one instance of Horizon can run at a time: a second launch shows a warning and exits.
 

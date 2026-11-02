@@ -14,6 +14,7 @@ licences respectives s'appliquent à ces fichiers, et leur texte intégral se tr
 | `mermaid.min.js` | [Mermaid](https://github.com/mermaid-js/mermaid) | 11.14.0 | [MIT](licenses/mermaid-MIT.txt) |
 | `horizon-editor.bundle.js` | [CodeMirror 6](https://codemirror.net/) et [Lezer](https://lezer.codemirror.net/) | voir ci-dessous | [MIT](licenses/codemirror-MIT.txt) |
 | `horizon-wysiwyg.bundle.js`, `horizon-wysiwyg.bundle.css` | [CKEditor 5](https://ckeditor.com/ckeditor-5/) | 49.0.0 | [GPL-2.0-or-later](licenses/ckeditor5-GPL-2.0.txt) |
+| `drawio/draw.war` | [draw.io](https://github.com/jgraph/drawio) | 32.6.9 | [Apache-2.0](licenses/drawio-Apache-2.0.txt) |
 
 ## Détail du bundle de l'éditeur
 
@@ -47,6 +48,16 @@ CKEditor 5 intègre lui-même quelques bibliothèques sous licences MIT et ISC, 
 mais un exécutable qui embarque ce bundle — l'application gelée publiée en Release — forme
 une œuvre combinée et se redistribue selon les termes de la GPL 2 ou ultérieure, sources
 correspondantes (ce dépôt) à l'appui.
+
+## Éditeur de diagrammes (draw.io)
+
+`drawio/draw.war` est l'archive de la release officielle de draw.io, © JGraph Holdings Ltd
+et draw.io AG, redistribuée sans modification sous licence Apache 2.0. Vu sa taille (~47 Mo),
+elle n'est pas versionnée : [`tools/fetch_drawio.py`](tools/fetch_drawio.py) la télécharge
+depuis la release GitHub de [jgraph/drawio](https://github.com/jgraph/drawio) et vérifie son
+empreinte SHA-256 ; la version et l'empreinte attendues sont figées dans ce script. Horizon la
+sert telle quelle à son éditeur de diagrammes, qui dialogue avec draw.io par messages
+(`postMessage`) sans en intégrer le code.
 
 ## Thèmes de coloration syntaxique
 

@@ -348,7 +348,7 @@ class DiagramEditorWidget(QWidget):
         banner_layout = QHBoxLayout(self._unavailable_banner)
         banner_layout.setContentsMargins(8, 2, 8, 2)
         banner_label = QLabel(
-            "draw.io est injoignable — une connexion Internet est requise pour éditer les diagrammes.")
+            "L'éditeur draw.io n'a pas pu démarrer — en développement, lancez tools/fetch_drawio.py.")
         banner_label.setStyleSheet("font-size: 11px;")
         retry_btn = QPushButton("Réessayer")
         retry_btn.clicked.connect(self._on_retry)
