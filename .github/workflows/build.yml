@@ -56,6 +56,9 @@ jobs:
         continue-on-error: true
         run: python tools/make_icon.py
 
+      - name: Telecharger draw.io (editeur de diagrammes embarque)
+        run: python tools/fetch_drawio.py
+
       - name: Geler l'application (PyInstaller)
         run: pyinstaller --noconfirm horizon.spec
 
@@ -68,7 +71,8 @@ jobs:
             'dist/Horizon/_internal/horizon/themes/terminal.json',
             'dist/Horizon/_internal/horizon/resources/mermaid.min.js',
             'dist/Horizon/_internal/horizon/resources/horizon-editor.bundle.js',
-            'dist/Horizon/_internal/horizon/resources/JetBrainsMono-Regular.ttf'
+            'dist/Horizon/_internal/horizon/resources/JetBrainsMono-Regular.ttf',
+            'dist/Horizon/_internal/horizon/resources/drawio/draw.war'
           )
           $missing = $required | Where-Object { -not (Test-Path $_) }
           if ($missing) {

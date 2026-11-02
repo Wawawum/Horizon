@@ -39,7 +39,7 @@ User action -> Qt Signal -> Widget method -> Repository -> Database.conn -> comm
 Single-instance logic lives in [../src/horizon/single_instance.py](../src/horizon/single_instance.py).
 
 [../Lancer-Horizon.bat](../Lancer-Horizon.bat) is a convenience launcher: it bootstraps `.venv`
-if needed and starts `pythonw -m horizon` without a console.
+if needed, runs `tools/fetch_drawio.py` and starts `pythonw -m horizon` without a console.
 
 ---
 
@@ -226,15 +226,23 @@ panel reloads the note from the database and unlocks.
 optional `project_id`, the draw.io XML, a small PNG `thumbnail` (the list), an `svg` rendering (the
 notes) and `archived`. Diagrams are neither searchable nor tagged.
 
-[../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) does not bundle draw.io: a local
-wrapper page loads the online embed (`https://embed.diagrams.net/?embed=1&proto=json…`) in an
-`<iframe>`, so editing needs an Internet connection. The wrapper relays draw.io's JSON embed protocol
-over a QWebChannel, accepting only messages from that origin and frame. `DrawioEditor` answers `init`
+[../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
+works offline and on networks that block diagrams.net. The official release archive
+(`resources/drawio/draw.war`, ~47 MB, not versioned: [../tools/fetch_drawio.py](../tools/fetch_drawio.py)
+downloads it and checks its SHA-256, in CI before PyInstaller and from `Lancer-Horizon.bat`) is served
+straight from the zip by a `horizon-drawio://app` scheme handler installed on draw.io's own
+off-the-record profile. The scheme uses the Host syntax — draw.io rebuilds its URL from `location.host`
+and redirects when it differs — and is declared by `register_drawio_scheme()` before `QApplication`. A
+request interceptor on that profile blocks every other scheme (fonts, analytics, cloud pickers), and
+draw.io runs with `stealth=1&pwa=0`. The same handler serves a wrapper page (`horizon.html`, generated
+for the current theme) and `qwebchannel.js` on that origin; the wrapper loads draw.io's `index.html?embed=1&proto=json…`
+in an `<iframe>` and relays the JSON embed protocol over a QWebChannel, accepting only messages from
+that origin and frame. `DrawioEditor` answers `init`
 with a `load` action (`autosave: 1`), keeps a synchronous XML mirror fed by `autosave` events — ignored
 between a `load` action and its `load` event, since one instance is reused across diagrams — and renders
 thumbnails and SVG with an `export` action (`format: png` / `svg`) awaited in a nested event loop. Without an `init`
-within 20 s it emits `unavailable` and the editor shows a retry banner; the stored XML is then left
-untouched.
+within 20 s — or at once when the archive is missing — it emits `unavailable` and the editor shows a
+retry banner; the stored XML is then left untouched.
 
 [../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
 (`DiagramsListWidget`), the editor panel (`DiagramEditorWidget`) and the picker of the WYSIWYG editor

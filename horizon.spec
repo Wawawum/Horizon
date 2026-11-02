@@ -27,7 +27,8 @@ a = Analysis(
     binaries=[],
     datas=[
         # widgets/markdown.py, widgets/webeditor.py, widgets/project.py,
-        # dialogs.py, theme.py
+        # dialogs.py, theme.py ; et widgets/drawio.py pour drawio/draw.war,
+        # telecharge au prealable par tools/fetch_drawio.py
         (str(PKG / "resources"), "horizon/resources"),
         # theme.py : load() lit themes/terminal.json sans garde
         (str(PKG / "themes"), "horizon/themes"),
