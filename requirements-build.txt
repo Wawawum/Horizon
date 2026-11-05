@@ -13,7 +13,7 @@ PySide6==6.11.0
 # (@server.list_tools() n'existe plus) : le gel doit rester en 1.x.
 mcp==1.30.0
 httpx==0.28.1
-certifi==2026.4.22
+certifi==2026.10.18
 pywin32==312
 pyinstaller==6.22.2
 pillow==13.0.0
