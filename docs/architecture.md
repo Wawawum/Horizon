@@ -229,7 +229,9 @@ notes) and `archived`. Diagrams are neither searchable nor tagged.
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive
 (`resources/drawio/draw.war`, ~47 MB, not versioned: [../tools/fetch_drawio.py](../tools/fetch_drawio.py)
-downloads it and checks its SHA-256, in CI before PyInstaller and from `Lancer-Horizon.bat`) is served
+downloads it and checks its SHA-256, from the hatchling build hook [../hatch_build.py](../hatch_build.py) on
+every `pip install` — which also force-includes it in non-editable wheels, since hatchling leaves out
+gitignored files — in CI before PyInstaller and from `Lancer-Horizon.bat`) is served
 straight from the zip by a `horizon-drawio://app` scheme handler installed on draw.io's own
 off-the-record profile. The scheme uses the Host syntax — draw.io rebuilds its URL from `location.host`
 and redirects when it differs — and is declared by `register_drawio_scheme()` before `QApplication`. A

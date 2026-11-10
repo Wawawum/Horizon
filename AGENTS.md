@@ -7,11 +7,9 @@ See [README.md](README.md) for the human-facing project overview and setup.
 ## Setup Commands
 
 ```powershell
-# Install in editable mode
+# Install in editable mode (hatch_build.py also fetches the embedded draw.io editor,
+# not versioned; `python tools/fetch_drawio.py` does it on its own)
 pip install -e .
-
-# Fetch the embedded draw.io editor (not versioned; the Diagrams module needs it)
-python tools/fetch_drawio.py
 
 # Run the desktop app
 python -m horizon

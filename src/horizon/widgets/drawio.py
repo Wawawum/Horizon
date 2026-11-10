@@ -108,7 +108,7 @@ def _archive_problem() -> str | None:
     """Why the archive cannot serve draw.io, or None when it can. Reads index.html for
     real: an antivirus may leave the file in place but deny or quarantine its content."""
     if not _ARCHIVE.is_file():
-        return f"archive draw.io absente ({_ARCHIVE})"
+        return f"archive draw.io absente ({_ARCHIVE}) — réinstallez Horizon (pip install .), qui la télécharge"
     try:
         with zipfile.ZipFile(_ARCHIVE) as archive:
             archive.read("index.html")

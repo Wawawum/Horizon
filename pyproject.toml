@@ -30,6 +30,10 @@ dependencies = [
 [tool.hatch.build.targets.wheel]
 packages = ["src/horizon"]
 
+# hatch_build.py : telecharge draw.io (tools/fetch_drawio.py) et l'ajoute au wheel,
+# .gitignore l'en excluant sinon
+[tool.hatch.build.targets.wheel.hooks.custom]
+
 [project.scripts]
 horizon = "horizon.__main__:main"
 horizon-mcp = "horizon.mcp_server:main"
