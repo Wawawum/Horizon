@@ -241,8 +241,15 @@ that origin and frame. `DrawioEditor` answers `init`
 with a `load` action (`autosave: 1`), keeps a synchronous XML mirror fed by `autosave` events — ignored
 between a `load` action and its `load` event, since one instance is reused across diagrams — and renders
 thumbnails and SVG with an `export` action (`format: png` / `svg`) awaited in a nested event loop. Without an `init`
-within 20 s — or at once when the archive is missing — it emits `unavailable` and the editor shows a
-retry banner; the stored XML is then left untouched.
+within 20 s — at once when the archive is missing or unreadable, or when the render process dies — it
+emits `unavailable(reason)` and the editor shows a banner with the reason, the log path and a retry
+button; the stored XML is then left untouched.
+
+Start-up is traced to `~/.horizon/drawio.log` (rotated to `drawio.log.old` beyond 1 MB), because the
+failures it explains happen on machines the developer cannot reach: Horizon, Qt and Chromium versions,
+the archive path and size, every file served and every request blocked until draw.io's `load` event,
+console messages (errors only afterwards), the wrapper's milestones (channel connected, iframe loaded,
+messages dropped by the origin check) and, on timeout, a JavaScript snapshot of how far draw.io got.
 
 [../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
 (`DiagramsListWidget`), the editor panel (`DiagramEditorWidget`) and the picker of the WYSIWYG editor

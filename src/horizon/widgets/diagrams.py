@@ -1,7 +1,7 @@
 import unicodedata
 
-from PySide6.QtCore import Qt, QTimer, Signal
-from PySide6.QtGui import QAction, QPixmap
+from PySide6.QtCore import Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -26,6 +26,7 @@ from horizon.dialogs import ConfirmDialog
 from horizon.diagram import Diagram, DiagramRepository
 from horizon.project import ProjectRepository
 from horizon.titlebar import TitleBar
+from horizon.widgets.drawio import LOG_PATH as DRAWIO_LOG_PATH
 from horizon.widgets.drawio import DrawioEditor, make_thumbnail
 from horizon.widgets.markdown import _plus_icon, _PLUS_ICON_SIZE
 
@@ -347,19 +348,23 @@ class DiagramEditorWidget(QWidget):
         self._unavailable_banner.setStyleSheet("background: #f59e0b; color: #1a1a1a;")
         banner_layout = QHBoxLayout(self._unavailable_banner)
         banner_layout.setContentsMargins(8, 2, 8, 2)
-        banner_label = QLabel(
-            "L'éditeur draw.io n'a pas pu démarrer — en développement, lancez tools/fetch_drawio.py.")
-        banner_label.setStyleSheet("font-size: 11px;")
+        self._unavailable_label = QLabel(self._unavailable_banner)
+        self._unavailable_label.setStyleSheet("font-size: 11px;")
+        self._unavailable_label.setWordWrap(True)
+        self._unavailable_label.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        log_btn = QPushButton("Ouvrir le journal")
+        log_btn.clicked.connect(self._on_open_log)
         retry_btn = QPushButton("Réessayer")
         retry_btn.clicked.connect(self._on_retry)
-        banner_layout.addWidget(banner_label, stretch=1)
+        banner_layout.addWidget(self._unavailable_label, stretch=1)
+        banner_layout.addWidget(log_btn)
         banner_layout.addWidget(retry_btn)
         self._unavailable_banner.setVisible(False)
 
         self._editor = DrawioEditor(self)
         self._editor.xml_changed.connect(self._autosave_timer.start)
         self._editor.ready.connect(lambda: self._unavailable_banner.setVisible(False))
-        self._editor.unavailable.connect(lambda: self._unavailable_banner.setVisible(True))
+        self._editor.unavailable.connect(self._on_editor_unavailable)
 
         self._status_label = QLabel("")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -471,6 +476,14 @@ class DiagramEditorWidget(QWidget):
             self._current = None
             self.diagram_changed.emit(diagram_id)
             self.back_requested.emit()
+
+    def _on_editor_unavailable(self, reason: str) -> None:
+        self._unavailable_label.setText(
+            f"L'éditeur draw.io n'a pas pu démarrer : {reason}.\nDétails : {DRAWIO_LOG_PATH}")
+        self._unavailable_banner.setVisible(True)
+
+    def _on_open_log(self) -> None:
+        QDesktopServices.openUrl(QUrl.fromLocalFile(str(DRAWIO_LOG_PATH)))
 
     def _on_retry(self) -> None:
         self._unavailable_banner.setVisible(False)
