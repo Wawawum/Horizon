@@ -229,7 +229,9 @@ notes) and `archived`. Diagrams are neither searchable nor tagged.
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive
 (`resources/drawio/draw.war`, ~47 MB, not versioned: [../tools/fetch_drawio.py](../tools/fetch_drawio.py)
-downloads it and checks its SHA-256, in CI before PyInstaller and from `Lancer-Horizon.bat`) is served
+downloads it and checks its SHA-256, from the hatchling build hook [../hatch_build.py](../hatch_build.py) on
+every `pip install` — which also force-includes it in non-editable wheels, since hatchling leaves out
+gitignored files — in CI before PyInstaller and from `Lancer-Horizon.bat`) is served
 straight from the zip by a `horizon-drawio://app` scheme handler installed on draw.io's own
 off-the-record profile. The scheme uses the Host syntax — draw.io rebuilds its URL from `location.host`
 and redirects when it differs — and is declared by `register_drawio_scheme()` before `QApplication`. A
@@ -241,8 +243,15 @@ that origin and frame. `DrawioEditor` answers `init`
 with a `load` action (`autosave: 1`), keeps a synchronous XML mirror fed by `autosave` events — ignored
 between a `load` action and its `load` event, since one instance is reused across diagrams — and renders
 thumbnails and SVG with an `export` action (`format: png` / `svg`) awaited in a nested event loop. Without an `init`
-within 20 s — or at once when the archive is missing — it emits `unavailable` and the editor shows a
-retry banner; the stored XML is then left untouched.
+within 20 s — at once when the archive is missing or unreadable, or when the render process dies — it
+emits `unavailable(reason)` and the editor shows a banner with the reason, the log path and a retry
+button; the stored XML is then left untouched.
+
+Start-up is traced to `~/.horizon/drawio.log` (rotated to `drawio.log.old` beyond 1 MB), because the
+failures it explains happen on machines the developer cannot reach: Horizon, Qt and Chromium versions,
+the archive path and size, every file served and every request blocked until draw.io's `load` event,
+console messages (errors only afterwards), the wrapper's milestones (channel connected, iframe loaded,
+messages dropped by the origin check) and, on timeout, a JavaScript snapshot of how far draw.io got.
 
 [../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
 (`DiagramsListWidget`), the editor panel (`DiagramEditorWidget`) and the picker of the WYSIWYG editor

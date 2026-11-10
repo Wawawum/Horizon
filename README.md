@@ -40,10 +40,10 @@ python -m venv venv
 
 # 3. Install in editable mode
 pip install -e .
-
-# 4. Fetch the embedded draw.io editor (~47 MB, not versioned; needed by the Diagrams module)
-python tools/fetch_drawio.py
 ```
+
+Installing (editable or not) also downloads the embedded draw.io editor (~47 MB, not versioned,
+needed by the Diagrams module) through `hatch_build.py`, which runs `tools/fetch_drawio.py`.
 
 The SQLite database is created automatically on first launch at `~/.horizon/horizon.db`.  
 No manual schema initialization is needed.
