@@ -1186,19 +1186,18 @@ class HomeWidget(QWidget):
 
         title = _SlashTitle("ALL TASKS", point_size_delta=4)
 
-        self._move_up_btn = QPushButton()
-        self._move_up_btn.setIcon(_arrow_icon("up"))
-        self._move_up_btn.setIconSize(_ARROW_ICON_SIZE)
-        self._move_up_btn.setFixedWidth(28)
-        self._move_up_btn.setToolTip("Move up")
-        self._move_up_btn.clicked.connect(self._on_move_up)
-
-        self._move_down_btn = QPushButton()
-        self._move_down_btn.setIcon(_arrow_icon("down"))
-        self._move_down_btn.setIconSize(_ARROW_ICON_SIZE)
-        self._move_down_btn.setFixedWidth(28)
-        self._move_down_btn.setToolTip("Move down")
-        self._move_down_btn.clicked.connect(self._on_move_down)
+        # L'ordre se règle au glisser-déposer : le bouton de création remplace
+        # les anciennes flèches monter / descendre.
+        t = _theme.current()
+        accent_hover = QColor(t.accent_color).darker(115).name()
+        new_task_btn = QPushButton("+ NEW")
+        new_task_btn.setToolTip("New task")
+        new_task_btn.setStyleSheet(
+            f"QPushButton {{ background-color: {t.accent_color}; color: white; "
+            f"border: none; border-radius: 6px; padding: 4px 14px; font-weight: bold; }}"
+            f"QPushButton:hover {{ background-color: {accent_hover}; }}"
+        )
+        new_task_btn.clicked.connect(self._on_new_task)
 
         self._show_archived_cb = QCheckBox("Show archived")
         self._show_archived_cb.stateChanged.connect(self.load)
@@ -1215,8 +1214,7 @@ class HomeWidget(QWidget):
         board_header.addStretch()
         board_header.addWidget(self._filter_bar)
         board_header.addWidget(self._show_archived_cb)
-        board_header.addWidget(self._move_up_btn)
-        board_header.addWidget(self._move_down_btn)
+        board_header.addWidget(new_task_btn)
 
         board_sep = QFrame()
         board_sep.setFrameShape(QFrame.Shape.HLine)
@@ -1247,27 +1245,25 @@ class HomeWidget(QWidget):
     def _project_filter_options(self) -> list[tuple[str, int]]:
         return [(p.name, p.id) for p in self._project_repo.list_all(archived_only=False)]
 
-    def _on_move_up(self) -> None:
-        self._on_move(-1)
-
-    def _on_move_down(self) -> None:
-        self._on_move(1)
-
-    def _on_move(self, direction: int) -> None:
-        task_id = self._board.selected_task_id()
-        if task_id is None:
+    def _on_new_task(self) -> None:
+        projects = self._project_repo.list_all(archived_only=False)
+        if not projects:
+            AlertDialog.warn("New Task", "Create a project first: a task always belongs to a project.", self)
             return
-        task = self._task_repo.get(task_id)
-        if task is None:
+        # Un filtre limité à un seul projet désigne le projet le plus probable.
+        filtered = self._task_filter_model.project_ids
+        current_id = filtered[0] if len(filtered) == 1 else None
+        dialog = NewTaskDialog(projects=projects, current_project_id=current_id, parent=self)
+        if dialog.exec() != QDialog.DialogCode.Accepted:
             return
-        bucket_tasks = [t for t in self._visible_tasks() if t.bucket == task.bucket]
-        idx = next((i for i, t in enumerate(bucket_tasks) if t.id == task_id), None)
-        if idx is None:
-            return
-        neighbor_idx = idx + direction
-        if not (0 <= neighbor_idx < len(bucket_tasks)):
-            return
-        self._task_repo.swap_order(task_id, bucket_tasks[neighbor_idx].id)
+        self._task_repo.create(
+            project_id=dialog.project_id(),
+            title=dialog.title(),
+            description=dialog.description(),
+            state=dialog.state(),
+            priority=dialog.priority(),
+            bucket=dialog.bucket(),
+        )
         self.load()
 
     def _on_task_edit_requested(self, task_id: int) -> None:
