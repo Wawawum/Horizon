@@ -271,11 +271,24 @@ class NewProjectDialog(QDialog):
 
 
 class NewTaskDialog(QDialog):
-    def __init__(self, parent=None) -> None:
+    """Création d'une tâche. Avec `projects`, le dialog propose aussi le projet
+    de destination (board ALL TASKS) ; sans, le projet est fixé par l'appelant."""
+
+    def __init__(self, projects=None, current_project_id: int | None = None, parent=None) -> None:
         super().__init__(parent)
         self.setWindowTitle("New Task")
         self.setWindowFlags(Qt.WindowType.FramelessWindowHint | Qt.WindowType.Dialog)
         self.setMinimumWidth(400)
+
+        self._project_combo: QComboBox | None = None
+        if projects is not None:
+            self._project_combo = QComboBox()
+            for project in projects:
+                self._project_combo.addItem(project.name, userData=project.id)
+            current_idx = self._project_combo.findData(current_project_id)
+            # Sans projet présélectionné, l'utilisateur doit choisir explicitement.
+            self._project_combo.setCurrentIndex(current_idx)
+            self._project_combo.setPlaceholderText("Select a project")
 
         self._title_edit = QLineEdit()
         self._title_edit.setMaxLength(255)
@@ -310,6 +323,9 @@ class NewTaskDialog(QDialog):
         content = QWidget()
         content_layout = QVBoxLayout(content)
         content_layout.setContentsMargins(12, 8, 12, 12)
+        if self._project_combo is not None:
+            content_layout.addWidget(QLabel("Project"))
+            content_layout.addWidget(self._project_combo)
         content_layout.addWidget(QLabel("Title"))
         content_layout.addWidget(self._title_edit)
         content_layout.addWidget(QLabel("Description"))
@@ -329,10 +345,16 @@ class NewTaskDialog(QDialog):
         layout.addWidget(content)
 
     def _on_accepted(self) -> None:
+        if self._project_combo is not None and self._project_combo.currentData() is None:
+            AlertDialog.warn("Validation Error", "Select the project the task belongs to.", self)
+            return
         if not self._title_edit.text().strip():
             AlertDialog.warn("Validation Error", "Task title cannot be blank.", self)
             return
         self.accept()
+
+    def project_id(self) -> int | None:
+        return self._project_combo.currentData() if self._project_combo is not None else None
 
     def title(self) -> str:
         return self._title_edit.text().strip()
