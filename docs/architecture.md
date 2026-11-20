@@ -281,6 +281,62 @@ diagram shows its `alt` text.
   `MainWindow` calls `refresh_diagram(id)` on the main note panel and every note window; the page
   bumps the revision and reconverts the widgets — not an edit, the stored HTML is unchanged.
 
+### Dropped content in notes
+
+Files, Outlook e-mails and URLs dropped on a note are archived and shown OneNote-style in a
+WYSIWYG note, as links in a markdown note (see *Markdown notes* at the end of this section).
+
+- **Interception.** `_WebEditorBase` (both editors, `accept_drops`) filters the drag events of its `QWebEngineView` (and of the
+  render widget QtWebEngine creates inside it) before Chromium sees them: Chromium cannot read
+  Outlook's virtual files. `parse_drop` ([../src/horizon/attachment_drop.py](../src/horizon/attachment_drop.py))
+  decides on `DragEnter` whether the drop is ours; text, HTML, an image from a web page and drags
+  started inside Horizon (`source()` set) are left to CKEditor. On `Drop` the `QMimeData` is read
+  at once (it dies with the event), the page moves the caret under the cursor (`setCaretAt`), and
+  `content_dropped` is emitted **after** the drop returns — Outlook is still in its `DoDragDrop`
+  loop until then and must not be called back over COM.
+- **Copy or link.** Every drop opens a menu under the cursor (`NoteDetailWidget._ask_drop_mode`):
+  *Copier le document dans Horizon* (`DropMode.COPY`) or *Créer un lien vers le document d'origine*
+  (`DropMode.LINK`); Escape or a click elsewhere cancels the drop. A link is a `kind="link"` block
+  (a `[name](url)` link in markdown) pointing to the original: `file:///…` for a file or folder
+  (`file://server/share/…` on a network share), `outlook:<EntryID>?store=<StoreID>` for an Outlook
+  e-mail — opened over COM with `GetItemFromID(…).Display()`, Outlook launched if needed — or the
+  URL itself. A file link is checked on click ("Document introuvable"), never while rendering: an
+  offline share would freeze every render. Attachments dragged out of an e-mail can only be copied.
+  Copying a URL downloads it in a background thread (`download_url`, same 200 MB cap); a document
+  URL answered by an HTML page (a sign-in page) is refused rather than archived.
+- **Archiving.** `DropImporter` stores files in `attachments` (BLOB, max 200 MB,
+  [../src/horizon/attachment.py](../src/horizon/attachment.py)); `.png/.jpg/.gif/.webp` go to
+  `images` and become ordinary images. E-mails dragged from Outlook only announce names
+  (`FileGroupDescriptorW`); their content is read over COM from the active Outlook window's
+  selection (`Selection` for messages, saved as `.msg`; `AttachmentSelection` for attachments of an
+  e-mail). Classic Outlook must be running — it is never launched, and the new Outlook has no COM.
+  `.eml` files are parsed with the stdlib; a `.msg` from disk gets its metadata through Outlook when
+  it is open.
+- **Display.** The `HorizonAttachment` plugin ([../web/src/wysiwyg.js](../web/src/wysiwyg.js))
+  stores `<figure class="horizon-attachment" data-kind="file|email|link" data-display="icon|preview"
+  data-attachment-id="N" …>`; the `data-*` attributes are authoritative, the inner HTML is a plain
+  fallback (link, subject, excerpt) that also feeds the search index. The display is chosen by type
+  — PDF and e-mails as a preview, other files as an icon card, URLs as a link card — and switched
+  from the block's toolbar (Ouvrir, Enregistrer sous…, Icône, Aperçu). PDF pages (first 5) are
+  rendered on demand by `_AttachmentSchemeHandler` from `horizon-attachment://N?page=P`
+  ([../src/horizon/attachment_preview.py](../src/horizon/attachment_preview.py)), nothing is stored.
+- **Opening.** Double-click or `Ouvrir` writes the archived copy to `%TEMP%\Horizon\attachments\<id>\`
+  and opens it with the associated application; edits to that copy do not come back.
+- **Link titles.** The browser's title (`text/x-moz-url`, HTML anchor) is used when present;
+  otherwise the card shows the host and `fetch_page_title` fetches `<title>` in a background thread,
+  then `setLinkTitle` updates cards still showing the placeholder.
+
+- **Markdown notes.** The same import runs; `blocks_to_markdown` writes one paragraph per item at
+  the end of the line where it fell (never inside a word): `[name](horizon-attachment://N)` for a
+  file, `[subject](horizon-attachment://N)` for an e-mail, `![](horizon-image://N)` for an image,
+  `[title](url)` for a URL. The preview renders each `horizon-attachment://` link as an icon card
+  (type badge, name, size — `_attachment_card` in
+  [../src/horizon/widgets/markdown.py](../src/horizon/widgets/markdown.py)); a click opens the file.
+  Converting the note to WYSIWYG keeps these as plain links (`horizon-attachment` is an allowed
+  CKEditor link protocol), opened by Ctrl+click.
+
+Attachments are not deleted when their block is removed: note versions may still reference them.
+
 ---
 
 ## HTTP API

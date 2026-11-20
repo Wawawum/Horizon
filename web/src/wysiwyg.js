@@ -11,7 +11,7 @@ import {
   Code, List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
   ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
   HorizontalLine, Autoformat, IconObjectLeft, IconObjectCenter, Widget, toWidget, Command,
-  ButtonView,
+  ButtonView, Plugin, WidgetToolbarRepository, isWidget,
 } from "ckeditor5";
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
@@ -235,6 +235,389 @@ function diagramHandlers(ed) {
   });
 }
 
+// ── Attachments ─────────────────────────────────────────────────────────────
+// Files, Outlook e-mails and URLs dropped on the note (Python's attachment_drop.py
+// archives them). The stored HTML is a <figure class="horizon-attachment" data-…>
+// whose data-* attributes are authoritative; its inner HTML is a plain fallback
+// (link, subject, excerpt) for the search index and for API readers. In the editor it
+// is a widget showing, OneNote-style, either an icon card or a preview — PDF pages
+// served by horizon-attachment://<id>?page=<n>, or the e-mail itself.
+//
+// Untrusted text (file names, e-mail bodies) is only ever set through textContent.
+
+const ATTACHMENT_ATTRS = {
+  attachmentId: "data-attachment-id",
+  kind: "data-kind",
+  display: "data-display",
+  name: "data-name",
+  size: "data-size",
+  mime: "data-mime",
+  pages: "data-pages",
+  href: "data-href",
+  title: "data-title",
+  subject: "data-subject",
+  sender: "data-sender",
+  date: "data-date",
+  excerpt: "data-excerpt",
+};
+const NUMERIC_ATTACHMENT_ATTRS = new Set(["attachmentId", "size", "pages"]);
+const PREVIEW_MAX_PAGES = 5;
+
+const BADGE_COLORS = [
+  [/^pdf$/, "#d93025"],
+  [/^(docx?|dotx?|rtf|odt)$/, "#2b579a"],
+  [/^(xlsx?|xlsm|csv|ods)$/, "#217346"],
+  [/^(pptx?|potx?|odp)$/, "#d24726"],
+  [/^(msg|eml)$/, "#0078d4"],
+  [/^(zip|7z|rar|gz|tar)$/, "#8a6d3b"],
+  [/^(vsdx?)$/, "#3955a3"],
+  [/^(txt|md|log|json|xml|ya?ml)$/, "#5f6b7a"],
+];
+
+function attachmentExtension(name) {
+  const match = /\.([A-Za-z0-9]{1,6})$/.exec(name || "");
+  return match ? match[1].toLowerCase() : "";
+}
+
+function formatSize(bytes) {
+  if (!(bytes > 0)) return "";
+  const units = ["octets", "Ko", "Mo", "Go"];
+  let value = bytes;
+  let unit = 0;
+  while (value >= 1024 && unit < units.length - 1) {
+    value /= 1024;
+    unit++;
+  }
+  return (unit === 0 ? value : value.toFixed(value < 10 ? 1 : 0)).toString().replace(".", ",") + " " + units[unit];
+}
+
+// A link to the original: a file or folder (file://), an Outlook e-mail (outlook:), or
+// a web page. The first two carry the original's name, which gives the badge.
+function linkTarget(href) {
+  if (/^file:/i.test(href)) {
+    try {
+      // file:///C:/x → C:\x ; file://serveur/partage → \\serveur\partage
+      return decodeURI(href.replace(/^file:\/*/i, (m) => (m.length > 7 ? "" : "\\\\"))).replace(/\//g, "\\");
+    } catch (e) {
+      return href;
+    }
+  }
+  if (/^outlook:/i.test(href)) return "Courriel Outlook — lien vers l'original";
+  return href;
+}
+
+function isFileLink(attrs) {
+  return attrs.kind === "link" && /^file:/i.test(attrs.href || "");
+}
+
+// Hover text of a card: the full path of a linked file or folder, then how to open it.
+function attachmentTooltip(attrs) {
+  if (isFileLink(attrs)) return linkTarget(attrs.href) + "\nDouble-cliquer pour ouvrir";
+  return attrs.kind === "link" ? "Double-cliquer pour ouvrir le lien" : "Double-cliquer pour ouvrir";
+}
+
+function attachmentHost(href) {
+  try {
+    return new URL(href).hostname.replace(/^www\./, "");
+  } catch (e) {
+    return href;
+  }
+}
+
+function canPreview(attrs) {
+  return attrs.kind === "email" || (attrs.kind === "file" && attrs.pages > 0);
+}
+
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function badge(label, color) {
+  const node = el("span", "hz-att-badge", label);
+  node.style.background = color;
+  return node;
+}
+
+function attachmentBadge(attrs) {
+  if (attrs.kind === "link") {
+    if (attrs.mime === "inode/directory") return badge("DOS", "#c79a2b");
+    if (/^outlook:/i.test(attrs.href)) return badge("MSG", "#0078d4");
+    if (!attrs.name) return badge("WEB", "var(--hz-accent-color)");
+  }
+  if (attrs.kind === "email") return badge((attachmentExtension(attrs.name) || "msg").toUpperCase(), "#0078d4");
+  const ext = attachmentExtension(attrs.name);
+  const color = (BADGE_COLORS.find(([re]) => re.test(ext)) || [null, "#5f6b7a"])[1];
+  return badge((ext || "?").toUpperCase().slice(0, 4), color);
+}
+
+// The editing view of one attachment, rebuilt whenever one of its attributes changes.
+function renderAttachment(dom, attrs) {
+  dom.textContent = "";
+  const preview = attrs.display === "preview" && canPreview(attrs);
+  const card = el("div", "hz-att-card");
+  card.appendChild(attachmentBadge(attrs));
+  const text = el("div", "hz-att-text");
+  let main;
+  let sub;
+  if (attrs.kind === "link") {
+    main = attrs.title || attachmentHost(attrs.href);
+    // A file or folder link shows its name only; the path is in the tooltip.
+    if (isFileLink(attrs)) sub = "";
+    else if (attrs.sender || attrs.date) sub = [attrs.sender, attrs.date].filter(Boolean).join(" · ");
+    else sub = linkTarget(attrs.href);
+  } else if (attrs.kind === "email") {
+    main = attrs.subject || attrs.name;
+    sub = [attrs.sender, attrs.date].filter(Boolean).join(" · ");
+  } else {
+    main = attrs.name;
+    const ext = attachmentExtension(attrs.name).toUpperCase();
+    sub = [ext, formatSize(attrs.size), attrs.pages > 0 ? attrs.pages + " page" + (attrs.pages > 1 ? "s" : "") : ""]
+      .filter(Boolean)
+      .join(" · ");
+  }
+  text.appendChild(el("div", "hz-att-name", main));
+  if (sub) text.appendChild(el("div", "hz-att-sub", sub));
+  card.appendChild(text);
+  dom.appendChild(card);
+
+  if (!preview) return;
+  if (attrs.kind === "email") {
+    if (attrs.excerpt) dom.appendChild(el("div", "hz-att-excerpt", attrs.excerpt));
+    return;
+  }
+  const pages = el("div", "hz-att-pages");
+  const shown = Math.min(attrs.pages, PREVIEW_MAX_PAGES);
+  for (let i = 0; i < shown; i++) {
+    const img = el("img", "hz-att-page");
+    img.src = "horizon-attachment://" + attrs.attachmentId + "?page=" + i;
+    img.alt = "Page " + (i + 1);
+    img.loading = "lazy";
+    img.draggable = false;
+    pages.appendChild(img);
+  }
+  dom.appendChild(pages);
+  if (attrs.pages > shown) {
+    dom.appendChild(el("div", "hz-att-more", "… " + (attrs.pages - shown) + " page(s) de plus — double-cliquer pour ouvrir le document"));
+  }
+}
+
+function attachmentAttrsOf(modelElement) {
+  const attrs = {};
+  for (const key of Object.keys(ATTACHMENT_ATTRS)) {
+    const value = modelElement.getAttribute(key);
+    attrs[key] = NUMERIC_ATTACHMENT_ATTRS.has(key) ? Number(value) || 0 : value || "";
+  }
+  return attrs;
+}
+
+// Plain fallback content of the stored HTML (search index, API, a reader without
+// Horizon). Escaped by building it as DOM, then serialised.
+function attachmentFallbackHtml(attrs) {
+  const box = document.createElement("div");
+  if (attrs.kind === "link") {
+    const a = el("a", null, attrs.title || attrs.href);
+    a.setAttribute("href", attrs.href);
+    box.appendChild(a);
+  } else {
+    const a = el("a", null, attrs.kind === "email" ? attrs.subject || attrs.name : attrs.name);
+    a.setAttribute("href", "horizon-attachment://" + attrs.attachmentId);
+    box.appendChild(a);
+    if (attrs.kind === "email") {
+      const meta = [attrs.sender, attrs.date].filter(Boolean).join(" · ");
+      if (meta) box.appendChild(el("p", null, meta));
+      if (attrs.excerpt) box.appendChild(el("p", null, attrs.excerpt));
+    }
+  }
+  return box.innerHTML;
+}
+
+function selectedAttachment(ed) {
+  const element = ed.model.document.selection.getSelectedElement();
+  return element && element.is("element", "horizonAttachment") ? element : null;
+}
+
+class AttachmentDisplayCommand extends Command {
+  constructor(ed, display) {
+    super(ed);
+    this.display = display;
+  }
+
+  refresh() {
+    const element = selectedAttachment(this.editor);
+    this.isEnabled = !!element && canPreview(attachmentAttrsOf(element));
+    this.value = !!element && element.getAttribute("display") === this.display;
+  }
+
+  execute() {
+    const element = selectedAttachment(this.editor);
+    if (!element) return;
+    this.editor.model.change((writer) => writer.setAttribute("display", this.display, element));
+  }
+}
+
+// Open / save as: read-only actions, available in a locked note or an old version too.
+class AttachmentActionCommand extends Command {
+  constructor(ed, action) {
+    super(ed);
+    this.action = action;
+    this.affectsData = false;
+  }
+
+  refresh() {
+    const element = selectedAttachment(this.editor);
+    const kind = element && element.getAttribute("kind");
+    this.isEnabled = !!element && (this.action === "open" || kind !== "link");
+  }
+
+  execute() {
+    const element = selectedAttachment(this.editor);
+    if (element) openAttachment(attachmentAttrsOf(element), this.action);
+  }
+}
+
+function openAttachment(attrs, action) {
+  if (!bridge) return;
+  if (attrs.kind === "link") {
+    if (action === "open") bridge.open_link(attrs.href);
+  } else if (attrs.attachmentId > 0) {
+    if (action === "save") bridge.save_attachment(attrs.attachmentId);
+    else bridge.open_attachment(attrs.attachmentId);
+  }
+}
+
+function HorizonAttachment(ed) {
+  ed.model.schema.register("horizonAttachment", {
+    inheritAllFrom: "$blockObject",
+    allowAttributes: Object.keys(ATTACHMENT_ATTRS),
+  });
+
+  ed.conversion.for("upcast").add((dispatcher) => {
+    dispatcher.on(
+      "element:figure",
+      (evt, data, conversionApi) => {
+        const figure = data.viewItem;
+        if (!figure.hasClass("horizon-attachment")) return;
+        if (!conversionApi.consumable.test(figure, { name: true })) return;
+        const attrs = {};
+        for (const [key, name] of Object.entries(ATTACHMENT_ATTRS)) {
+          const value = figure.getAttribute(name);
+          if (value === undefined || value === null || value === "") continue;
+          attrs[key] = NUMERIC_ATTACHMENT_ATTRS.has(key) ? parseInt(value, 10) || 0 : value;
+        }
+        if (attrs.kind === "link" ? !attrs.href : !(attrs.attachmentId > 0)) return;
+        const element = conversionApi.writer.createElement("horizonAttachment", attrs);
+        if (!conversionApi.safeInsert(element, data.modelCursor)) return;
+        // The children (fallback content) are deliberately not converted.
+        conversionApi.consumable.consume(figure, { name: true });
+        conversionApi.updateConversionResult(element, data);
+      },
+      { priority: "high" }
+    );
+  });
+
+  ed.conversion.for("dataDowncast").elementToElement({
+    model: "horizonAttachment",
+    view: (modelElement, { writer }) => {
+      const attrs = attachmentAttrsOf(modelElement);
+      const viewAttrs = { class: "horizon-attachment" };
+      for (const [key, name] of Object.entries(ATTACHMENT_ATTRS)) {
+        const value = attrs[key];
+        if (value !== "" && value !== 0) viewAttrs[name] = String(value);
+      }
+      return writer.createRawElement("figure", viewAttrs, (dom) => {
+        dom.innerHTML = attachmentFallbackHtml(attrs);
+      });
+    },
+  });
+
+  ed.conversion.for("editingDowncast").elementToElement({
+    // Listing the attributes makes CKEditor rebuild the widget when one changes
+    // (display toggled, link title fetched).
+    model: { name: "horizonAttachment", attributes: Object.keys(ATTACHMENT_ATTRS) },
+    view: (modelElement, { writer }) => {
+      const attrs = attachmentAttrsOf(modelElement);
+      const figure = writer.createContainerElement(
+        "figure",
+        {
+          class: "horizon-attachment hz-att-" + attrs.kind + (attrs.display === "preview" && canPreview(attrs) ? " hz-att-preview" : ""),
+          "data-attachment-id": String(attrs.attachmentId || ""),
+          title: attachmentTooltip(attrs),
+        },
+        [writer.createRawElement("div", { class: "hz-att-body" }, (dom) => renderAttachment(dom, attrs))]
+      );
+      return toWidget(figure, writer, { label: "Pièce jointe" });
+    },
+  });
+
+  ed.commands.add("attachmentShowIcon", new AttachmentDisplayCommand(ed, "icon"));
+  ed.commands.add("attachmentShowPreview", new AttachmentDisplayCommand(ed, "preview"));
+  ed.commands.add("attachmentOpen", new AttachmentActionCommand(ed, "open"));
+  ed.commands.add("attachmentSave", new AttachmentActionCommand(ed, "save"));
+
+  const buttons = [
+    ["attachmentOpen", "Ouvrir"],
+    ["attachmentSave", "Enregistrer sous…"],
+    ["attachmentShowIcon", "Icône"],
+    ["attachmentShowPreview", "Aperçu"],
+  ];
+  for (const [name, label] of buttons) {
+    ed.ui.componentFactory.add(name, (locale) => {
+      const button = new ButtonView(locale);
+      const command = ed.commands.get(name);
+      button.set({ label, withText: true, tooltip: false });
+      button.bind("isEnabled").to(command, "isEnabled");
+      if (command instanceof AttachmentDisplayCommand) button.bind("isOn").to(command, "value");
+      button.on("execute", () => ed.execute(name));
+      return button;
+    });
+  }
+}
+
+class HorizonAttachmentToolbar extends Plugin {
+  static get requires() {
+    return [WidgetToolbarRepository];
+  }
+
+  afterInit() {
+    this.editor.plugins.get(WidgetToolbarRepository).register("horizonAttachment", {
+      ariaLabel: "Pièce jointe",
+      items: ["attachmentOpen", "attachmentSave", "|", "attachmentShowIcon", "attachmentShowPreview"],
+      getRelatedElement: (selection) => {
+        const element = selection.getSelectedElement();
+        return element && isWidget(element) && element.hasClass("horizon-attachment") ? element : null;
+      },
+    });
+  }
+}
+
+function attachmentHandlers(ed) {
+  ed.ui.getEditableElement().addEventListener("dblclick", (e) => {
+    const figure = e.target.closest && e.target.closest("figure.horizon-attachment");
+    if (!figure) return;
+    e.preventDefault();
+    const element = selectedAttachment(ed);
+    if (element) openAttachment(attachmentAttrsOf(element), "open");
+  });
+}
+
+// Drops are taken by Python before Chromium sees them (it reads the Windows clipboard
+// formats Outlook uses); it only asks the page to move the caret where the item fell.
+function modelPositionAt(x, y) {
+  const range = document.caretRangeFromPoint(x, y);
+  const editable = editor.ui.getEditableElement();
+  if (!range || !editable.contains(range.startContainer)) return null;
+  const viewPosition = editor.editing.view.domConverter.domPositionToView(range.startContainer, range.startOffset);
+  if (!viewPosition) return null;
+  try {
+    return editor.editing.mapper.toModelPosition(viewPosition);
+  } catch (e) {
+    return null;
+  }
+}
+
 // ── Links ───────────────────────────────────────────────────────────────────
 // The page must never navigate: Ctrl+click in the text, or a click on the link shown
 // in CKEditor's balloon, is handed to Python, which opens notes, tasks and URLs.
@@ -326,6 +709,7 @@ function createEditor(state) {
       List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
       ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
       HorizontalLine, Autoformat, Widget, HorizonUploadAdapter, HorizonDiagram,
+      HorizonAttachment, HorizonAttachmentToolbar,
     ],
     toolbar: {
       items: [
@@ -348,7 +732,7 @@ function createEditor(state) {
     // allowedProtocols replaces CKEditor's list rather than extending it: the usual web
     // protocols must be restated, or their links are rendered with href="#" in the editor.
     link: {
-      allowedProtocols: ["https", "http", "ftp", "ftps", "mailto", "tel", "horizon"],
+      allowedProtocols: ["https", "http", "ftp", "ftps", "mailto", "tel", "horizon", "horizon-attachment", "file", "outlook"],
       defaultProtocol: "https://",
     },
     // Block alignment: tables through the table properties balloon (alignment, plus
@@ -433,6 +817,7 @@ function init() {
           });
           linkHandlers(editor);
           diagramHandlers(editor);
+          attachmentHandlers(editor);
           installApi();
           // Pulled again: CKEditor starts asynchronously, and Python may have loaded
           // another note or toggled read-only (call_js lands nowhere) in the meantime.
@@ -496,6 +881,47 @@ function installApi() {
     insertDiagram(id) {
       editor.execute("insertHorizonDiagram", { diagramId: id });
       editor.editing.view.focus();
+    },
+    setCaretAt(x, y) {
+      // Where a drop fell; outside the text (margin, toolbar) it goes to the end.
+      const position = modelPositionAt(x, y);
+      editor.model.change((writer) => {
+        writer.setSelection(position || writer.createPositionAt(editor.model.document.getRoot(), "end"));
+      });
+    },
+    insertBlocks(blocks) {
+      // One undo step for the whole drop.
+      editor.model.change((writer) => {
+        for (const block of blocks) {
+          let element;
+          if (block.kind === "image") {
+            element = writer.createElement("imageBlock", { src: "horizon-image://" + block.imageId });
+          } else {
+            const attrs = {};
+            for (const key of Object.keys(ATTACHMENT_ATTRS)) {
+              const value = block[key];
+              if (value !== undefined && value !== null && value !== "" && value !== 0) attrs[key] = value;
+            }
+            element = writer.createElement("horizonAttachment", attrs);
+          }
+          // "after": the caret lands past the block, so the next one follows it instead
+          // of replacing it.
+          editor.model.insertObject(element, null, null, { setSelection: "after" });
+        }
+      });
+      editor.editing.view.focus();
+    },
+    setLinkTitle(href, placeholder, title) {
+      // A title fetched after the drop; a card the user already renamed is left alone.
+      const root = editor.model.document.getRoot();
+      editor.model.change((writer) => {
+        for (const item of editor.model.createRangeIn(root).getItems()) {
+          if (item.is("element", "horizonAttachment") && item.getAttribute("kind") === "link"
+              && item.getAttribute("href") === href && item.getAttribute("title") === placeholder) {
+            writer.setAttribute("title", title, item);
+          }
+        }
+      });
     },
     refreshDiagram(id) {
       diagramRevisions.set(id, (diagramRevisions.get(id) || 0) + 1);

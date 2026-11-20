@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import QMainWindow, QVBoxLayout, QWidget
 
+from horizon.attachment import AttachmentRepository
 from horizon.diagram import DiagramRepository
 from horizon.folder import FolderRepository
 from horizon.image import ImageRepository
@@ -34,6 +35,7 @@ class NoteWindow(QMainWindow):
         subtask_repo: SubtaskRepository | None = None,
         note_task_repo: NoteTaskRepository | None = None,
         diagram_repo: DiagramRepository | None = None,
+        attachment_repo: AttachmentRepository | None = None,
         sticky: bool = False,
         parent=None,
     ) -> None:
@@ -59,6 +61,7 @@ class NoteWindow(QMainWindow):
             subtask_repo=subtask_repo,
             note_task_repo=note_task_repo,
             diagram_repo=diagram_repo,
+            attachment_repo=attachment_repo,
             windowed=True,
             sticky=sticky,
         )

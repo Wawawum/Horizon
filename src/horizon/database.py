@@ -135,6 +135,16 @@ CREATE TABLE IF NOT EXISTS diagrams (
     archived   INTEGER NOT NULL DEFAULT 0,
     svg        TEXT
 );
+
+CREATE TABLE IF NOT EXISTS attachments (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    note_id    INTEGER REFERENCES notes(id) ON DELETE SET NULL,
+    name       TEXT    NOT NULL,
+    mime_type  TEXT    NOT NULL DEFAULT 'application/octet-stream',
+    size       INTEGER NOT NULL DEFAULT 0,
+    data       BLOB    NOT NULL,
+    created_at TEXT    NOT NULL
+);
 """
 
 _SEARCH_INDEX_VERSION = 1
@@ -168,6 +178,7 @@ _MIGRATIONS = [
     "ALTER TABLE note_versions ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown' CHECK(format IN ('markdown','html'))",
     "CREATE TABLE IF NOT EXISTS diagrams (id INTEGER PRIMARY KEY AUTOINCREMENT, project_id INTEGER REFERENCES projects(id) ON DELETE SET NULL, title TEXT NOT NULL CHECK(length(title) <= 255), xml TEXT NOT NULL DEFAULT '', thumbnail BLOB, created_at TEXT NOT NULL, updated_at TEXT NOT NULL, archived INTEGER NOT NULL DEFAULT 0)",
     "ALTER TABLE diagrams ADD COLUMN svg TEXT",
+    "CREATE TABLE IF NOT EXISTS attachments (id INTEGER PRIMARY KEY AUTOINCREMENT, note_id INTEGER REFERENCES notes(id) ON DELETE SET NULL, name TEXT NOT NULL, mime_type TEXT NOT NULL DEFAULT 'application/octet-stream', size INTEGER NOT NULL DEFAULT 0, data BLOB NOT NULL, created_at TEXT NOT NULL)",
 ]
 
 

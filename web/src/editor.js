@@ -507,6 +507,19 @@ function init() {
     toggleBulletList,
     insertBlock,
     insertInline,
+    setCaretAt(x, y) {
+      // Where a drop fell (Python intercepts it): after the line under the cursor, never
+      // inside a word; below the text or outside it, at the end.
+      const { doc } = view.state;
+      const last = view.coordsAtPos(doc.length);
+      const pos = last && y > last.bottom ? null : view.posAtCoords({ x, y });
+      view.dispatch({ selection: { anchor: pos === null ? doc.length : doc.lineAt(pos).to } });
+    },
+    replaceFirst(oldText, newText) {
+      const at = view.state.doc.toString().indexOf(oldText);
+      if (at < 0) return;
+      view.dispatch({ changes: { from: at, to: at + oldText.length, insert: newText } });
+    },
   };
 
   new QWebChannel(qt.webChannelTransport, (channel) => {

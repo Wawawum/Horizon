@@ -1,10 +1,15 @@
-from PySide6.QtCore import Qt, Signal, QTimer
-from PySide6.QtGui import QColor, QFont, QTextCursor
+import os
+import threading
+from pathlib import Path
+
+from PySide6.QtCore import QObject, Qt, Signal, QTimer
+from PySide6.QtGui import QColor, QCursor, QFont, QTextCursor
 from PySide6.QtWidgets import (
     QAbstractItemView,
     QCheckBox,
     QComboBox,
     QDialog,
+    QFileDialog,
     QFrame,
     QHBoxLayout,
     QHeaderView,
@@ -27,6 +32,21 @@ from PySide6.QtWebEngineWidgets import QWebEngineView
 from PySide6.QtWebChannel import QWebChannel
 
 from horizon import theme as _theme
+from horizon.attachment import AttachmentRepository
+from horizon.attachment_drop import (
+    OUTLOOK_SCHEME,
+    DropImporter,
+    DropImportError,
+    DropMode,
+    DroppedFile,
+    DroppedLink,
+    blocks_to_markdown,
+    download_url,
+    fetch_page_title,
+    link_unavailable_reason,
+    markdown_link,
+    open_outlook_item,
+)
 from horizon.diagram import DiagramRepository
 from horizon.dialogs import ConfirmDialog, NoteFormatDialog, TaskDetailDialog
 from horizon.folder import FolderRepository
@@ -145,6 +165,49 @@ class NotesListWidget(QWidget):
             self.note_open_in_window_requested.emit(note_id)
 
 
+def _attachment_id_from_url(url: str) -> int | None:
+    """Id de horizon-attachment://<id>. Lu dans le texte, pas via QUrl, qui prend le
+    nombre pour une adresse IPv4."""
+    raw = url.removeprefix("horizon-attachment://").split("?", 1)[0].strip("/")
+    return int(raw) if raw.isdigit() else None
+
+
+class _UrlDownloader(QObject):
+    """Télécharge les URLs déposées en mode copie, hors du thread de l'interface. Seuls
+    les octets reviennent : l'archivage (base SQLite) se fait dans le thread de l'UI."""
+
+    downloaded = Signal(str, str, bytes)  # emits (url, file name, content)
+    failed = Signal(str, str)  # emits (url, message)
+
+    def download(self, url: str) -> None:
+        def run() -> None:
+            try:
+                name, data = download_url(url)
+            except DropImportError as exc:
+                self.failed.emit(url, str(exc))
+            else:
+                self.downloaded.emit(url, name, data)
+
+        threading.Thread(target=run, name="horizon-url-download", daemon=True).start()
+
+
+class _PageTitleFetcher(QObject):
+    """Cherche le titre des pages déposées sans en avoir, hors du thread de l'interface.
+
+    Le signal est émis depuis un thread Python : Qt le remet dans la file du thread de
+    ce QObject (celui de l'interface), où le slot s'exécute."""
+
+    title_found = Signal(str, str, str)  # emits (url, provisional title, fetched title)
+
+    def fetch(self, url: str, placeholder: str) -> None:
+        def run() -> None:
+            title = fetch_page_title(url)
+            if title and title != placeholder:
+                self.title_found.emit(url, placeholder, title)
+
+        threading.Thread(target=run, name="horizon-page-title", daemon=True).start()
+
+
 class NoteDetailWidget(QWidget):
     back_requested = Signal()
     note_link_clicked = Signal(int)  # emits note_id
@@ -154,7 +217,7 @@ class NoteDetailWidget(QWidget):
     editor_ready = Signal()  # CodeMirror is live; focus_editor() lands from here on
     diagram_open_requested = Signal(int)  # emits diagram_id (double-click on a diagram, WYSIWYG)
 
-    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, task_repo: TaskRepository | None = None, subtask_repo: SubtaskRepository | None = None, note_task_repo: NoteTaskRepository | None = None, diagram_repo: DiagramRepository | None = None, windowed: bool = False, sticky: bool = False, parent=None) -> None:
+    def __init__(self, note_repo: NoteRepository, project_repo: ProjectRepository, folder_repo: FolderRepository, prefs=None, image_repo: ImageRepository | None = None, version_repo: NoteVersionRepository | None = None, task_repo: TaskRepository | None = None, subtask_repo: SubtaskRepository | None = None, note_task_repo: NoteTaskRepository | None = None, diagram_repo: DiagramRepository | None = None, attachment_repo: AttachmentRepository | None = None, windowed: bool = False, sticky: bool = False, parent=None) -> None:
         super().__init__(parent)
         self._note_repo = note_repo
         self._project_repo = project_repo
@@ -162,6 +225,10 @@ class NoteDetailWidget(QWidget):
         self._prefs = prefs
         self._image_repo = image_repo
         self._diagram_repo = diagram_repo
+        self._attachment_repo = attachment_repo
+        self._drop_importer = DropImporter(attachment_repo, image_repo) if attachment_repo is not None else None
+        self._title_fetcher = _PageTitleFetcher(self)
+        self._url_downloader = _UrlDownloader(self)
         self._version_repo = version_repo
         self._task_repo = task_repo
         self._subtask_repo = subtask_repo
@@ -306,10 +373,12 @@ class NoteDetailWidget(QWidget):
             show_toolbar=not sticky,
             placeholder="Notes de réunion…" if sticky else "Write markdown here…",
             prefs=prefs,
+            accept_drops=attachment_repo is not None,
         )
         self._html_editor = WebHtmlEditor(
             image_repo, self,
             diagram_repo=diagram_repo,
+            attachment_repo=attachment_repo,
             show_toolbar=not sticky,
             placeholder="Notes de réunion…" if sticky else "Écrivez ici…",
             prefs=prefs,
@@ -323,6 +392,13 @@ class NoteDetailWidget(QWidget):
         self._html_editor.link_clicked.connect(self._on_link_clicked)
         self._html_editor.diagram_insert_requested.connect(self._on_insert_diagram)
         self._html_editor.diagram_open_requested.connect(self.diagram_open_requested)
+        self._md_editor.content_dropped.connect(self._on_content_dropped)
+        self._html_editor.content_dropped.connect(self._on_content_dropped)
+        self._html_editor.attachment_open_requested.connect(self._on_open_attachment)
+        self._html_editor.attachment_save_requested.connect(self._on_save_attachment)
+        self._title_fetcher.title_found.connect(self._on_page_title_found)
+        self._url_downloader.downloaded.connect(self._on_url_downloaded)
+        self._url_downloader.failed.connect(lambda _url, message: self._show_status(message, 8000))
         self._editor_stack = QStackedWidget(self)
         self._editor_stack.addWidget(self._md_editor)
         self._editor_stack.addWidget(self._html_editor)
@@ -654,6 +730,7 @@ class NoteDetailWidget(QWidget):
             id_exists=self._note_id_exists,
             image_cache=self._image_cache,
             task_info=self._task_info,
+            attachment_repo=self._attachment_repo,
         ))
 
     def _on_image_clicked(self, data_uri: str) -> None:
@@ -673,6 +750,119 @@ class NoteDetailWidget(QWidget):
         if diagram_id is not None:
             self._html_editor.insert_diagram(diagram_id)
 
+    def _show_status(self, message: str, timeout_ms: int = 2000) -> None:
+        self._status_label.setText(message)
+        self._status_clear_timer.start(timeout_ms)
+
+    def _on_content_dropped(self, items: list) -> None:
+        """Archive what was dropped on the editor and insert it where it fell: attachment
+        widgets in a WYSIWYG note, horizon-attachment:// links in a markdown note."""
+        if self._drop_importer is None or self._current_note is None or self._locked:
+            return
+        mode = self._ask_drop_mode(items)
+        if mode is None:
+            return
+        self._status_clear_timer.stop()
+        self._status_label.setText("Import du contenu déposé…")
+        self._status_label.repaint()  # Outlook peut prendre une seconde : montrer l'attente
+        result = self._drop_importer.import_items(items, self._current_note.id, mode)
+        self._insert_dropped_blocks(result.blocks)
+        for url, placeholder in result.titles_to_fetch:
+            self._title_fetcher.fetch(url, placeholder)
+        for url in result.downloads:
+            self._url_downloader.download(url)
+        if result.errors:
+            self._show_status(" — ".join(result.errors), 8000)
+        elif result.downloads:
+            count = len(result.downloads)
+            self._status_label.setText(f"Téléchargement de {count} document{'s' if count > 1 else ''}…")
+        else:
+            count = len(result.blocks)
+            self._show_status(f"{count} élément{'s' if count > 1 else ''} ajouté{'s' if count > 1 else ''}")
+
+    def _ask_drop_mode(self, items: list) -> DropMode | None:
+        """Copier le document dans Horizon ou le lier à son original : un menu sous le
+        curseur, à chaque dépôt. None si l'utilisateur le referme (Échap, clic ailleurs)."""
+        menu = QMenu(self)
+        if all(isinstance(item, DroppedLink) for item in items):
+            copy_label = "Télécharger une copie dans Horizon"
+        else:
+            copy_label = "Copier le document dans Horizon"
+        copy_action = menu.addAction(copy_label)
+        copy_action.setToolTip("Le contenu est archivé dans la note : il reste lisible si l'original disparaît.")
+        link_action = menu.addAction("Créer un lien vers le document d'origine")
+        reason = link_unavailable_reason(items)
+        if reason is not None:
+            link_action.setEnabled(False)
+            link_action.setText(f"Créer un lien — impossible : {reason}")
+        elif any(isinstance(item, DroppedFile) for item in items):
+            link_action.setToolTip("Rien n'est copié : la note ouvre le fichier là où il se trouve.")
+        menu.setToolTipsVisible(True)
+        menu.setDefaultAction(copy_action)
+        # Le dépôt vient souvent d'une autre application : la fenêtre doit être active pour
+        # que le menu reçoive le clavier (Échap, flèches).
+        self.window().activateWindow()
+        chosen = menu.exec(QCursor.pos())
+        if chosen is copy_action:
+            return DropMode.COPY
+        if chosen is link_action:
+            return DropMode.LINK
+        return None
+
+    def _insert_dropped_blocks(self, blocks: list[dict]) -> None:
+        if not blocks:
+            return
+        if self._is_html():
+            self._html_editor.insert_blocks(blocks)
+        else:
+            self._md_editor.insert_markdown(blocks_to_markdown(blocks))
+
+    def _on_url_downloaded(self, url: str, name: str, data: bytes) -> None:
+        """Une URL copiée est arrivée : archivée, puis insérée au curseur."""
+        if self._drop_importer is None or self._current_note is None or self._locked:
+            return
+        try:
+            block = self._drop_importer.import_bytes(name, data, self._current_note.id)
+        except DropImportError as exc:
+            self._show_status(str(exc), 8000)
+            return
+        self._insert_dropped_blocks([block])
+        self._show_status(f"Copie enregistrée : {name}")
+
+    def _on_page_title_found(self, url: str, placeholder: str, title: str) -> None:
+        if self._is_html():
+            self._html_editor.set_link_title(url, placeholder, title)
+        else:
+            self._md_editor.replace_first(markdown_link(placeholder, url), markdown_link(title, url))
+
+    def _on_open_attachment(self, attachment_id: int) -> None:
+        if self._attachment_repo is None:
+            return
+        path = self._attachment_repo.export_to_temp(attachment_id)
+        if path is None:
+            self._show_status("Pièce jointe introuvable dans la base", 5000)
+            return
+        from PySide6.QtCore import QUrl
+        from PySide6.QtGui import QDesktopServices
+        if not QDesktopServices.openUrl(QUrl.fromLocalFile(str(path))):
+            self._show_status(f"Aucune application pour ouvrir « {path.name} »", 5000)
+
+    def _on_save_attachment(self, attachment_id: int) -> None:
+        attachment = self._attachment_repo.get(attachment_id) if self._attachment_repo is not None else None
+        if attachment is None:
+            self._show_status("Pièce jointe introuvable dans la base", 5000)
+            return
+        default = str(Path.home() / "Downloads" / attachment.name)
+        target, _ = QFileDialog.getSaveFileName(self, "Enregistrer la pièce jointe", default)
+        if not target:
+            return
+        try:
+            self._attachment_repo.export_to(attachment_id, Path(target))
+        except OSError as exc:
+            self._show_status(f"Enregistrement impossible : {exc.strerror or exc}", 8000)
+            return
+        self._show_status(f"Enregistré : {Path(target).name}")
+
     def refresh_diagram(self, diagram_id: int) -> None:
         """Show the new rendering of a diagram that was redrawn or deleted."""
         self._html_editor.refresh_diagram(diagram_id)
@@ -687,6 +877,23 @@ class NoteDetailWidget(QWidget):
                 return
             self.note_link_clicked.emit(note_id)
             return
+        if parsed.scheme() == "horizon-attachment":
+            # Aperçu markdown (icône) ou lien d'une note convertie en WYSIWYG.
+            attachment_id = _attachment_id_from_url(url)
+            if attachment_id is not None:
+                self._on_open_attachment(attachment_id)
+            return
+        if url.startswith(OUTLOOK_SCHEME):
+            try:
+                open_outlook_item(url)
+            except DropImportError as exc:
+                self._show_status(str(exc), 8000)
+            return
+        if parsed.isLocalFile():
+            # Lien vers le document d'origine : il a pu être déplacé ou supprimé depuis.
+            if not os.path.exists(parsed.toLocalFile()):
+                self._show_status(f"Document introuvable : {parsed.toLocalFile()}", 8000)
+                return
         if parsed.scheme() == "horizon" and parsed.host() == "task":
             try:
                 task_id = int(parsed.path().lstrip("/"))
@@ -870,7 +1077,8 @@ class NoteDetailWidget(QWidget):
         if not self._is_html():
             self._editor.set_text(body)
             self._bridge.push_html(_markdown_to_html(
-                body, self._image_repo, self._note_repo, task_info=self._task_info))
+                body, self._image_repo, self._note_repo, task_info=self._task_info,
+                attachment_repo=self._attachment_repo))
             return
         if fmt is NoteFormat.Markdown:
             body = markdown_to_storage_html(

@@ -7,6 +7,7 @@ from PySide6.QtCore import QObject, QSize, Signal, Slot, QUrl
 from PySide6.QtGui import QFontDatabase, QIcon, QTextDocument
 
 from horizon import theme as _theme
+from horizon.attachment import AttachmentRepository, attachment_badge, format_size
 from horizon.image import ImageRepository
 from horizon.note_task import split_title_description, sub_outside_code
 from horizon.task import TASK_STATE_GLYPHS
@@ -52,6 +53,15 @@ _CODE_PH_RE = re.compile(r'HORIZONCODEBLOCK(\d+)END')
 
 _MD_IMG_RE  = re.compile(r'!\[([^\]]*)\]\(horizon-image://(\d+)\)')
 _HTML_PH_RE = re.compile(r'HORIZONIMG(\d+)END')
+
+# Lien vers une pièce jointe déposée : [libellé](horizon-attachment://12), pas une image.
+_MD_ATT_RE    = re.compile(r'(?<!!)\[((?:\\.|[^\]\\])*)\]\(horizon-attachment://(\d+)\)')
+_ATT_PH_RE    = re.compile(r'HORIZONATT(\d+)END')
+_MD_ESCAPE_RE = re.compile(r'\\(.)')
+# Lien vers le document d'origine : [nom](file:///…) ou [objet](outlook:<EntryID>…),
+# destination éventuellement entre chevrons (CommonMark, chemins avec espaces).
+_MD_ORIGIN_RE = re.compile(r'(?<!!)\[((?:\\.|[^\]\\])*)\]\(<?((?:file|outlook):[^)>\s]+)>?\)')
+_ORIGIN_PH_RE = re.compile(r'HORIZONORIGIN(\d+)END')
 
 _WIKILINK_RE = re.compile(
     r'\[\[(\d+)\|([^\]]+)\]\]'   # [[42|Texte]] : group 1=id, group 2=label
@@ -156,6 +166,16 @@ def _make_preview_html() -> str:
   .footnotes-list {{ padding-left: 1.5em; }}
   .footnotes-list li {{ margin-bottom: 0.4em; }}
   .footnote-backref {{ color: {t.preview_link}; text-decoration: none; margin-left: 0.3em; }}
+  a.att-card {{ display: inline-flex; align-items: center; gap: 10px; vertical-align: middle; margin: 2px 0; padding: 5px 12px 5px 5px;
+    border: 1px solid {t.preview_border}; border-radius: 6px; background: {t.preview_code_bg}; color: {t.preview_text};
+    text-decoration: none; max-width: 100%; cursor: pointer; }}
+  a.att-card:hover {{ border-color: {t.accent_color}; }}
+  .att-badge {{ flex: none; min-width: 34px; height: 40px; padding: 0 4px; border-radius: 4px; color: #fff;
+    font: bold 10px/40px 'Segoe UI', sans-serif; text-align: center; letter-spacing: 0.3px; }}
+  .att-text {{ display: flex; flex-direction: column; min-width: 0; line-height: 1.35; }}
+  .att-name {{ font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }}
+  .att-sub {{ font-size: 0.85em; opacity: 0.7; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 70ch; }}
+  .att-missing {{ opacity: 0.5; text-decoration: line-through; font-style: italic; }}
 </style>
 <link rel="stylesheet" href="{_HIGHLIGHT_CSS_DARK_URL if t.is_dark else _HIGHLIGHT_CSS_LIGHT_URL}">
 <style>
@@ -650,6 +670,7 @@ def _markdown_to_html(
     id_exists: set[int] | None = None,
     image_cache: dict[int, bytes | None] | None = None,
     task_info: dict[int, tuple[str, str]] | None = None,
+    attachment_repo: AttachmentRepository | None = None,
 ) -> str:
     # Use pre-computed note maps when provided to avoid hitting the DB on every render
     if title_to_id is not None and id_exists is not None:
@@ -674,6 +695,22 @@ def _markdown_to_html(
             return f"HORIZONIMG{img_id}END"
 
         markdown = _MD_IMG_RE.sub(_extract, markdown)
+
+    attachment_links: list[tuple[int, str]] = []
+    if attachment_repo is not None:
+        def _extract_attachment(m: re.Match) -> str:
+            attachment_links.append((int(m.group(2)), _MD_ESCAPE_RE.sub(r'\1', m.group(1))))
+            return f"HORIZONATT{len(attachment_links) - 1}END"
+
+        markdown = _MD_ATT_RE.sub(_extract_attachment, markdown)
+
+    origin_links: list[tuple[str, str]] = []
+
+    def _extract_origin(m: re.Match) -> str:
+        origin_links.append((m.group(2), _MD_ESCAPE_RE.sub(r'\1', m.group(1))))
+        return f"HORIZONORIGIN{len(origin_links) - 1}END"
+
+    markdown = _MD_ORIGIN_RE.sub(_extract_origin, markdown)
 
     markdown, html_blocks = _extract_html_blocks(markdown)
     markdown, inline_tags = _extract_tags(markdown)
@@ -709,9 +746,58 @@ def _markdown_to_html(
 
         html = _HTML_PH_RE.sub(_inject, html)
 
+    if attachment_links:
+        html = _ATT_PH_RE.sub(
+            lambda m: _attachment_card(attachment_repo, *attachment_links[int(m.group(1))]), html)
+    if origin_links:
+        html = _ORIGIN_PH_RE.sub(lambda m: _origin_card(*origin_links[int(m.group(1))]), html)
+
     html = _inject_html_blocks(html, html_blocks)
 
     return html
+
+
+def _card_html(href: str, badge: str, color: str, name: str, sub: str, tooltip: str) -> str:
+    esc = _html_mod.escape
+    return (
+        f'<a class="att-card" href="{esc(href)}" title="{esc(tooltip)}">'
+        f'<span class="att-badge" style="background:{color}">{esc(badge)}</span>'
+        f'<span class="att-text"><span class="att-name">{esc(name)}</span>'
+        f'<span class="att-sub">{esc(sub)}</span></span></a>'
+    )
+
+
+def _origin_card(href: str, label: str) -> str:
+    """Icône d'un lien vers le document d'origine (fichier, dossier, courriel Outlook).
+    L'existence du fichier n'est pas vérifiée ici — un partage réseau hors ligne gèlerait
+    chaque rendu — mais au clic."""
+    if href.startswith("outlook:"):
+        return _card_html(href, "MSG", "#0078d4", label or "Courriel", "Courriel Outlook — lien vers l'original",
+                          "Ouvrir dans Outlook")
+    path = str(Path(QUrl(href).toLocalFile())) if QUrl(href).isLocalFile() else href
+    name = label or Path(path).name or path
+    badge, color = attachment_badge(Path(path).name)
+    if badge == "?":
+        badge, color = "DOS", "#c79a2b"  # sans extension : le plus souvent un dossier
+    return _card_html(href, badge, color, name, path, f"Ouvrir {path}")
+
+
+def _attachment_card(attachment_repo: AttachmentRepository, attachment_id: int, label: str) -> str:
+    """Icône d'une pièce jointe dans l'aperçu : pastille du type, nom, taille. Un clic
+    l'ouvre (horizon-attachment://, traité par NoteDetailWidget._on_link_clicked)."""
+    attachment = attachment_repo.get(attachment_id)
+    if attachment is None:
+        return f'<span class="att-missing">{_html_mod.escape(label or "pièce jointe")} (introuvable)</span>'
+    badge, color = attachment_badge(attachment.name)
+    name = label or attachment.name
+    sub = " · ".join(x for x in (
+        attachment.name if name != attachment.name else badge, format_size(attachment.size)) if x)
+    return (
+        f'<a class="att-card" href="horizon-attachment://{attachment_id}" title="Ouvrir {_html_mod.escape(attachment.name)}">'
+        f'<span class="att-badge" style="background:{color}">{_html_mod.escape(badge)}</span>'
+        f'<span class="att-text"><span class="att-name">{_html_mod.escape(name)}</span>'
+        f'<span class="att-sub">{_html_mod.escape(sub)}</span></span></a>'
+    )
 
 
 def _extract_task_links(md: str, task_info: dict[int, tuple[str, str]]) -> tuple[str, list[str]]:

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import QApplication, QMainWindow, QSplitter, QStackedWidg
 
 from horizon import theme as _theme
 from horizon import updater
+from horizon.attachment import AttachmentRepository
 from horizon.database import Database
 from horizon.diagram import DiagramRepository
 from horizon.dialogs import AlertDialog, NoteFormatDialog
@@ -127,6 +128,7 @@ class MainWindow(QMainWindow):
         self._archimate_repo = ArchimateModelRepository(db)
         self._document_repo = DocumentRepository(db)
         self._diagram_repo = DiagramRepository(db)
+        self._attachment_repo = AttachmentRepository(db)
         self._note_source: str = "notes"
         # Vue à retrouver au retour de l'éditeur de diagrammes ouvert depuis une note ;
         # None : retour à la liste des diagrammes.
@@ -156,6 +158,7 @@ class MainWindow(QMainWindow):
             task_repo=task_repo, subtask_repo=subtask_repo,
             note_task_repo=self._note_task_repo,
             diagram_repo=self._diagram_repo,
+            attachment_repo=self._attachment_repo,
         )
         self._right_stack.addWidget(self._note_detail)     # index 3
 
@@ -556,6 +559,7 @@ class MainWindow(QMainWindow):
             task_repo=self._task_repo, subtask_repo=self._subtask_repo,
             note_task_repo=self._note_task_repo,
             diagram_repo=self._diagram_repo,
+            attachment_repo=self._attachment_repo,
             sticky=sticky,
         )
         win.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)

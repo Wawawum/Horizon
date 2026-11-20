@@ -67,7 +67,7 @@ Detailed patterns: [docs/agent-patterns.md](docs/agent-patterns.md)
 - Tagged entities: notes, tasks.
 - Note↔task links: `note_tasks`, synced from the `{task: …}` blocks of a note body by `src/horizon/note_task.py` (markdown notes only).
 - Note formats: `notes.format` is `markdown` or `html` (WYSIWYG, CKEditor 5). Only `NoteRepository.convert_to_html` changes it, one way; see [docs/architecture.md](docs/architecture.md).
-- Other repositories, such as deliverables, diagrams, folders, images, and deliverable templates, still follow the repository pattern and commit mutations, but do not currently sync tags or `search_index`.
+- Other repositories, such as deliverables, diagrams, folders, images, attachments, and deliverable templates, still follow the repository pattern and commit mutations, but do not currently sync tags or `search_index`.
 
 ## Common Workflows
 
@@ -97,6 +97,8 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/widgets/updates.py](src/horizon/widgets/updates.py) | `UpdateCheckWorker`, `UpdateDownloadWorker`, `UpdateDialog` (startup check wired in `MainWindow`) |
 | [src/horizon/widgets/notes.py](src/horizon/widgets/notes.py) | Canonical list/detail widget example |
 | [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` and `horizon-diagram://` schemes |
+| [src/horizon/attachment.py](src/horizon/attachment.py) | `Attachment` + `AttachmentRepository`: files dropped on WYSIWYG notes, archived as BLOBs |
+| [src/horizon/attachment_drop.py](src/horizon/attachment_drop.py) | `parse_drop` (QMimeData → files / Outlook items / links), `DropImporter`, Outlook COM export, page title fetch |
 | [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
 | [src/horizon/widgets/drawio.py](src/horizon/widgets/drawio.py) | `DrawioEditor`: embedded draw.io (`resources/drawio/draw.war`, fetched by `tools/fetch_drawio.py`) served on `horizon-drawio://app`, JSON protocol over QWebChannel |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |

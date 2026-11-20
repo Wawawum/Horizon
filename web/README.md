@@ -52,8 +52,9 @@ Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plug
 markdown toolbar commands in `editor.js`) and talk back through the `bridge` object registered
 on the QWebChannel (`push_text`, `mark_dirty`, `editor_blurred`, `editor_ready`, `store_image`,
 `set_font_size`, `shortcut`, `image_upload_started/finished`, and `open_link`, `pick_diagram`,
-`open_diagram` for the WYSIWYG editor, whose `HorizonEditor` also has `insertDiagram` and
-`refreshDiagram`).
+`open_diagram`, `open_attachment`, `save_attachment` for the WYSIWYG editor, whose
+`HorizonEditor` also has `insertDiagram`, `refreshDiagram`, `setCaretAt`, `insertBlocks` and
+`setLinkTitle`).
 
 Invariants worth preserving if you touch this:
 
@@ -85,5 +86,10 @@ WYSIWYG specifics:
   `horizon-diagram://<id>`, served by `_DiagramSchemeHandler`. The editing view adds a
   `?v=<page nonce>.<revision>` cache buster that `refreshDiagram` bumps; the data view does not,
   so a refresh is never an edit. See docs/architecture.md, "Diagrams in WYSIWYG notes".
+- **Dropped files, e-mails and URLs are Python's.** `_WebEditorBase` intercepts those drops
+  before Chromium; the page only places the caret (`setCaretAt`, in both bundles) and inserts
+  what Python archived — `HorizonAttachment` widgets (`insertBlocks`) in CKEditor, markdown
+  links (`insertBlock`, then `replaceFirst` for a fetched page title) in CodeMirror. See
+  docs/architecture.md, "Dropped content in notes".
 - **The page never navigates.** Ctrl+click on a link in the text, or a click on the link in
   CKEditor's balloon, is sent to Python through `open_link`.
