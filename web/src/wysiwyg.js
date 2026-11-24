@@ -11,7 +11,7 @@ import {
   Code, List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
   ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
   HorizontalLine, Autoformat, IconObjectLeft, IconObjectCenter, Widget, toWidget, Command,
-  ButtonView, Plugin, WidgetToolbarRepository, isWidget,
+  ButtonView, Plugin, WidgetToolbarRepository, isWidget, FontColor, Highlight,
 } from "ckeditor5";
 import translations from "ckeditor5/translations/fr.js";
 import "ckeditor5/ckeditor5.css";
@@ -709,15 +709,47 @@ function createEditor(state) {
       List, BlockQuote, Link, Table, TableToolbar, CodeBlock, Image, ImageUpload,
       ImageToolbar, ImageCaption, ImageTextAlternative, ImageStyle, TableProperties,
       HorizontalLine, Autoformat, Widget, HorizonUploadAdapter, HorizonDiagram,
-      HorizonAttachment, HorizonAttachmentToolbar,
+      HorizonAttachment, HorizonAttachmentToolbar, FontColor, Highlight,
     ],
     toolbar: {
       items: [
         "undo", "redo", "|", "heading", "|", "bold", "italic", "underline",
-        "strikethrough", "code", "|", "bulletedList", "numberedList", "blockQuote", "|",
+        "strikethrough", "code", "|", "fontColor", "highlight", "|", "bulletedList", "numberedList", "blockQuote", "|",
         "link", "insertTable", "codeBlock", "uploadImage", "insertDiagram", "horizontalLine",
       ],
       shouldNotGroupWhenFull: false,
+    },
+    // Text colour: a palette readable on both the light and the dark theme (no black or
+    // white, which would vanish on one of them), plus the picker for any other colour.
+    // "Couleur par défaut" removes it, so the text follows the theme again.
+    fontColor: {
+      colors: [
+        { color: "#e03131", label: "Rouge" },
+        { color: "#f76707", label: "Orange" },
+        { color: "#f59f00", label: "Jaune" },
+        { color: "#2f9e44", label: "Vert" },
+        { color: "#0c8599", label: "Turquoise" },
+        { color: "#1c7ed6", label: "Bleu" },
+        { color: "#7048e8", label: "Violet" },
+        { color: "#d6336c", label: "Rose" },
+        { color: "#868e96", label: "Gris" },
+      ],
+      columns: 9,
+      documentColors: 9,
+      colorPicker: { format: "hex" },
+    },
+    // Highlighting: <mark class="marker-…">. The first four classes are styled by
+    // CKEditor's own CSS, the others by the page CSS (webeditor.py), which also keeps the
+    // highlighted text dark so it stays readable on the dark theme.
+    highlight: {
+      options: [
+        { model: "yellowMarker", class: "marker-yellow", title: "Surligneur jaune", color: "var(--ck-content-highlight-marker-yellow)", type: "marker" },
+        { model: "greenMarker", class: "marker-green", title: "Surligneur vert", color: "var(--ck-content-highlight-marker-green)", type: "marker" },
+        { model: "pinkMarker", class: "marker-pink", title: "Surligneur rose", color: "var(--ck-content-highlight-marker-pink)", type: "marker" },
+        { model: "blueMarker", class: "marker-blue", title: "Surligneur bleu", color: "var(--ck-content-highlight-marker-blue)", type: "marker" },
+        { model: "orangeMarker", class: "marker-orange", title: "Surligneur orange", color: "var(--hz-highlight-marker-orange)", type: "marker" },
+        { model: "purpleMarker", class: "marker-purple", title: "Surligneur violet", color: "var(--hz-highlight-marker-purple)", type: "marker" },
+      ],
     },
     // Titre N = <hN>, comme en markdown (CKEditor décale d'un niveau par défaut).
     heading: {

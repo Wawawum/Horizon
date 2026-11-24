@@ -282,6 +282,8 @@ def _make_wysiwyg_html() -> str:
     --ck-color-image-caption-background: transparent;
     --ck-color-image-caption-text: var(--hz-text);
     --ck-border-radius: 4px;
+    --hz-highlight-marker-orange: #ffc078;
+    --hz-highlight-marker-purple: #d0bfff;
   }}
   * {{ box-sizing: border-box; }}
   html, body {{ height: 100%; margin: 0; overflow: hidden; background: var(--hz-input-bg); }}
@@ -296,6 +298,10 @@ def _make_wysiwyg_html() -> str:
   }}
   body.no-toolbar .ck.ck-editor__top {{ display: none; }}
   body.no-toolbar .ck.ck-editor__main > .ck-editor__editable {{ border-radius: 0; }}
+  .ck-content mark[class^="marker-"] {{ color: #1f1f1f; padding: 0 0.1em; border-radius: 2px; }}
+  .ck-content span[style*="color"] > mark[class^="marker-"] {{ color: inherit; }}
+  .ck-content .marker-orange {{ background-color: var(--hz-highlight-marker-orange); }}
+  .ck-content .marker-purple {{ background-color: var(--hz-highlight-marker-purple); }}
   .ck-content a {{ color: {t.preview_link}; }}
   .ck-content a[href^="horizon://note/"] {{ color: var(--hz-accent-color); text-decoration: none; border-bottom: 1px dashed var(--hz-accent-color); }}
   .ck-content a[href^="horizon://task/"] {{ color: var(--hz-accent-color); text-decoration: none; border-left: 3px solid var(--hz-accent-color); padding-left: 4px; }}
