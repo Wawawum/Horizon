@@ -1,5 +1,5 @@
-// Style bar of the mind map editor: font size, text colour, background, border colour and
-// width of the selected nodes.
+// Style bar of the mind map editor: font size, text colour, background, shape, border colour
+// and width of the selected nodes.
 //
 // Mind Elixir stores a node's look in `nodeObj.style`, whose keys it copies onto the topic
 // element as inline CSS, and applies it with reshapeNode(), which records an undoable
@@ -7,6 +7,15 @@
 // Elixir has no panel for it; this bar shows up above the map while nodes are selected.
 
 const FONT_SIZES = ["12", "14", "16", "18", "20", "24", "28", "32", "40"];
+// Shapes are border radii (clip-path shapes such as a diamond would clip the border away).
+// The ellipse also gets more padding, so that its curve clears the text.
+const SHAPES = [
+  ["rect", "Rectangle", { borderRadius: "0px", padding: "" }],
+  ["rounded", "Arrondi", { borderRadius: "8px", padding: "" }],
+  ["pill", "Pilule", { borderRadius: "999px", padding: "" }],
+  ["ellipse", "Ellipse", { borderRadius: "50%", padding: "14px 30px" }],
+];
+
 const BORDER_WIDTHS = [["0", "Aucune"], ["1", "1 px"], ["2", "2 px"], ["3", "3 px"], ["4", "4 px"], ["6", "6 px"]];
 
 // Strong colours, then light ones (backgrounds).
@@ -170,6 +179,15 @@ export function installStyleBar(getMind) {
   for (const px of FONT_SIZES) size.appendChild(new Option(px, px));
   size.addEventListener("change", () => apply({ fontSize: size.value ? size.value + "px" : "" }));
 
+  const shape = document.createElement("select");
+  shape.title = "Forme du nœud";
+  shape.appendChild(new Option("Auto", ""));
+  for (const [id, name] of SHAPES) shape.appendChild(new Option(name, id));
+  shape.addEventListener("change", () => {
+    const found = SHAPES.find(([id]) => id === shape.value);
+    apply(found ? found[2] : { borderRadius: "", padding: "" });
+  });
+
   const borderWidth = document.createElement("select");
   borderWidth.title = "Épaisseur de la bordure";
   borderWidth.appendChild(new Option("Auto", ""));
@@ -187,6 +205,7 @@ export function installStyleBar(getMind) {
   bar.append(
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
+    label("Forme"), shape, sep(),
     label("Bordure"), borderWidth, borderColor.button,
   );
   document.body.append(bar, pop);
@@ -219,6 +238,9 @@ export function installStyleBar(getMind) {
     }
     showSelect(size, "fontSize", FONT_SIZES);
     showSelect(borderWidth, "borderWidth", BORDER_WIDTHS.map(([px]) => px));
+    const radius = commonValue("borderRadius");
+    const current = radius ? SHAPES.find(([, , st]) => st.borderRadius === radius) : null;
+    shape.value = current ? current[0] : "";
     for (const { key, swatch: s } of colorButtons) {
       const v = commonValue(key);
       s.className = "hz-swatch" + (v === null ? " mixed" : v ? "" : " auto");

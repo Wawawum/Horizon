@@ -113,9 +113,11 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   the Markdown source. Links get `target="_blank"`, and a click on any link in the page is
   sent to Python through `open_link` (http, https and mailto only), so the page never navigates.
 - **Node style bar** (`src/nodestyle.js`). While nodes are selected, a bar above the map sets
-  their font size, text colour, background, border width and border colour (`nodeObj.style`:
-  `fontSize`, `color`, `background`, `borderWidth`, `borderColor`, plus `borderStyle: solid`
-  when either border key is set) through `reshapeNode`, an undoable operation pushed like any
+  their font size, text colour, background, shape, border width and border colour
+  (`nodeObj.style`: `fontSize`, `color`, `background`, `borderWidth`, `borderColor`, plus
+  `borderStyle: solid` when either border key is set; a shape is a `borderRadius` — rectangle,
+  rounded, pill, ellipse, the ellipse with a wider `padding` — since a `clip-path` shape would
+  clip the border) through `reshapeNode`, an undoable operation pushed like any
   edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker).
   `reshapeNode` merges the previous style under the new one, so "Auto" stores the key as `""`
   rather than deleting it. `linkDiv` paints first-level topics' borders in their branch colour
