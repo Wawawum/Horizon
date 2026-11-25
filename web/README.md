@@ -154,3 +154,10 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   `viewBox` is then cropped to the content plus 16 px, since `mind.nodes` carries the editor's
   wide `--map-padding`. The PNG thumbnail is that SVG drawn on a canvas. The selection is
   cleared first, so its outline is not in the picture.
+- **Full screen.** Mind Elixir's toolbar button calls `requestFullscreen()` on the map element,
+  which QtWebEngine refuses (and which would leave the style bar out). A capture-phase click
+  listener on the window catches it before Mind Elixir's `onclick` and calls
+  `bridge.toggle_fullscreen()`; Python moves the view into a full-screen top-level window. F11
+  toggles too, and Esc calls `bridge.exit_fullscreen()` — the format painter and the topic
+  editor stop Esc first (Mind Elixir prevents the default of every key, so `defaultPrevented`
+  says nothing). The map keeps its centre across the resize.
