@@ -238,7 +238,8 @@ fonts embedded, cropped to the content — in Horizon's theme at the time of the
 draws it in the notes' `<img>`. Links in topics open in the system browser. A style bar, shown while
 nodes are selected, sets their font size, text colour, background, shape and border (line, width, colour), or applies a
 preset style (ten colours, pastel or vivid); its format painter copies a node's whole style onto
-others, and an icon picker adds emoji to nodes.
+others, and an icon picker adds emoji to nodes. How many levels under the root are boxed nodes rather than
+underlined leaves is a setting of each map, and a node can force its own kind.
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive

@@ -7,6 +7,7 @@
 // Elixir has no panel for it; this bar shows up above the map while nodes are selected.
 
 import { installIconPicker } from "./nodeicons.js";
+import { installNodeKinds, kindSetting, setKind, shieldControls } from "./nodekind.js";
 
 const FONT_SIZES = ["12", "14", "16", "18", "20", "24", "28", "32", "40"];
 // Shapes are border radii (clip-path shapes such as a diamond would clip the border away).
@@ -204,16 +205,18 @@ function swatch(value) {
   return s;
 }
 
+const KINDS = [["node", "Nœud"], ["leaf", "Feuille"]];
+
 export function installStyleBar(getMind) {
+  const kinds = installNodeKinds(getMind);
+
   const style = document.createElement("style");
   style.textContent = CSS;
   document.head.appendChild(style);
 
   // Clicks on the bar and its popover must not reach the map, which would clear the selection.
   function shield(el) {
-    for (const type of ["mousedown", "pointerdown", "click", "dblclick", "keydown", "wheel"]) {
-      el.addEventListener(type, (e) => e.stopPropagation());
-    }
+    shieldControls(el, getMind);
   }
 
   const bar = document.createElement("div");
@@ -390,6 +393,7 @@ export function installStyleBar(getMind) {
     const nodes = selected();
     if (!nodes.length) return;
     painter.style = { ...(nodes[0].nodeObj.style || {}) };
+    painter.kind = kindSetting(nodes[0].nodeObj);
     painter.sticky = sticky;
     painterBtn.classList.add("active");
     document.body.classList.add("hz-painting");
@@ -416,6 +420,11 @@ export function installStyleBar(getMind) {
     painter.busy = true;
     try {
       await apply(patch, { derive: false });
+      // The node / leaf kind is part of the format too (not for the root).
+      const mind = getMind();
+      for (const tpc of targets) {
+        await setKind(mind, tpc, painter.kind);
+      }
     } finally {
       painter.busy = false;
     }
@@ -456,6 +465,18 @@ export function installStyleBar(getMind) {
   for (const px of FONT_SIZES) size.appendChild(new Option(px, px));
   size.addEventListener("change", () => apply({ fontSize: size.value ? size.value + "px" : "" }));
 
+  const kind = document.createElement("select");
+  kind.title = "Type : nœud (encadré) ou feuille (texte souligné) ; Auto suit les niveaux de la carte";
+  kind.appendChild(new Option("Auto", ""));
+  for (const [id, name] of KINDS) kind.appendChild(new Option(name, id));
+  kind.addEventListener("change", async () => {
+    const mind = getMind();
+    for (const tpc of selected()) {
+      await setKind(mind, tpc, kind.value);
+    }
+    refresh();
+  });
+
   const shape = document.createElement("select");
   shape.title = "Forme du nœud";
   shape.appendChild(new Option("Auto", ""));
@@ -490,6 +511,7 @@ export function installStyleBar(getMind) {
     presets, iconPicker.button, sep(),
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
+    label("Type"), kind, sep(),
     label("Forme"), shape, sep(),
     label("Bordure"), line, borderWidth, borderColor.button,
   );
@@ -526,6 +548,9 @@ export function installStyleBar(getMind) {
     }
     showSelect(size, "fontSize", FONT_SIZES);
     showSelect(borderWidth, "borderWidth", BORDER_WIDTHS.map(([px]) => px));
+    const selectedKinds = nodes.filter((tpc) => !tpc.nodeObj.root).map((tpc) => kindSetting(tpc.nodeObj));
+    kind.disabled = selectedKinds.length === 0;
+    kind.value = selectedKinds.length && selectedKinds.every((k) => k === selectedKinds[0]) ? selectedKinds[0] : "";
     const currentLine = commonValue("hzLine");
     line.value = currentLine && LINE_CSS[currentLine] ? currentLine : "";
     const radius = commonValue("borderRadius");
@@ -573,9 +598,17 @@ export function installStyleBar(getMind) {
       if (painter.style) stopPainter(); // a style copied from the previous map
       // linkDiv() — every redraw — paints first-level topics' borders in their branch
       // colour, over the node's own style: put a chosen border colour back afterwards.
+      kinds.attach(mind);
       const linkDiv = mind.linkDiv;
       mind.linkDiv = function (...args) {
-        const result = linkDiv.apply(this, args);
+        // Node / leaf classes first: they change the topics' size, which the layout measures.
+        kinds.beforeLayout(this, args[0]);
+        let result;
+        try {
+          result = linkDiv.apply(this, args);
+        } finally {
+          kinds.afterLayout(this);
+        }
         for (const tpc of this.nodes.querySelectorAll(".me-tpc")) {
           const style = (tpc.nodeObj && tpc.nodeObj.style) || {};
           if (style.borderColor) tpc.style.borderColor = style.borderColor;

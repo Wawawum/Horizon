@@ -8,7 +8,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
 | `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
-| `src/mindmap.js` (+ `src/nodestyle.js`, `src/nodeicons.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
+| `src/mindmap.js` (+ `src/nodestyle.js`, `src/nodeicons.js`, `src/nodekind.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
 
 ## Rebuilding
 
@@ -126,8 +126,20 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   text, so icons are emoji: a palette in five groups toggles one on the selected nodes (removed
   when they all have it), a field adds any other emoji, and "Retirer toutes les icônes" empties
   the list — all through `reshapeNode`. The format painter does not copy icons: they are content.
+- **Node or leaf** (`src/nodekind.js`). Mind Elixir boxes the root's children and underlines
+  everything deeper. The root's `metadata.hzLevels` (panel at the bottom left, default 1) sets how
+  many levels are boxed; a topic's `metadata.hzKind` ("node" / "leaf", "Type" in the bar) forces
+  its own. Both sit in `metadata` because undo/redo restores through `diffRefresh`, which only
+  compares a fixed list of fields (`metadata` among them). Before each layout the wrapped
+  `linkDiv` puts `hz-node` / `hz-leaf` on the `.me-parent`s (CSS restyles the topic), and
+  `generateMainBranch` / `generateSubBranch` are wrapped to start a line from a boxed parent's
+  middle and end it at a boxed child's middle, or under a first-level leaf. The generators only
+  get geometry: the topics are looked up in the order Mind Elixir draws them (document order),
+  checked against it, with Mind Elixir's own line as the fallback. Not applied to the top-down
+  layout, which boxes every topic. Controls of the page hand the keyboard back to the map once
+  used (`shieldControls`), so that Ctrl+Z and the other shortcuts keep working.
 - **Format painter.** The brush button copies the first selected node's whole `style`; the
-  next selection receives it (the source's keys, and `""` for keys only the targets had),
+  next selection receives it, with its node / leaf kind (the source's keys, and `""` for keys only the targets had),
   applied as is (`apply(patch, { derive: false })`), and the tool turns off. A double-click
   keeps it on until Esc or another click on the button; the bar stays up meanwhile.
 - **Border lines** are stored in `style.hzLine` (solid, dashed, long, dashdot, dotted, double),
