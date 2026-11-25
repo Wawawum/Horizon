@@ -237,7 +237,8 @@ DOMPurify), so its SVG is a SnapDOM capture of the map's DOM — HTML in a `<for
 fonts embedded, cropped to the content — in Horizon's theme at the time of the export; Chromium
 draws it in the notes' `<img>`. Links in topics open in the system browser. A style bar, shown while
 nodes are selected, sets their font size, text colour, background, shape and border (line, width, colour), or applies a
-preset style (ten colours, pastel or vivid).
+preset style (ten colours, pastel or vivid); its format painter copies a node's whole style onto
+others.
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive

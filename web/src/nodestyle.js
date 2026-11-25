@@ -1,5 +1,5 @@
-// Style bar of the mind map editor: preset styles, font size, text colour, background, shape,
-// border line, colour and width of the selected nodes.
+// Style bar of the mind map editor: format painter, preset styles, font size, text colour,
+// background, shape, border line, colour and width of the selected nodes.
 //
 // Mind Elixir stores a node's look in `nodeObj.style`, whose keys it copies onto the topic
 // element as inline CSS, and applies it with reshapeNode(), which records an undoable
@@ -143,6 +143,17 @@ const CSS = `
   background: linear-gradient(135deg, var(--hz-input-bg) 45%, #e03131 45%, #e03131 55%, var(--hz-input-bg) 55%);
 }
 .hz-swatch.mixed { background: repeating-linear-gradient(45deg, #adb5bd 0 3px, transparent 3px 6px); }
+#hz-style-bar .hz-painter-btn {
+  display: inline-flex; align-items: center; justify-content: center; width: 26px; height: 22px;
+  padding: 0; cursor: pointer; color: var(--hz-text); background: var(--hz-input-bg);
+  border: 1px solid var(--hz-border); border-radius: 4px;
+}
+#hz-style-bar .hz-painter-btn.active {
+  color: #ffffff; background: var(--hz-accent-color); border-color: var(--hz-accent-color);
+}
+#hz-style-bar .hz-painter-hint { display: none; opacity: 0.75; }
+body.hz-painting #hz-style-bar .hz-painter-hint { display: inline; }
+body.hz-painting .map-container, body.hz-painting .map-container .me-tpc { cursor: copy !important; }
 #hz-style-bar .hz-preset-btn {
   padding: 2px 8px; cursor: pointer; font: inherit; color: var(--hz-text);
   background: var(--hz-input-bg); border: 1px solid var(--hz-border); border-radius: 4px;
@@ -339,6 +350,84 @@ export function installStyleBar(getMind) {
     return { key, button: b, swatch: s };
   }
 
+  // ── Format painter ─────────────────────────────────────────────────────
+  // Click: copy the selected node's whole style; the next node(s) selected receive it, then
+  // the tool turns off. Double-click: it stays on until Esc or another click on the button.
+  const painter = { style: null, sticky: false, busy: false };
+  const painterBtn = document.createElement("button");
+  painterBtn.type = "button";
+  painterBtn.className = "hz-painter-btn";
+  painterBtn.title = "Reproduire la mise en forme (double-clic : sur plusieurs nœuds, Échap pour arrêter)";
+  painterBtn.innerHTML =
+    '<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.4" ' +
+    'stroke-linejoin="round"><rect x="2" y="1.5" width="10" height="4.5" rx="1"/>' +
+    '<path d="M12 3.75h1.5v3.5H7.5v2"/><rect x="6" y="9.25" width="3" height="5.25" rx="0.8"/></svg>';
+  const painterHint = document.createElement("span");
+  painterHint.className = "hz-painter-hint";
+  painterHint.textContent = "Cliquez sur les nœuds à mettre en forme";
+  let painterClickTimer = null;
+  painterBtn.addEventListener("click", () => {
+    // A double-click also sends two clicks: wait to tell them apart.
+    if (painterClickTimer !== null) return;
+    painterClickTimer = setTimeout(() => {
+      painterClickTimer = null;
+      if (painter.style) stopPainter();
+      else startPainter(false);
+    }, 220);
+  });
+  painterBtn.addEventListener("dblclick", () => {
+    clearTimeout(painterClickTimer);
+    painterClickTimer = null;
+    startPainter(true);
+  });
+
+  function startPainter(sticky) {
+    const nodes = selected();
+    if (!nodes.length) return;
+    painter.style = { ...(nodes[0].nodeObj.style || {}) };
+    painter.sticky = sticky;
+    painterBtn.classList.add("active");
+    document.body.classList.add("hz-painting");
+    closePop();
+    closePresets();
+  }
+
+  function stopPainter() {
+    painter.style = null;
+    painterBtn.classList.remove("active");
+    document.body.classList.remove("hz-painting");
+    refresh();
+  }
+
+  async function paintSelection() {
+    if (!painter.style || painter.busy) return;
+    const targets = selected();
+    if (!targets.length) return;
+    // The whole format: the source's keys, and "" for keys only the targets have.
+    const patch = { ...painter.style };
+    for (const tpc of targets) {
+      for (const key of Object.keys(tpc.nodeObj.style || {})) if (!(key in patch)) patch[key] = "";
+    }
+    painter.busy = true;
+    try {
+      await apply(patch, { derive: false });
+    } finally {
+      painter.busy = false;
+    }
+    if (!painter.sticky) stopPainter();
+  }
+
+  document.addEventListener(
+    "keydown",
+    (e) => {
+      if (e.key === "Escape" && painter.style) {
+        e.stopPropagation();
+        stopPainter();
+      }
+    },
+    true,
+  );
+
   const presets = document.createElement("button");
   presets.type = "button";
   presets.className = "hz-preset-btn";
@@ -382,6 +471,7 @@ export function installStyleBar(getMind) {
   const [textColor, background, borderColor] = colorButtons;
 
   bar.append(
+    painterBtn, painterHint, sep(),
     presets, sep(),
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
@@ -411,7 +501,8 @@ export function installStyleBar(getMind) {
 
   function refresh() {
     const nodes = selected();
-    bar.classList.toggle("visible", nodes.length > 0);
+    // While the painter is on, the bar stays up: it shows the tool and how to stop it.
+    bar.classList.toggle("visible", nodes.length > 0 || painter.style !== null);
     if (!nodes.length) {
       closePop();
       closePresets();
@@ -431,11 +522,13 @@ export function installStyleBar(getMind) {
     }
   }
 
-  async function apply(patch) {
+  // `derive: false` applies `patch` as is (the format painter copies a style that is already
+  // consistent); otherwise borderStyle and a missing border width are worked out.
+  async function apply(patch, { derive = true } = {}) {
     const mind = getMind();
     for (const tpc of selected()) {
       const next = { ...(tpc.nodeObj.style || {}), ...patch };
-      if ("borderWidth" in patch || "borderColor" in patch || "hzLine" in patch) {
+      if (derive && ("borderWidth" in patch || "borderColor" in patch || "hzLine" in patch)) {
         // borderStyle follows the chosen line, else "solid" as soon as the border is
         // customised: sub-topics have no border of their own.
         next.borderStyle = next.hzLine
@@ -461,6 +554,7 @@ export function installStyleBar(getMind) {
   return {
     // Called once per Mind Elixir instance (one per loaded map).
     attach(mind) {
+      if (painter.style) stopPainter(); // a style copied from the previous map
       // linkDiv() — every redraw — paints first-level topics' borders in their branch
       // colour, over the node's own style: put a chosen border colour back afterwards.
       const linkDiv = mind.linkDiv;
@@ -476,7 +570,7 @@ export function installStyleBar(getMind) {
         return result;
       };
       mind.linkDiv();
-      mind.bus.addListener("selectNodes", refresh);
+      mind.bus.addListener("selectNodes", () => (painter.style ? paintSelection() : refresh()));
       mind.bus.addListener("unselectNodes", refresh);
       refresh();
     },

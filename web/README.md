@@ -122,6 +122,10 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   "Styles" button offers presets — green, yellow, orange, red, pink, mauve, blue, grey, white,
   black, each pastel or vivid (`PRESET_COLORS`) — that set background, a 2 px border and a
   readable text colour, leaving size, shape and line alone; "Aucun" empties those keys.
+- **Format painter.** The brush button copies the first selected node's whole `style`; the
+  next selection receives it (the source's keys, and `""` for keys only the targets had),
+  applied as is (`apply(patch, { derive: false })`), and the tool turns off. A double-click
+  keeps it on until Esc or another click on the button; the bar stays up meanwhile.
 - **Border lines** are stored in `style.hzLine` (solid, dashed, long, dashdot, dotted, double),
   from which `borderStyle` is derived. CSS dashes have a fixed length, so long dashes and
   dash-dot are drawn by `paintLine()` as an SVG background under a transparent border of the
