@@ -1,5 +1,5 @@
 // Style bar of the mind map editor: preset styles, font size, text colour, background, shape,
-// border colour and width of the selected nodes.
+// border line, colour and width of the selected nodes.
 //
 // Mind Elixir stores a node's look in `nodeObj.style`, whose keys it copies onto the topic
 // element as inline CSS, and applies it with reshapeNode(), which records an undoable
@@ -43,11 +43,77 @@ const PRESET_COLORS = [
 ];
 
 function presetStyle([background, border, text]) {
-  return { background, borderColor: border, borderWidth: "2px", borderStyle: "solid", color: text };
+  return { background, borderColor: border, borderWidth: "2px", color: text };
 }
 
 // "Aucun": back to the theme's look for what a preset sets.
-const NO_PRESET = { background: "", borderColor: "", borderWidth: "", borderStyle: "", color: "" };
+const NO_PRESET = { background: "", borderColor: "", borderWidth: "", color: "" };
+
+// Border lines, stored in style.hzLine (a key no CSS property has: Mind Elixir's harmless
+// assignment of it to element.style does nothing). CSS draws the first four; its dashes have a
+// fixed length, so long dashes and dash-dot are drawn by paintLine() as an SVG under a
+// transparent border, which follows the node's shape.
+const LINES = [
+  ["solid", "Continu", "solid"],
+  ["dashed", "Tirets", "dashed"],
+  ["long", "Tirets longs", "solid"],
+  ["dashdot", "Tiret-point", "solid"],
+  ["dotted", "Points", "dotted"],
+  ["double", "Double", "double"],
+];
+const LINE_CSS = Object.fromEntries(LINES.map(([id, , css]) => [id, css]));
+
+function dashArray(line, w) {
+  if (line === "long") return `${Math.max(10, 6 * w)} ${Math.max(5, 3 * w)}`;
+  const gap = Math.max(4, 2 * w);
+  return `${Math.max(8, 5 * w)} ${gap} ${w} ${gap}`; // dash-dot
+}
+
+function opaque(color) {
+  return color && color !== "transparent" && color !== "rgba(0, 0, 0, 0)" ? color : "";
+}
+
+// Draw a long-dash or dash-dot border: the CSS border keeps its width (layout) but turns
+// transparent, and an SVG rectangle with the node's radius is painted under it.
+function paintLine(tpc, style, line) {
+  const cs = getComputedStyle(tpc);
+  const w = parseFloat(cs.borderTopWidth) || 0;
+  const W = tpc.offsetWidth, H = tpc.offsetHeight;
+  if (!w || !W || !H) return unpaintLine(tpc, style);
+  const color = opaque(style.borderColor) || opaque(tpc.style.borderColor) || tpc.dataset.hzLineColor || cs.color;
+  tpc.dataset.hzLineColor = color;
+  const radius = cs.borderTopLeftRadius;
+  let rx, ry;
+  if (radius.endsWith("%")) {
+    rx = (W * parseFloat(radius)) / 100;
+    ry = (H * parseFloat(radius)) / 100;
+  } else {
+    rx = ry = Math.min(parseFloat(radius) || 0, W / 2, H / 2);
+  }
+  rx = Math.max(0, rx - w / 2);
+  ry = Math.max(0, ry - w / 2);
+  const svg =
+    `<svg xmlns="http://www.w3.org/2000/svg" width="${W}" height="${H}">` +
+    `<rect x="${w / 2}" y="${w / 2}" width="${W - w}" height="${H - w}" rx="${rx}" ry="${ry}" ` +
+    `fill="none" stroke="${color}" stroke-width="${w}" stroke-dasharray="${dashArray(line, w)}"/></svg>`;
+  Object.assign(tpc.style, {
+    borderColor: "transparent",
+    backgroundImage: `url("data:image/svg+xml,${encodeURIComponent(svg)}")`,
+    backgroundOrigin: "border-box",
+    backgroundRepeat: "no-repeat",
+    backgroundSize: "100% 100%",
+  });
+  tpc.dataset.hzLine = line;
+}
+
+function unpaintLine(tpc, style) {
+  if (!tpc.dataset.hzLine) return;
+  Object.assign(tpc.style, { backgroundImage: "", backgroundOrigin: "", backgroundRepeat: "", backgroundSize: "" });
+  // First-level topics got their branch colour back from linkDiv(); others are still transparent.
+  if (tpc.style.borderColor === "transparent") tpc.style.borderColor = style.borderColor || "";
+  delete tpc.dataset.hzLine;
+  delete tpc.dataset.hzLineColor;
+}
 
 const CSS = `
 #hz-style-bar {
@@ -295,6 +361,12 @@ export function installStyleBar(getMind) {
     apply(found ? found[2] : { borderRadius: "", padding: "" });
   });
 
+  const line = document.createElement("select");
+  line.title = "Type de trait de la bordure";
+  line.appendChild(new Option("Auto", ""));
+  for (const [id, name] of LINES) line.appendChild(new Option(name, id));
+  line.addEventListener("change", () => apply({ hzLine: line.value }));
+
   const borderWidth = document.createElement("select");
   borderWidth.title = "Épaisseur de la bordure";
   borderWidth.appendChild(new Option("Auto", ""));
@@ -314,7 +386,7 @@ export function installStyleBar(getMind) {
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
     label("Forme"), shape, sep(),
-    label("Bordure"), borderWidth, borderColor.button,
+    label("Bordure"), line, borderWidth, borderColor.button,
   );
   document.body.append(bar, pop, presetPop);
 
@@ -347,6 +419,8 @@ export function installStyleBar(getMind) {
     }
     showSelect(size, "fontSize", FONT_SIZES);
     showSelect(borderWidth, "borderWidth", BORDER_WIDTHS.map(([px]) => px));
+    const currentLine = commonValue("hzLine");
+    line.value = currentLine && LINE_CSS[currentLine] ? currentLine : "";
     const radius = commonValue("borderRadius");
     const current = radius ? SHAPES.find(([, , st]) => st.borderRadius === radius) : null;
     shape.value = current ? current[0] : "";
@@ -361,13 +435,18 @@ export function installStyleBar(getMind) {
     const mind = getMind();
     for (const tpc of selected()) {
       const next = { ...(tpc.nodeObj.style || {}), ...patch };
-      if ("borderWidth" in patch || "borderColor" in patch) {
-        // Sub-topics have no border of their own: a colour or a width needs a style, and a
-        // colour alone a visible width.
-        const custom = next.borderWidth || next.borderColor;
-        next.borderStyle = custom ? "solid" : "";
-        if (next.borderColor && !next.borderWidth && getComputedStyle(tpc).borderTopStyle === "none") {
-          next.borderWidth = "2px";
+      if ("borderWidth" in patch || "borderColor" in patch || "hzLine" in patch) {
+        // borderStyle follows the chosen line, else "solid" as soon as the border is
+        // customised: sub-topics have no border of their own.
+        next.borderStyle = next.hzLine
+          ? LINE_CSS[next.hzLine]
+          : next.borderWidth || next.borderColor ? "solid" : "";
+        // A colour or a line alone needs a visible width (a double line, three pixels).
+        if ((next.borderColor || next.hzLine) && !next.borderWidth) {
+          const cs = getComputedStyle(tpc);
+          const current = cs.borderTopStyle === "none" ? 0 : parseFloat(cs.borderTopWidth) || 0;
+          const needed = next.hzLine === "double" ? 3 : 2;
+          if (current < needed) next.borderWidth = needed + "px";
         }
       }
       // reshapeNode() merges the previous style under the one it is given, so a key cannot
@@ -388,8 +467,11 @@ export function installStyleBar(getMind) {
       mind.linkDiv = function (...args) {
         const result = linkDiv.apply(this, args);
         for (const tpc of this.nodes.querySelectorAll(".me-tpc")) {
-          const color = tpc.nodeObj && tpc.nodeObj.style && tpc.nodeObj.style.borderColor;
-          if (color) tpc.style.borderColor = color;
+          const style = (tpc.nodeObj && tpc.nodeObj.style) || {};
+          if (style.borderColor) tpc.style.borderColor = style.borderColor;
+          // Long dashes and dash-dot depend on the node's size: redrawn with every layout.
+          if (style.hzLine === "long" || style.hzLine === "dashdot") paintLine(tpc, style, style.hzLine);
+          else unpaintLine(tpc, style);
         }
         return result;
       };

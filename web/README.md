@@ -121,7 +121,11 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker). The
   "Styles" button offers presets — green, yellow, orange, red, pink, mauve, blue, grey, white,
   black, each pastel or vivid (`PRESET_COLORS`) — that set background, a 2 px border and a
-  readable text colour, leaving size and shape alone; "Aucun" empties those keys.
+  readable text colour, leaving size, shape and line alone; "Aucun" empties those keys.
+- **Border lines** are stored in `style.hzLine` (solid, dashed, long, dashdot, dotted, double),
+  from which `borderStyle` is derived. CSS dashes have a fixed length, so long dashes and
+  dash-dot are drawn by `paintLine()` as an SVG background under a transparent border of the
+  same width, with the node's radius; the wrapped `linkDiv` repaints them on every layout.
   `reshapeNode` merges the previous style under the new one, so "Auto" stores the key as `""`
   rather than deleting it. `linkDiv` paints first-level topics' borders in their branch colour
   on every redraw; the bar wraps it on each instance to put a chosen border colour back.
