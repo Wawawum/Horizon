@@ -113,9 +113,13 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   the Markdown source. Links get `target="_blank"`, and a click on any link in the page is
   sent to Python through `open_link` (http, https and mailto only), so the page never navigates.
 - **Node style bar** (`src/nodestyle.js`). While nodes are selected, a bar above the map sets
-  their font size and colour (`nodeObj.style.fontSize` / `color`) through `reshapeNode`, an
-  undoable operation pushed like any edit. `reshapeNode` merges the previous style under the new
-  one, so "Auto" stores the key as `""` rather than deleting it.
+  their font size, text colour, background, border width and border colour (`nodeObj.style`:
+  `fontSize`, `color`, `background`, `borderWidth`, `borderColor`, plus `borderStyle: solid`
+  when either border key is set) through `reshapeNode`, an undoable operation pushed like any
+  edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker).
+  `reshapeNode` merges the previous style under the new one, so "Auto" stores the key as `""`
+  rather than deleting it. `linkDiv` paints first-level topics' borders in their branch colour
+  on every redraw; the bar wraps it on each instance to put a chosen border colour back.
 - **Renderings are DOM captures.** SnapDOM captures `mind.nodes` (topics, branches, arrows,
   summaries) as an SVG with the HTML in a `<foreignObject>` and the fonts embedded; its
   `viewBox` is then cropped to the content plus 16 px, since `mind.nodes` carries the editor's
