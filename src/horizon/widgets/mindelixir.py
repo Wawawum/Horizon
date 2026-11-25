@@ -5,13 +5,16 @@ The JavaScript half is `web/src/mindmap.js`, bundled to
 As with draw.io, Python keeps a synchronous mirror of the document
 (`MindElixirEditor.document`: Mind Elixir's `getDataString()` JSON), fed by the page after
 every operation, and asks the page for renderings — SVG for the notes, PNG for the list
-thumbnail — through a nested event loop.
+thumbnail — through a nested event loop. Topics are Markdown (marked + DOMPurify), so the
+renderings are captures of the map's DOM (SnapDOM): an SVG with the HTML in a
+<foreignObject>, which Chromium draws in the notes' <img>.
 """
 
 import base64
 import json
 
-from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer, Signal, Slot
+from PySide6.QtCore import QEventLoop, QObject, Qt, QTimer, QUrl, Signal, Slot
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
@@ -23,7 +26,10 @@ from horizon.widgets.webeditor import _RESOURCES_BASE_URL, _RESOURCES_DIR, _edit
 _BUNDLE_URL = (_RESOURCES_DIR / "horizon-mindmap.bundle.js").as_uri()
 _CSS_URL    = (_RESOURCES_DIR / "horizon-mindmap.bundle.css").as_uri()
 
-_EXPORT_TIMEOUT_MS = 3000
+_EXPORT_TIMEOUT_MS = 5000  # a DOM capture embeds the fonts: slower than draw.io's export
+
+# Links a topic may open, in the system browser.
+_LINK_SCHEMES = {"http", "https", "mailto"}
 
 
 def _make_page_html() -> str:
@@ -103,6 +109,13 @@ class _MindmapBridge(QObject):
     @Slot(int, str)
     def export_done(self, request_id: int, data_uri: str) -> None:
         self.export_received.emit(request_id, data_uri)
+
+    @Slot(str)
+    def open_link(self, url: str) -> None:
+        """A link clicked in a topic; the page never navigates itself."""
+        qurl = QUrl(url)
+        if qurl.scheme().lower() in _LINK_SCHEMES:
+            QDesktopServices.openUrl(qurl)
 
 
 class MindElixirEditor(QWidget):

@@ -8,7 +8,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
 | `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
-| `src/mindmap.js` | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
+| `src/mindmap.js` (+ `src/nodestyle.js`, `src/nodeicons.js`, `src/nodekind.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
 
 ## Rebuilding
 
@@ -41,9 +41,9 @@ dynamic `import()`, which esbuild cannot code-split in IIFE format — it would 
 grammar it knows and roughly triple the bundle. Fenced-code sublanguages are instead listed
 explicitly in the `codeLanguages` array at the top of `src/editor.js`; add imports there.
 
-**Mind Elixir and `@erseco/mind-elixir-export-svg` are pinned to exact versions** too: the
-SVG renderer computes Mind Elixir's layout itself (it targets Mind Elixir 6.0), so bump them
-together and update `THIRD-PARTY-NOTICES.md`. Mind Elixir 6 has no image export of its own.
+**Mind Elixir, marked, DOMPurify and SnapDOM are pinned to exact versions** too; bumping one
+means updating `THIRD-PARTY-NOTICES.md`. Mind Elixir 6 has no image export of its own: SnapDOM
+captures the map's DOM instead.
 
 **CKEditor 5 is pinned to an exact version and used under the GPL** (`licenseKey: 'GPL'`).
 Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plugins listed in
@@ -106,6 +106,51 @@ WYSIWYG specifics:
 `readDoc()`) and calls `bridge.get_initial_state`, `push_data(json, generation)` (debounced
 300 ms after each Mind Elixir operation; a stale generation is dropped), `editor_ready(generation)`
 and `export_done(requestId, dataUri)`. An empty document starts a new map whose root topic is the
-diagram title, pushed at once. The map always follows Horizon's light or dark theme. Renderings
-are made from the data by `@erseco/mind-elixir-export-svg` (vector SVG, no `foreignObject`); the
-PNG thumbnail is that SVG drawn on a canvas.
+diagram title, pushed at once. The map always follows Horizon's light or dark theme.
+
+- **Topics are Markdown.** Mind Elixir's `markdown` option renders topics, arrow and summary
+  labels with marked (GFM, line breaks kept), sanitised by DOMPurify; the stored `topic` stays
+  the Markdown source. Links get `target="_blank"`, and a click on any link in the page is
+  sent to Python through `open_link` (http, https and mailto only), so the page never navigates.
+- **Node style bar** (`src/nodestyle.js`). While nodes are selected, a bar above the map sets
+  their font size, text colour, background, shape, border width and border colour
+  (`nodeObj.style`: `fontSize`, `color`, `background`, `borderWidth`, `borderColor`, plus
+  `borderStyle: solid` when either border key is set; a shape is a `borderRadius` — rectangle,
+  rounded, pill, ellipse, the ellipse with a wider `padding` — since a `clip-path` shape would
+  clip the border) through `reshapeNode`, an undoable operation pushed like any
+  edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker). The
+  "Styles" button offers presets — green, yellow, orange, red, pink, mauve, blue, grey, white,
+  black, each pastel or vivid (`PRESET_COLORS`) — that set background, a 2 px border and a
+  readable text colour, leaving size, shape and line alone; "Aucun" empties those keys.
+- **Icons** (`src/nodeicons.js`). Mind Elixir shows `nodeObj.icons` (escaped strings) after the
+  text, so icons are emoji: a palette in five groups toggles one on the selected nodes (removed
+  when they all have it), a field adds any other emoji, and "Retirer toutes les icônes" empties
+  the list — all through `reshapeNode`. The format painter does not copy icons: they are content.
+- **Node or leaf** (`src/nodekind.js`). Mind Elixir boxes the root's children and underlines
+  everything deeper. The root's `metadata.hzLevels` (panel at the bottom left, default 1) sets how
+  many levels are boxed; a topic's `metadata.hzKind` ("node" / "leaf", "Type" in the bar) forces
+  its own. Both sit in `metadata` because undo/redo restores through `diffRefresh`, which only
+  compares a fixed list of fields (`metadata` among them). Before each layout the wrapped
+  `linkDiv` puts `hz-node` / `hz-leaf` on the `.me-parent`s (CSS restyles the topic), and
+  `generateMainBranch` / `generateSubBranch` are wrapped to start a line from a boxed parent's
+  middle and end it at a boxed child's middle, or under a first-level leaf. The generators only
+  get geometry: the topics are looked up in the order Mind Elixir draws them (document order),
+  checked against it, with Mind Elixir's own line as the fallback. Not applied to the top-down
+  layout, which boxes every topic. Controls of the page hand the keyboard back to the map once
+  used (`shieldControls`), so that Ctrl+Z and the other shortcuts keep working.
+- **Format painter.** The brush button copies the first selected node's whole `style`; the
+  next selection receives it, with its node / leaf kind (the source's keys, and `""` for keys only the targets had),
+  applied as is (`apply(patch, { derive: false })`), and the tool turns off. A double-click
+  keeps it on until Esc or another click on the button; the bar stays up meanwhile.
+- **Border lines** are stored in `style.hzLine` (solid, dashed, long, dashdot, dotted, double),
+  from which `borderStyle` is derived. CSS dashes have a fixed length, so long dashes and
+  dash-dot are drawn by `paintLine()` as an SVG background under a transparent border of the
+  same width, with the node's radius; the wrapped `linkDiv` repaints them on every layout.
+  `reshapeNode` merges the previous style under the new one, so "Auto" stores the key as `""`
+  rather than deleting it. `linkDiv` paints first-level topics' borders in their branch colour
+  on every redraw; the bar wraps it on each instance to put a chosen border colour back.
+- **Renderings are DOM captures.** SnapDOM captures `mind.nodes` (topics, branches, arrows,
+  summaries) as an SVG with the HTML in a `<foreignObject>` and the fonts embedded; its
+  `viewBox` is then cropped to the content plus 16 px, since `mind.nodes` carries the editor's
+  wide `--map-padding`. The PNG thumbnail is that SVG drawn on a canvas. The selection is
+  cleared first, so its outline is not in the picture.
