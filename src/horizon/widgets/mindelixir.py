@@ -8,6 +8,11 @@ every operation, and asks the page for renderings — SVG for the notes, PNG for
 thumbnail — through a nested event loop. Topics are Markdown (marked + DOMPurify), so the
 renderings are captures of the map's DOM (SnapDOM): an SVG with the HTML in a
 <foreignObject>, which Chromium draws in the notes' <img>.
+
+Full screen: Mind Elixir's toolbar button would put the map element in the browser's full
+screen, which QtWebEngine refuses unless the application handles it. The page catches that
+click and asks for `toggle_fullscreen` instead: the view moves into a top-level window shown
+full screen, style bar included, and back into the editor on Esc, F11 or a second click.
 """
 
 import base64
@@ -18,7 +23,7 @@ from PySide6.QtGui import QDesktopServices
 from PySide6.QtWebChannel import QWebChannel
 from PySide6.QtWebEngineCore import QWebEnginePage
 from PySide6.QtWebEngineWidgets import QWebEngineView
-from PySide6.QtWidgets import QVBoxLayout, QWidget
+from PySide6.QtWidgets import QApplication, QVBoxLayout, QWidget
 
 from horizon import theme as _theme
 from horizon.widgets.webeditor import _RESOURCES_BASE_URL, _RESOURCES_DIR, _editor_profile
@@ -62,6 +67,7 @@ class _MindmapBridge(QObject):
     data_pushed     = Signal()
     ready           = Signal()
     export_received = Signal(int, str)  # request id, data URI ("" when the export failed)
+    fullscreen_requested = Signal(bool)  # True: toggle, False: leave
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
@@ -117,6 +123,33 @@ class _MindmapBridge(QObject):
         if qurl.scheme().lower() in _LINK_SCHEMES:
             QDesktopServices.openUrl(qurl)
 
+    @Slot()
+    def toggle_fullscreen(self) -> None:
+        """Mind Elixir's full-screen button, or F11."""
+        self.fullscreen_requested.emit(True)
+
+    @Slot()
+    def exit_fullscreen(self) -> None:
+        """Esc in the page."""
+        self.fullscreen_requested.emit(False)
+
+
+class _FullScreenWindow(QWidget):
+    """Top-level window that holds the editor's view while it is shown full screen."""
+
+    closed = Signal()
+
+    def __init__(self, parent: QWidget) -> None:
+        super().__init__(parent, Qt.WindowType.Window)
+        self.setWindowTitle(parent.window().windowTitle())
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+
+    def closeEvent(self, event) -> None:
+        # Alt+F4 closes the full screen, not the view it holds.
+        event.ignore()
+        self.closed.emit()
+
 
 class MindElixirEditor(QWidget):
     """One Mind Elixir page, reused from one mind map to the next."""
@@ -128,10 +161,12 @@ class MindElixirEditor(QWidget):
         super().__init__(parent)
         self._loaded = False
         self._export_seq = 0
+        self._fullscreen: _FullScreenWindow | None = None
 
         self._bridge = _MindmapBridge(self)
         self._bridge.data_pushed.connect(self.document_changed)
         self._bridge.ready.connect(self._on_ready)
+        self._bridge.fullscreen_requested.connect(self._on_fullscreen_requested)
         self._channel = QWebChannel(self)
         self._channel.registerObject("bridge", self._bridge)
 
@@ -160,6 +195,41 @@ class MindElixirEditor(QWidget):
     def _on_ready(self) -> None:
         self._loaded = True
         self.ready.emit()
+
+    # ── Full screen ───────────────────────────────────────────────────────
+    def is_fullscreen(self) -> bool:
+        return self._fullscreen is not None
+
+    def set_fullscreen(self, on: bool) -> None:
+        """Show the map alone on the screen of Horizon's window, or put it back."""
+        if self._view is None or on == self.is_fullscreen():
+            return
+        if on:
+            window = _FullScreenWindow(self)
+            window.closed.connect(lambda: self.set_fullscreen(False))
+            screen = self.window().screen() or QApplication.primaryScreen()
+            window.setGeometry(screen.geometry())
+            window.layout().addWidget(self._view)
+            self._fullscreen = window
+            window.showFullScreen()
+            window.activateWindow()
+        else:
+            window, self._fullscreen = self._fullscreen, None
+            self._layout.addWidget(self._view)
+            window.hide()
+            window.deleteLater()
+            self.window().activateWindow()
+        self._view.setFocus()
+
+    def _on_fullscreen_requested(self, toggle: bool) -> None:
+        self.set_fullscreen(not self.is_fullscreen() if toggle else False)
+
+    def hideEvent(self, event) -> None:
+        # The editor was put away (another module, the list of diagrams): no full-screen
+        # window left behind. Spontaneous hides (Horizon's window minimised) keep it.
+        if not event.spontaneous():
+            self.set_fullscreen(False)
+        super().hideEvent(event)
 
     # ── Content ───────────────────────────────────────────────────────────
     def load_document(self, data: str, root_topic: str = "") -> None:

@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QComboBox,
     QDialog,
     QDialogButtonBox,
+    QFileDialog,
     QFrame,
     QGridLayout,
     QHBoxLayout,
@@ -43,6 +44,15 @@ _MENU_ARROW = Path(__file__).parent.parent / "resources" / "combo_arrow.svg"
 # Per diagram kind: label in menus and tooltips, title of a new diagram.
 _KIND_LABELS = {KIND_DRAWIO: "Diagramme Draw.io", KIND_MINDELIXIR: "Mind map (Mind Elixir)"}
 _NEW_TITLES  = {KIND_DRAWIO: "New Diagram", KIND_MINDELIXIR: "New Mind Map"}
+
+# Export formats: label in the menu, file dialog filter.
+_EXPORT_FORMATS = {
+    "png": ("Image PNG…", "Image PNG (*.png)"),
+    "svg": ("Image SVG…", "Image SVG (*.svg)"),
+}
+
+# Characters Windows refuses in a file name.
+_UNSAFE_FILENAME_CHARS = str.maketrans({c: "_" for c in '<>:"/\\|?*'})
 
 
 def _fold(text: str) -> str:
@@ -359,6 +369,28 @@ class DiagramEditorWidget(QWidget):
         self._archive_cb = QCheckBox("Archive")
         self._archive_cb.stateChanged.connect(self._on_archive_changed)
 
+        # Split button: "Exporter" saves a PNG; the arrow next to it offers PNG or SVG.
+        export_btn = QPushButton("Exporter")
+        export_btn.setToolTip("Exporter le diagramme en image PNG")
+        export_btn.clicked.connect(lambda: self._on_export("png"))
+        self._export_menu = QMenu(self)
+        for fmt, (label, _filter) in _EXPORT_FORMATS.items():
+            action = QAction(label, self._export_menu)
+            action.triggered.connect(lambda _checked=False, f=fmt: self._on_export(f))
+            self._export_menu.addAction(action)
+        self._export_fmt_btn = QPushButton()
+        self._export_fmt_btn.setIcon(QIcon(str(_MENU_ARROW)))
+        self._export_fmt_btn.setIconSize(QSize(10, 6))
+        self._export_fmt_btn.setToolTip("Choisir le format d'export")
+        self._export_fmt_btn.setFixedWidth(28)
+        self._export_fmt_btn.clicked.connect(
+            lambda: self._export_menu.exec(
+                self._export_fmt_btn.mapToGlobal(self._export_fmt_btn.rect().bottomLeft())))
+        export_layout = QHBoxLayout()
+        export_layout.setSpacing(1)
+        export_layout.addWidget(export_btn)
+        export_layout.addWidget(self._export_fmt_btn)
+
         self._delete_btn = QPushButton("Delete")
         _t = _theme.current()
         self._delete_btn.setStyleSheet(f"color: {_t.delete_btn_text}; background-color: {_t.delete_btn_bg};")
@@ -371,6 +403,8 @@ class DiagramEditorWidget(QWidget):
         header_layout = QHBoxLayout()
         header_layout.addWidget(self._id_label)
         header_layout.addWidget(self._title_edit, stretch=1)
+        header_layout.addLayout(export_layout)
+        header_layout.addSpacing(8)
         header_layout.addWidget(self._archive_cb)
         header_layout.addWidget(self._delete_btn)
         header_layout.addWidget(back_btn)
@@ -501,8 +535,7 @@ class DiagramEditorWidget(QWidget):
         self._current.xml = xml
         self._diagram_repo.update(self._current)
         if show_status:
-            self._status_label.setText("Saving...")
-            self._status_clear_timer.start()
+            self._show_status("Saving...", 2000)
 
     def _save_title(self) -> None:
         if self._current is None:
@@ -516,6 +549,40 @@ class DiagramEditorWidget(QWidget):
             return
         self._current.project_id = self._project_combo.currentData()
         self._diagram_repo.update(self._current)
+
+    def _on_export(self, fmt: str) -> None:
+        """Save a rendering of the diagram (as the editor shows it now) to a file."""
+        if self._current is None:
+            return
+        _label, file_filter = _EXPORT_FORMATS[fmt]
+        name = self._current.title.translate(_UNSAFE_FILENAME_CHARS).strip(" .") or "diagramme"
+        default = str(Path.home() / "Pictures" / f"{name}.{fmt}")
+        target, _ = QFileDialog.getSaveFileName(self, "Exporter le diagramme", default, file_filter)
+        if not target:
+            return
+        path = Path(target)
+        if path.suffix.lower() != f".{fmt}":
+            path = path.with_name(path.name + f".{fmt}")
+        if self._editor is self._mindmap:
+            self._mindmap.flush()
+        if fmt == "svg":
+            svg = self._editor.export_svg()
+            data = svg.encode("utf-8") if svg is not None else None
+        else:
+            data = self._editor.export_png()
+        if not data:
+            self._show_status("Export impossible : l'éditeur n'a pas produit d'image", 8000)
+            return
+        try:
+            path.write_bytes(data)
+        except OSError as exc:
+            self._show_status(f"Export impossible : {exc.strerror or exc}", 8000)
+            return
+        self._show_status(f"Exporté : {path.name}", 4000)
+
+    def _show_status(self, text: str, ms: int) -> None:
+        self._status_label.setText(text)
+        self._status_clear_timer.start(ms)
 
     def _on_archive_changed(self) -> None:
         if self._current is None:

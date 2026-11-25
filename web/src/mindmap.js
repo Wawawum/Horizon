@@ -202,6 +202,54 @@ document.addEventListener(
   true,
 );
 
+// Full screen. Mind Elixir's toolbar button calls requestFullscreen() on the map element,
+// which QtWebEngine refuses (and which would leave Horizon's style bar out). Its click is
+// caught first, in the capture phase, and Python shows the whole page in a full-screen
+// window instead. Esc leaves, unless something else used it (the format painter and the
+// topic editor stop it; Mind Elixir prevents the default of every key), F11 toggles. The map keeps its centre across the resize.
+let keepCentre = null; // the map's size before the switch, while the window resizes
+let keepCentreTimer = null;
+
+function requestFullscreen(action) {
+  if (!bridge) return;
+  const r = mind ? mind.container.getBoundingClientRect() : null;
+  keepCentre = r ? { width: r.width, height: r.height } : null;
+  clearTimeout(keepCentreTimer);
+  keepCentreTimer = setTimeout(() => (keepCentre = null), 1000);
+  if (action === "toggle") bridge.toggle_fullscreen();
+  else bridge.exit_fullscreen();
+}
+
+window.addEventListener("resize", () => {
+  if (!keepCentre || !mind) return;
+  const r = mind.container.getBoundingClientRect();
+  mind.move((r.width - keepCentre.width) / 2, (r.height - keepCentre.height) / 2);
+  keepCentre = { width: r.width, height: r.height };
+});
+
+window.addEventListener(
+  "click",
+  (e) => {
+    const button = e.target && e.target.closest ? e.target.closest(".mind-elixir-toolbar #fullscreen") : null;
+    if (!button) return;
+    e.preventDefault();
+    e.stopImmediatePropagation();
+    requestFullscreen("toggle");
+  },
+  true,
+);
+
+window.addEventListener("keydown", (e) => {
+  if (e.key === "F11") {
+    e.preventDefault();
+    requestFullscreen("toggle");
+  } else if (e.key === "Escape") {
+    const t = e.target;
+    if (t && (t.isContentEditable || t instanceof HTMLInputElement || t instanceof HTMLTextAreaElement)) return;
+    requestFullscreen("exit");
+  }
+});
+
 window.HorizonMindmap = {
   load(data, gen, rootTopic) {
     load(data, gen, rootTopic);
