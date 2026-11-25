@@ -8,7 +8,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
 | `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
-| `src/mindmap.js` (+ `src/nodestyle.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
+| `src/mindmap.js` (+ `src/nodestyle.js`, `src/nodeicons.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
 
 ## Rebuilding
 
@@ -122,6 +122,10 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   "Styles" button offers presets — green, yellow, orange, red, pink, mauve, blue, grey, white,
   black, each pastel or vivid (`PRESET_COLORS`) — that set background, a 2 px border and a
   readable text colour, leaving size, shape and line alone; "Aucun" empties those keys.
+- **Icons** (`src/nodeicons.js`). Mind Elixir shows `nodeObj.icons` (escaped strings) after the
+  text, so icons are emoji: a palette in five groups toggles one on the selected nodes (removed
+  when they all have it), a field adds any other emoji, and "Retirer toutes les icônes" empties
+  the list — all through `reshapeNode`. The format painter does not copy icons: they are content.
 - **Format painter.** The brush button copies the first selected node's whole `style`; the
   next selection receives it (the source's keys, and `""` for keys only the targets had),
   applied as is (`apply(patch, { derive: false })`), and the tool turns off. A double-click

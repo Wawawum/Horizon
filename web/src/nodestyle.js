@@ -1,10 +1,12 @@
-// Style bar of the mind map editor: format painter, preset styles, font size, text colour,
-// background, shape, border line, colour and width of the selected nodes.
+// Style bar of the mind map editor: format painter, preset styles, icons, font size, text
+// colour, background, shape, border line, colour and width of the selected nodes.
 //
 // Mind Elixir stores a node's look in `nodeObj.style`, whose keys it copies onto the topic
 // element as inline CSS, and applies it with reshapeNode(), which records an undoable
 // `reshapeNode` operation — so the change reaches Python's mirror like any other edit. Mind
 // Elixir has no panel for it; this bar shows up above the map while nodes are selected.
+
+import { installIconPicker } from "./nodeicons.js";
 
 const FONT_SIZES = ["12", "14", "16", "18", "20", "24", "28", "32", "40"];
 // Shapes are border radii (clip-path shapes such as a diamond would clip the border away).
@@ -250,6 +252,7 @@ export function installStyleBar(getMind) {
   function openPop(key, anchor) {
     if (popKey === key && pop.classList.contains("visible")) return closePop();
     presetPop.classList.remove("visible");
+    iconPicker.close();
     popKey = key;
     const current = commonValue(key);
     for (const s of gridSwatches) s.classList.toggle("active", current !== null && s.dataset.color === current);
@@ -302,6 +305,7 @@ export function installStyleBar(getMind) {
   function openPresets(anchor) {
     if (presetPop.classList.contains("visible")) return closePresets();
     closePop();
+    iconPicker.close();
     const bg = commonValue("background"), border = commonValue("borderColor");
     for (const { cell, st } of presetCells) {
       cell.classList.toggle("active", bg === st.background && border === st.borderColor);
@@ -322,6 +326,7 @@ export function installStyleBar(getMind) {
   }
 
   document.addEventListener("mousedown", () => {
+    iconPicker.close();
     closePop();
     closePresets();
   });
@@ -428,6 +433,16 @@ export function installStyleBar(getMind) {
     true,
   );
 
+  const iconPicker = installIconPicker({
+    getMind,
+    getSelected: () => selected(),
+    shield,
+    beforeOpen: () => {
+      closePop();
+      closePresets();
+    },
+  });
+
   const presets = document.createElement("button");
   presets.type = "button";
   presets.className = "hz-preset-btn";
@@ -472,13 +487,13 @@ export function installStyleBar(getMind) {
 
   bar.append(
     painterBtn, painterHint, sep(),
-    presets, sep(),
+    presets, iconPicker.button, sep(),
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
     label("Forme"), shape, sep(),
     label("Bordure"), line, borderWidth, borderColor.button,
   );
-  document.body.append(bar, pop, presetPop);
+  document.body.append(bar, pop, presetPop, iconPicker.pop);
 
   // ── State ──────────────────────────────────────────────────────────────
   function selected() {
@@ -506,6 +521,7 @@ export function installStyleBar(getMind) {
     if (!nodes.length) {
       closePop();
       closePresets();
+      iconPicker.close();
       return;
     }
     showSelect(size, "fontSize", FONT_SIZES);
