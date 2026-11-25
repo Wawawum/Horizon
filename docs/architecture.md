@@ -232,8 +232,10 @@ Mind maps are edited with Mind Elixir by [../src/horizon/widgets/mindelixir.py](
 ([../web/src/mindmap.js](../web/src/mindmap.js)) and the note editors' profile: no network, no
 archive. It offers the same interface as `DrawioEditor` (`load_document`, `document`,
 `document_changed`, `export_png`, `export_svg`), plus `flush()` to read the map before saving,
-since the page pushes it 300 ms after an operation. Its SVG is drawn from the data by
-`@erseco/mind-elixir-export-svg`, in Horizon's theme at the time of the export.
+since the page pushes it 300 ms after an operation. Topics are Markdown (marked, sanitised by
+DOMPurify), so its SVG is a SnapDOM capture of the map's DOM — HTML in a `<foreignObject>`,
+fonts embedded, cropped to the content — in Horizon's theme at the time of the export; Chromium
+draws it in the notes' `<img>`. Links in topics open in the system browser.
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive

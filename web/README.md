@@ -41,9 +41,9 @@ dynamic `import()`, which esbuild cannot code-split in IIFE format — it would 
 grammar it knows and roughly triple the bundle. Fenced-code sublanguages are instead listed
 explicitly in the `codeLanguages` array at the top of `src/editor.js`; add imports there.
 
-**Mind Elixir and `@erseco/mind-elixir-export-svg` are pinned to exact versions** too: the
-SVG renderer computes Mind Elixir's layout itself (it targets Mind Elixir 6.0), so bump them
-together and update `THIRD-PARTY-NOTICES.md`. Mind Elixir 6 has no image export of its own.
+**Mind Elixir, marked, DOMPurify and SnapDOM are pinned to exact versions** too; bumping one
+means updating `THIRD-PARTY-NOTICES.md`. Mind Elixir 6 has no image export of its own: SnapDOM
+captures the map's DOM instead.
 
 **CKEditor 5 is pinned to an exact version and used under the GPL** (`licenseKey: 'GPL'`).
 Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plugins listed in
@@ -106,6 +106,14 @@ WYSIWYG specifics:
 `readDoc()`) and calls `bridge.get_initial_state`, `push_data(json, generation)` (debounced
 300 ms after each Mind Elixir operation; a stale generation is dropped), `editor_ready(generation)`
 and `export_done(requestId, dataUri)`. An empty document starts a new map whose root topic is the
-diagram title, pushed at once. The map always follows Horizon's light or dark theme. Renderings
-are made from the data by `@erseco/mind-elixir-export-svg` (vector SVG, no `foreignObject`); the
-PNG thumbnail is that SVG drawn on a canvas.
+diagram title, pushed at once. The map always follows Horizon's light or dark theme.
+
+- **Topics are Markdown.** Mind Elixir's `markdown` option renders topics, arrow and summary
+  labels with marked (GFM, line breaks kept), sanitised by DOMPurify; the stored `topic` stays
+  the Markdown source. Links get `target="_blank"`, and a click on any link in the page is
+  sent to Python through `open_link` (http, https and mailto only), so the page never navigates.
+- **Renderings are DOM captures.** SnapDOM captures `mind.nodes` (topics, branches, arrows,
+  summaries) as an SVG with the HTML in a `<foreignObject>` and the fonts embedded; its
+  `viewBox` is then cropped to the content plus 16 px, since `mind.nodes` carries the editor's
+  wide `--map-padding`. The PNG thumbnail is that SVG drawn on a canvas. The selection is
+  cleared first, so its outline is not in the picture.

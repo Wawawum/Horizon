@@ -15,7 +15,7 @@ licences respectives s'appliquent à ces fichiers, et leur texte intégral se tr
 | `horizon-editor.bundle.js` | [CodeMirror 6](https://codemirror.net/) et [Lezer](https://lezer.codemirror.net/) | voir ci-dessous | [MIT](licenses/codemirror-MIT.txt) |
 | `horizon-wysiwyg.bundle.js`, `horizon-wysiwyg.bundle.css` | [CKEditor 5](https://ckeditor.com/ckeditor-5/) | 49.0.0 | [GPL-2.0-or-later](licenses/ckeditor5-GPL-2.0.txt) |
 | `drawio/draw.war` | [draw.io](https://github.com/jgraph/drawio) | 32.6.9 | [Apache-2.0](licenses/drawio-Apache-2.0.txt) |
-| `horizon-mindmap.bundle.js`, `horizon-mindmap.bundle.css` | [Mind Elixir](https://github.com/SSShooter/mind-elixir-core) et [mind-elixir-export-svg](https://github.com/erseco/mind-elixir-export-svg) | 6.0.3 et 0.3.0 | [MIT](licenses/mind-elixir-MIT.txt), [MIT](licenses/mind-elixir-export-svg-MIT.txt) |
+| `horizon-mindmap.bundle.js`, `horizon-mindmap.bundle.css` | [Mind Elixir](https://github.com/SSShooter/mind-elixir-core), [marked](https://github.com/markedjs/marked), [DOMPurify](https://github.com/cure53/DOMPurify), [SnapDOM](https://github.com/zumerlab/snapdom) | 6.0.3, 18.3.0, 3.5.0, 3.8.3 | [MIT](licenses/mind-elixir-MIT.txt), [MIT](licenses/marked-MIT.txt), [Apache-2.0](licenses/dompurify-Apache-2.0.txt), [MIT](licenses/snapdom-MIT.txt) |
 
 ## Détail du bundle de l'éditeur
 
@@ -64,8 +64,10 @@ sert telle quelle à son éditeur de diagrammes, qui dialogue avec draw.io par m
 
 `horizon-mindmap.bundle.js` et `horizon-mindmap.bundle.css` sont produits par esbuild à
 partir de [`web/src/mindmap.js`](web/src/mindmap.js) et des paquets `mind-elixir` (Mind Elixir
-Core, © DjZhou) et `@erseco/mind-elixir-export-svg` (rendu SVG des cartes, © Ernesto Serrano
-et contributeurs), tous deux sous licence MIT, aux versions figées par
+Core, © DjZhou, MIT), `marked` (rendu Markdown des nœuds, © Christopher Jeffrey et MarkedJS,
+MIT), `dompurify` (nettoyage du HTML produit, © Cure53, utilisé sous Apache-2.0 parmi sa double
+licence MPL-2.0 / Apache-2.0) et `@zumer/snapdom` (capture des cartes pour les notes et les
+miniatures, © ZumerLab, MIT), aux versions figées par
 [`web/package-lock.json`](web/package-lock.json). Ils servent à l'éditeur de mind maps du
 module Diagrams.
 
