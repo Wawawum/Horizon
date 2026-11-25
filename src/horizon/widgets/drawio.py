@@ -357,9 +357,9 @@ class _DrawioBridge(QObject):
 class DrawioEditor(QWidget):
     """One draw.io instance, reused from one diagram to the next through its `load` action."""
 
-    xml_changed = Signal()     # the mirror changed (draw.io autosave or Ctrl+S)
-    ready       = Signal()     # draw.io answered and holds the current diagram
-    unavailable = Signal(str)  # draw.io cannot start; the reason, in French, for the user
+    document_changed = Signal()  # the mirror changed (draw.io autosave or Ctrl+S)
+    ready            = Signal()  # draw.io answered and holds the current diagram
+    unavailable      = Signal(str)  # draw.io cannot start; the reason, in French, for the user
 
     _export_received = Signal(str)  # data URI, or "" when the export failed
 
@@ -460,15 +460,15 @@ class DrawioEditor(QWidget):
             self._load_page()
 
     # ── Content ───────────────────────────────────────────────────────────
-    def load_xml(self, xml: str) -> None:
-        """Open a diagram ("" for a blank one). Never emits `xml_changed`."""
+    def load_document(self, xml: str) -> None:
+        """Open a diagram ("" for a blank one). Never emits `document_changed`."""
         self._xml = xml
         self._loaded = False
         if self._initialized:
             self._send_load()
         # Otherwise the init handler sends it.
 
-    def xml(self) -> str:
+    def document(self) -> str:
         """The mirrored diagram, as of draw.io's last autosave."""
         return self._xml
 
@@ -495,7 +495,7 @@ class DrawioEditor(QWidget):
 
         Spins a nested QEventLoop, like _WebEditorBase.flush(): the answer comes back
         asynchronously through the channel. Not to be called from a handler of a draw.io
-        message (`ready`, `xml_changed`): the channel does not deliver the answer while
+        message (`ready`, `document_changed`): the channel does not deliver the answer while
         that delivery is still on the stack, and the export times out.
         """
         if self._view is None or not self._loaded:
@@ -566,7 +566,7 @@ class DrawioEditor(QWidget):
             if not self._loaded or not isinstance(xml, str) or xml == self._xml:
                 return
             self._xml = xml
-            self.xml_changed.emit()
+            self.document_changed.emit()
         elif event == "export":
             data_uri = message.get("data")
             self._export_received.emit(data_uri if isinstance(data_uri, str) else "")

@@ -8,6 +8,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
 | `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
+| `src/mindmap.js` | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
 
 ## Rebuilding
 
@@ -17,8 +18,8 @@ npm install
 npm run build
 ```
 
-`npm run build` builds both bundles; `npm run build:markdown` and `npm run build:wysiwyg`
-build one. Commit the output alongside your source change — the Python side has no fallback.
+`npm run build` builds every bundle; `npm run build:markdown`, `npm run build:wysiwyg` and
+`npm run build:mindmap` build one. Commit the output alongside your source change — the Python side has no fallback.
 
 `npm run build:dev` writes unminified builds with inline sourcemaps to the same paths, for
 local debugging. **Do not commit that output.**
@@ -39,6 +40,10 @@ reject.
 dynamic `import()`, which esbuild cannot code-split in IIFE format — it would inline every
 grammar it knows and roughly triple the bundle. Fenced-code sublanguages are instead listed
 explicitly in the `codeLanguages` array at the top of `src/editor.js`; add imports there.
+
+**Mind Elixir and `@erseco/mind-elixir-export-svg` are pinned to exact versions** too: the
+SVG renderer computes Mind Elixir's layout itself (it targets Mind Elixir 6.0), so bump them
+together and update `THIRD-PARTY-NOTICES.md`. Mind Elixir 6 has no image export of its own.
 
 **CKEditor 5 is pinned to an exact version and used under the GPL** (`licenseKey: 'GPL'`).
 Bumping it means updating the version in `THIRD-PARTY-NOTICES.md`. Only the plugins listed in
@@ -93,3 +98,14 @@ WYSIWYG specifics:
   docs/architecture.md, "Dropped content in notes".
 - **The page never navigates.** Ctrl+click on a link in the text, or a click on the link in
   CKEditor's balloon, is sent to Python through `open_link`.
+
+## Mind map editor (`mindmap.js`)
+
+`src/horizon/widgets/mindelixir.py` (`MindElixirEditor`) owns the other half. The page exposes
+`window.HorizonMindmap` (`load(data, generation, rootTopic)`, `exportImage(fmt, requestId)`,
+`readDoc()`) and calls `bridge.get_initial_state`, `push_data(json, generation)` (debounced
+300 ms after each Mind Elixir operation; a stale generation is dropped), `editor_ready(generation)`
+and `export_done(requestId, dataUri)`. An empty document starts a new map whose root topic is the
+diagram title, pushed at once. The map always follows Horizon's light or dark theme. Renderings
+are made from the data by `@erseco/mind-elixir-export-svg` (vector SVG, no `foreignObject`); the
+PNG thumbnail is that SVG drawn on a canvas.

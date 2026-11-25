@@ -3,21 +3,26 @@ from datetime import datetime
 
 from horizon.database import Database
 
+# Editor a diagram is drawn with; fixed when the diagram is created.
+KIND_DRAWIO     = "drawio"      # draw.io (widgets/drawio.py)
+KIND_MINDELIXIR = "mindelixir"  # mind map, Mind Elixir (widgets/mindelixir.py)
+
 
 @dataclass
 class Diagram:
     id: int | None
     project_id: int | None
     title: str
-    xml: str                  # fichier draw.io (mxfile), tel que renvoyé par l'éditeur
+    xml: str                  # document de l'éditeur : mxfile draw.io, ou JSON Mind Elixir (getDataString)
     thumbnail: bytes | None   # PNG réduit pour la liste ; None tant que rien n'a été dessiné
-    svg: str | None           # rendu affiché dans les notes WYSIWYG ; None tant que draw.io ne l'a pas exporté
+    svg: str | None           # rendu affiché dans les notes WYSIWYG ; None tant que l'éditeur ne l'a pas exporté
     created_at: datetime      # stored as ISO-8601 TEXT in SQLite
     updated_at: datetime
     archived: bool = False
+    kind: str = KIND_DRAWIO
 
 
-_COLUMNS = "id, project_id, title, xml, thumbnail, svg, created_at, updated_at, archived"
+_COLUMNS = "id, project_id, title, xml, thumbnail, svg, created_at, updated_at, archived, kind"
 
 
 def _row_to_diagram(row) -> "Diagram":
@@ -31,6 +36,7 @@ def _row_to_diagram(row) -> "Diagram":
         created_at=datetime.fromisoformat(row["created_at"]),
         updated_at=datetime.fromisoformat(row["updated_at"]),
         archived=bool(row["archived"]),
+        kind=row["kind"],
     )
 
 
@@ -38,16 +44,16 @@ class DiagramRepository:
     def __init__(self, db: Database) -> None:
         self._db = db
 
-    def create(self, title: str, project_id: int | None = None) -> "Diagram":
+    def create(self, title: str, project_id: int | None = None, kind: str = KIND_DRAWIO) -> "Diagram":
         now = datetime.now()
         cur = self._db.conn.execute(
-            "INSERT INTO diagrams (project_id, title, xml, thumbnail, svg, created_at, updated_at, archived)"
-            " VALUES (?, ?, '', NULL, NULL, ?, ?, 0)",
-            (project_id, title, now.isoformat(), now.isoformat()),
+            "INSERT INTO diagrams (project_id, title, xml, thumbnail, svg, created_at, updated_at, archived, kind)"
+            " VALUES (?, ?, '', NULL, NULL, ?, ?, 0, ?)",
+            (project_id, title, now.isoformat(), now.isoformat(), kind),
         )
         self._db.conn.commit()
         return Diagram(id=cur.lastrowid, project_id=project_id, title=title, xml="",
-                       thumbnail=None, svg=None, created_at=now, updated_at=now)
+                       thumbnail=None, svg=None, created_at=now, updated_at=now, kind=kind)
 
     def get(self, diagram_id: int) -> "Diagram | None":
         row = self._db.conn.execute(
@@ -61,7 +67,7 @@ class DiagramRepository:
     def list_all(self, archived_only: bool = False) -> list["Diagram"]:
         rows = self._db.conn.execute(
             "SELECT diagrams.id, diagrams.project_id, diagrams.title, diagrams.xml, diagrams.thumbnail,"
-            " diagrams.svg, diagrams.created_at, diagrams.updated_at, diagrams.archived"
+            " diagrams.svg, diagrams.created_at, diagrams.updated_at, diagrams.archived, diagrams.kind"
             " FROM diagrams LEFT JOIN projects ON diagrams.project_id = projects.id"
             " WHERE diagrams.archived = ? AND (diagrams.project_id IS NULL OR projects.archived = 0)"
             " ORDER BY diagrams.updated_at DESC",

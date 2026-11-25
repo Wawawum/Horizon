@@ -2,14 +2,16 @@
   "name": "horizon-editor",
   "version": "1.0.0",
   "private": true,
-  "description": "CodeMirror 6 markdown editor and CKEditor 5 WYSIWYG editor bundled for Horizon's QWebEngineView",
+  "description": "CodeMirror 6 markdown editor, CKEditor 5 WYSIWYG editor and Mind Elixir mind map editor bundled for Horizon's QWebEngineView",
   "scripts": {
-    "build": "npm run build:markdown && npm run build:wysiwyg",
+    "build": "npm run build:markdown && npm run build:wysiwyg && npm run build:mindmap",
     "build:markdown": "esbuild src/editor.js --bundle --format=iife --minify --target=chrome110 --banner:js=\"/* GENERATED FILE - do not edit. Source: web/src/editor.js - Rebuild: cd web && npm run build */\" --outfile=../src/horizon/resources/horizon-editor.bundle.js",
     "build:wysiwyg": "esbuild src/wysiwyg.js --bundle --format=iife --minify --target=chrome110 --banner:js=\"/* GENERATED FILE - do not edit. Source: web/src/wysiwyg.js - Rebuild: cd web && npm run build */\" --outfile=../src/horizon/resources/horizon-wysiwyg.bundle.js",
-    "build:dev": "npm run build:markdown:dev && npm run build:wysiwyg:dev",
+    "build:mindmap": "esbuild src/mindmap.js --bundle --format=iife --minify --target=chrome110 --banner:js=\"/* GENERATED FILE - do not edit. Source: web/src/mindmap.js - Rebuild: cd web && npm run build */\" --outfile=../src/horizon/resources/horizon-mindmap.bundle.js",
+    "build:dev": "npm run build:markdown:dev && npm run build:wysiwyg:dev && npm run build:mindmap:dev",
     "build:markdown:dev": "esbuild src/editor.js --bundle --format=iife --target=chrome110 --sourcemap=inline --outfile=../src/horizon/resources/horizon-editor.bundle.js",
-    "build:wysiwyg:dev": "esbuild src/wysiwyg.js --bundle --format=iife --target=chrome110 --sourcemap=inline --outfile=../src/horizon/resources/horizon-wysiwyg.bundle.js"
+    "build:wysiwyg:dev": "esbuild src/wysiwyg.js --bundle --format=iife --target=chrome110 --sourcemap=inline --outfile=../src/horizon/resources/horizon-wysiwyg.bundle.js",
+    "build:mindmap:dev": "esbuild src/mindmap.js --bundle --format=iife --target=chrome110 --sourcemap=inline --outfile=../src/horizon/resources/horizon-mindmap.bundle.js"
   },
   "dependencies": {
     "@codemirror/autocomplete": "^6.18.6",
@@ -28,8 +30,10 @@
     "@codemirror/search": "^6.5.10",
     "@codemirror/state": "^6.5.2",
     "@codemirror/view": "^6.36.4",
+    "@erseco/mind-elixir-export-svg": "0.3.0",
     "@lezer/highlight": "^1.2.1",
-    "ckeditor5": "49.0.0"
+    "ckeditor5": "49.0.0",
+    "mind-elixir": "6.0.3"
   },
   "devDependencies": {
     "esbuild": "^0.25.0"

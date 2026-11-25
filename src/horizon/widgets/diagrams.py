@@ -1,7 +1,8 @@
 import unicodedata
+from pathlib import Path
 
-from PySide6.QtCore import Qt, QTimer, QUrl, Signal
-from PySide6.QtGui import QAction, QDesktopServices, QPixmap
+from PySide6.QtCore import QSize, Qt, QTimer, QUrl, Signal
+from PySide6.QtGui import QAction, QDesktopServices, QIcon, QPixmap
 from PySide6.QtWidgets import (
     QCheckBox,
     QComboBox,
@@ -23,17 +24,25 @@ from PySide6.QtWidgets import (
 
 from horizon import theme as _theme
 from horizon.dialogs import ConfirmDialog
-from horizon.diagram import Diagram, DiagramRepository
+from horizon.diagram import KIND_DRAWIO, KIND_MINDELIXIR, Diagram, DiagramRepository
 from horizon.project import ProjectRepository
 from horizon.titlebar import TitleBar
 from horizon.widgets.drawio import LOG_PATH as DRAWIO_LOG_PATH
 from horizon.widgets.drawio import DrawioEditor, make_thumbnail
 from horizon.widgets.markdown import _plus_icon, _PLUS_ICON_SIZE
+from horizon.widgets.mindelixir import MindElixirEditor
 
 _THUMB_WIDTH  = 200
 _THUMB_HEIGHT = 150
 _TILE_WIDTH   = _THUMB_WIDTH + 16
 _GRID_SPACING = 12
+
+# The combo boxes' arrow, written in the theme's text colour by theme.make_stylesheet().
+_MENU_ARROW = Path(__file__).parent.parent / "resources" / "combo_arrow.svg"
+
+# Per diagram kind: label in menus and tooltips, title of a new diagram.
+_KIND_LABELS = {KIND_DRAWIO: "Diagramme Draw.io", KIND_MINDELIXIR: "Mind map (Mind Elixir)"}
+_NEW_TITLES  = {KIND_DRAWIO: "New Diagram", KIND_MINDELIXIR: "New Mind Map"}
 
 
 def _fold(text: str) -> str:
@@ -51,7 +60,7 @@ class _DiagramTile(QFrame):
         self.setFixedSize(_TILE_WIDTH, _THUMB_HEIGHT + 40)
         self.setFrameShape(QFrame.Shape.StyledPanel)
         self.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.setToolTip(diagram.title)
+        self.setToolTip(f"{diagram.title}\n{_KIND_LABELS.get(diagram.kind, diagram.kind)}")
         if context_menu:
             self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
             self.customContextMenuRequested.connect(self._show_context_menu)
@@ -82,6 +91,17 @@ class _DiagramTile(QFrame):
         layout.setSpacing(4)
         layout.addWidget(thumb_label)
         layout.addWidget(title_label)
+
+        if diagram.kind == KIND_MINDELIXIR:
+            # Badge over the thumbnail's top-left corner, so mind maps stand out in the grid.
+            t = _theme.current()
+            badge = QLabel("Mind map", self)
+            badge.setStyleSheet(
+                f"background: {t.accent_color}; color: #ffffff; font-size: 10px;"
+                " padding: 1px 5px; border-radius: 3px;")
+            badge.adjustSize()
+            badge.move(10, 10)
+            badge.raise_()
 
     def mousePressEvent(self, event) -> None:
         if event.button() == Qt.MouseButton.LeftButton:
@@ -244,10 +264,30 @@ class DiagramsListWidget(QWidget):
         font.setBold(True)
         title.setFont(font)
 
+        # Split button: "New" makes a draw.io diagram; the arrow next to it offers every kind.
         new_btn = QPushButton("New")
         new_btn.setIcon(_plus_icon())
         new_btn.setIconSize(_PLUS_ICON_SIZE)
-        new_btn.clicked.connect(self._on_new_diagram)
+        new_btn.setToolTip(f"Nouveau : {_KIND_LABELS[KIND_DRAWIO]}")
+        new_btn.clicked.connect(lambda: self._on_new_diagram(KIND_DRAWIO))
+
+        self._new_menu = QMenu(self)
+        for kind in (KIND_DRAWIO, KIND_MINDELIXIR):
+            action = QAction(_KIND_LABELS[kind], self._new_menu)
+            action.triggered.connect(lambda _checked=False, k=kind: self._on_new_diagram(k))
+            self._new_menu.addAction(action)
+
+        self._new_kind_btn = QPushButton()
+        self._new_kind_btn.setIcon(QIcon(str(_MENU_ARROW)))
+        self._new_kind_btn.setIconSize(QSize(10, 6))
+        self._new_kind_btn.setToolTip("Choisir le type de diagramme")
+        self._new_kind_btn.setFixedWidth(28)
+        self._new_kind_btn.clicked.connect(self._show_new_menu)
+
+        new_layout = QHBoxLayout()
+        new_layout.setSpacing(1)
+        new_layout.addWidget(new_btn)
+        new_layout.addWidget(self._new_kind_btn)
 
         self._show_archived_cb = QCheckBox("Show archived")
         self._show_archived_cb.stateChanged.connect(self.load)
@@ -256,7 +296,7 @@ class DiagramsListWidget(QWidget):
         header_layout.addWidget(title)
         header_layout.addStretch()
         header_layout.addWidget(self._show_archived_cb)
-        header_layout.addWidget(new_btn)
+        header_layout.addLayout(new_layout)
 
         self._grid = _DiagramGrid(self)
         self._grid.diagram_clicked.connect(self.diagram_edit_requested)
@@ -270,8 +310,11 @@ class DiagramsListWidget(QWidget):
     def load(self) -> None:
         self._grid.set_diagrams(self._diagram_repo.list_all(archived_only=self._show_archived_cb.isChecked()))
 
-    def _on_new_diagram(self) -> None:
-        diagram = self._diagram_repo.create(title="New Diagram")
+    def _show_new_menu(self) -> None:
+        self._new_menu.exec(self._new_kind_btn.mapToGlobal(self._new_kind_btn.rect().bottomLeft()))
+
+    def _on_new_diagram(self, kind: str) -> None:
+        diagram = self._diagram_repo.create(title=_NEW_TITLES[kind], kind=kind)
         self.load()
         self.diagram_edit_requested.emit(diagram.id)
 
@@ -361,10 +404,21 @@ class DiagramEditorWidget(QWidget):
         banner_layout.addWidget(retry_btn)
         self._unavailable_banner.setVisible(False)
 
-        self._editor = DrawioEditor(self)
-        self._editor.xml_changed.connect(self._autosave_timer.start)
-        self._editor.ready.connect(lambda: self._unavailable_banner.setVisible(False))
-        self._editor.unavailable.connect(self._on_editor_unavailable)
+        # One editor per diagram kind, both lazily started on first show: only the kind
+        # actually opened costs a web engine page.
+        self._drawio = DrawioEditor(self)
+        self._drawio.document_changed.connect(self._autosave_timer.start)
+        self._drawio.ready.connect(lambda: self._unavailable_banner.setVisible(False))
+        self._drawio.unavailable.connect(self._on_editor_unavailable)
+
+        self._mindmap = MindElixirEditor(self)
+        self._mindmap.document_changed.connect(self._autosave_timer.start)
+
+        self._editors = {KIND_DRAWIO: self._drawio, KIND_MINDELIXIR: self._mindmap}
+        self._editor: DrawioEditor | MindElixirEditor = self._drawio
+        self._editor_stack = QStackedWidget(self)
+        self._editor_stack.addWidget(self._drawio)
+        self._editor_stack.addWidget(self._mindmap)
 
         self._status_label = QLabel("")
         self._status_label.setAlignment(Qt.AlignmentFlag.AlignRight)
@@ -377,7 +431,7 @@ class DiagramEditorWidget(QWidget):
         layout.addLayout(project_row)
         layout.addWidget(sep)
         layout.addWidget(self._unavailable_banner)
-        layout.addWidget(self._editor, stretch=1)
+        layout.addWidget(self._editor_stack, stretch=1)
         layout.addWidget(self._status_label)
 
     def load_diagram(self, diagram: Diagram, projects: list) -> None:
@@ -402,7 +456,13 @@ class DiagramEditorWidget(QWidget):
         self._project_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self._updating_combo = False
 
-        self._editor.load_xml(diagram.xml)
+        self._editor = self._editors.get(diagram.kind, self._drawio)
+        self._editor_stack.setCurrentWidget(self._editor)
+        if self._editor is self._mindmap:
+            self._unavailable_banner.setVisible(False)  # draw.io's
+            self._mindmap.load_document(diagram.xml, root_topic=diagram.title)
+        else:
+            self._drawio.load_document(diagram.xml)
 
     def flush_and_save(self) -> None:
         """Persist the diagram and redo its renderings (list thumbnail, SVG shown in
@@ -413,6 +473,8 @@ class DiagramEditorWidget(QWidget):
         self._autosave_timer.stop()
         if self._current is None:
             return
+        if self._editor is self._mindmap:
+            self._mindmap.flush()  # its last operation may not be pushed yet
         self._save_xml()
         rendered = self._current.thumbnail is not None and self._current.svg is not None
         if self._current.xml == self._xml_at_open and rendered:
@@ -423,7 +485,7 @@ class DiagramEditorWidget(QWidget):
         thumbnail = make_thumbnail(png) if png else None
         svg = self._editor.export_svg() if thumbnail is not None else None
         if svg is None:
-            return  # draw.io unreachable: keep the previous renderings
+            return  # editor unreachable: keep the previous renderings
         self._current.thumbnail = thumbnail
         self._current.svg = svg
         self._diagram_repo.update(self._current)
@@ -433,7 +495,7 @@ class DiagramEditorWidget(QWidget):
     def _save_xml(self, show_status: bool = False) -> None:
         if self._current is None:
             return
-        xml = self._editor.xml()
+        xml = self._editor.document()
         if xml == self._current.xml:
             return
         self._current.xml = xml
@@ -487,7 +549,7 @@ class DiagramEditorWidget(QWidget):
 
     def _on_retry(self) -> None:
         self._unavailable_banner.setVisible(False)
-        self._editor.reload()
+        self._drawio.reload()
 
     def _on_back_clicked(self) -> None:
         self.flush_and_save()
