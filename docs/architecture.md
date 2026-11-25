@@ -244,6 +244,11 @@ full-screen button (or F11) is caught by the page: Python moves the view into a 
 shown full screen on the screen of Horizon's window, and puts it back on Esc, F11, the button,
 Alt+F4, or when the editor is hidden.
 
+The editor header has an "Exporter" split button (PNG, or PNG / SVG from its arrow) that saves
+the editor's `export_png()` / `export_svg()` rendering to a file — for both kinds. Mind Elixir 6
+no longer has the `exportPng` / `exportSvg` its documentation describes, so a mind map export is
+the same SnapDOM capture as the notes' rendering (PNG at twice the size, at most 4000 px).
+
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive
 (`resources/drawio/draw.war`, ~47 MB, not versioned: [../tools/fetch_drawio.py](../tools/fetch_drawio.py)
