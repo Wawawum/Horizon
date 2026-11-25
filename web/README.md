@@ -8,7 +8,7 @@ committed artifacts under `src/horizon/resources/` as plain static files, exactl
 |---|---|---|
 | `src/editor.js` | `horizon-editor.bundle.js` (~702 KB) | CodeMirror 6, markdown notes |
 | `src/wysiwyg.js` | `horizon-wysiwyg.bundle.js` (~1 MB) + `horizon-wysiwyg.bundle.css` (~266 KB) | CKEditor 5, WYSIWYG (HTML) notes |
-| `src/mindmap.js` | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
+| `src/mindmap.js` (+ `src/nodestyle.js`) | `horizon-mindmap.bundle.js` (~160 KB) + `horizon-mindmap.bundle.css` (~20 KB) | Mind Elixir, mind maps (Diagrams module) |
 
 ## Rebuilding
 
@@ -112,6 +112,10 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   labels with marked (GFM, line breaks kept), sanitised by DOMPurify; the stored `topic` stays
   the Markdown source. Links get `target="_blank"`, and a click on any link in the page is
   sent to Python through `open_link` (http, https and mailto only), so the page never navigates.
+- **Node style bar** (`src/nodestyle.js`). While nodes are selected, a bar above the map sets
+  their font size and colour (`nodeObj.style.fontSize` / `color`) through `reshapeNode`, an
+  undoable operation pushed like any edit. `reshapeNode` merges the previous style under the new
+  one, so "Auto" stores the key as `""` rather than deleting it.
 - **Renderings are DOM captures.** SnapDOM captures `mind.nodes` (topics, branches, arrows,
   summaries) as an SVG with the HTML in a `<foreignObject>` and the fonts embedded; its
   `viewBox` is then cropped to the content plus 16 px, since `mind.nodes` carries the editor's

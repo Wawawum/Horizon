@@ -16,6 +16,7 @@ import "mind-elixir/style.css";
 import { marked } from "marked";
 import DOMPurify from "dompurify";
 import { snapdom } from "@zumer/snapdom";
+import { installStyleBar } from "./nodestyle.js";
 
 const PUSH_DELAY_MS = 300;
 
@@ -24,6 +25,7 @@ let mind = null;
 let generation = 0;
 let dark = false;
 let pushTimer = null;
+const styleBar = installStyleBar(() => mind);
 
 function theme() {
   return dark ? MindElixir.DARK_THEME : MindElixir.THEME;
@@ -97,6 +99,7 @@ async function load(data, gen, rootTopic) {
   // The map follows Horizon's theme, whatever theme it was saved with.
   instance.changeTheme(theme());
   instance.bus.addListener("operation", schedulePush);
+  styleBar.attach(instance);
   if (isNew || error) pushNow(); // a new map exists as soon as it is created
   if (bridge) bridge.editor_ready(gen);
 }
@@ -163,6 +166,7 @@ async function exportImage(fmt, requestId) {
       pushNow();
       // The selection outline would end up in the picture.
       mind.clearSelection();
+      styleBar.refresh();
       // The whole map (topics, branches, arrows, summaries), whatever is scrolled into view.
       const capture = await snapdom(mind.nodes, {
         backgroundColor: mind.theme.cssVar["--bgcolor"],
