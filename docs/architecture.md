@@ -236,7 +236,8 @@ since the page pushes it 300 ms after an operation. Topics are Markdown (marked,
 DOMPurify), so its SVG is a SnapDOM capture of the map's DOM — HTML in a `<foreignObject>`,
 fonts embedded, cropped to the content — in Horizon's theme at the time of the export; Chromium
 draws it in the notes' `<img>`. Links in topics open in the system browser. A style bar, shown while
-nodes are selected, sets their font size, text colour, background, shape and border (width, colour).
+nodes are selected, sets their font size, text colour, background, shape and border (width, colour), or applies a
+preset style (ten colours, pastel or vivid).
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive

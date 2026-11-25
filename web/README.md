@@ -118,7 +118,10 @@ diagram title, pushed at once. The map always follows Horizon's light or dark th
   `borderStyle: solid` when either border key is set; a shape is a `borderRadius` — rectangle,
   rounded, pill, ellipse, the ellipse with a wider `padding` — since a `clip-path` shape would
   clip the border) through `reshapeNode`, an undoable operation pushed like any
-  edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker).
+  edit. Colours come from a shared popover (16 colours, "Auto", a free colour picker). The
+  "Styles" button offers presets — green, yellow, orange, red, pink, mauve, blue, grey, white,
+  black, each pastel or vivid (`PRESET_COLORS`) — that set background, a 2 px border and a
+  readable text colour, leaving size and shape alone; "Aucun" empties those keys.
   `reshapeNode` merges the previous style under the new one, so "Auto" stores the key as `""`
   rather than deleting it. `linkDiv` paints first-level topics' borders in their branch colour
   on every redraw; the bar wraps it on each instance to put a chosen border colour back.

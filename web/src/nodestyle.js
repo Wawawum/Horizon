@@ -1,5 +1,5 @@
-// Style bar of the mind map editor: font size, text colour, background, shape, border colour
-// and width of the selected nodes.
+// Style bar of the mind map editor: preset styles, font size, text colour, background, shape,
+// border colour and width of the selected nodes.
 //
 // Mind Elixir stores a node's look in `nodeObj.style`, whose keys it copies onto the topic
 // element as inline CSS, and applies it with reshapeNode(), which records an undoable
@@ -25,6 +25,29 @@ const PALETTE = [
   ["#ffffff", "Blanc"], ["#f1f3f5", "Gris clair"], ["#ffe3e3", "Rouge clair"], ["#ffe8cc", "Orange clair"],
   ["#fff3bf", "Jaune clair"], ["#d3f9d8", "Vert clair"], ["#d0ebff", "Bleu clair"], ["#e5dbff", "Violet clair"],
 ];
+
+// Preset styles: background, border and a readable text colour, pastel or vivid. Applying
+// one leaves the font size and the shape alone.
+const PRESET_COLORS = [
+  // name, pastel [background, border, text], vivid [background, border, text]
+  ["Vert", ["#d3f9d8", "#69db7c", "#1f1f1f"], ["#2f9e44", "#2b8a3e", "#ffffff"]],
+  ["Jaune", ["#fff3bf", "#ffd43b", "#1f1f1f"], ["#fcc419", "#f59f00", "#1f1f1f"]],
+  ["Orange", ["#ffe8cc", "#ffa94d", "#1f1f1f"], ["#fd7e14", "#e8590c", "#ffffff"]],
+  ["Rouge", ["#ffe3e3", "#ff8787", "#1f1f1f"], ["#e03131", "#c92a2a", "#ffffff"]],
+  ["Rose", ["#ffdeeb", "#f783ac", "#1f1f1f"], ["#e64980", "#c2255c", "#ffffff"]],
+  ["Mauve", ["#e5dbff", "#b197fc", "#1f1f1f"], ["#7950f2", "#6741d9", "#ffffff"]],
+  ["Bleu", ["#d0ebff", "#74c0fc", "#1f1f1f"], ["#1c7ed6", "#1864ab", "#ffffff"]],
+  ["Gris", ["#f1f3f5", "#ced4da", "#1f1f1f"], ["#868e96", "#495057", "#ffffff"]],
+  ["Blanc", ["#ffffff", "#dee2e6", "#1f1f1f"], ["#ffffff", "#343a40", "#1f1f1f"]],
+  ["Noir", ["#495057", "#343a40", "#ffffff"], ["#000000", "#212529", "#ffffff"]],
+];
+
+function presetStyle([background, border, text]) {
+  return { background, borderColor: border, borderWidth: "2px", borderStyle: "solid", color: text };
+}
+
+// "Aucun": back to the theme's look for what a preset sets.
+const NO_PRESET = { background: "", borderColor: "", borderWidth: "", borderStyle: "", color: "" };
 
 const CSS = `
 #hz-style-bar {
@@ -54,6 +77,29 @@ const CSS = `
   background: linear-gradient(135deg, var(--hz-input-bg) 45%, #e03131 45%, #e03131 55%, var(--hz-input-bg) 55%);
 }
 .hz-swatch.mixed { background: repeating-linear-gradient(45deg, #adb5bd 0 3px, transparent 3px 6px); }
+#hz-style-bar .hz-preset-btn {
+  padding: 2px 8px; cursor: pointer; font: inherit; color: var(--hz-text);
+  background: var(--hz-input-bg); border: 1px solid var(--hz-border); border-radius: 4px;
+}
+#hz-style-bar .hz-preset-btn::after { content: " ▾"; font-size: 9px; opacity: 0.7; }
+#hz-preset-pop {
+  position: absolute; z-index: 30; display: none; padding: 8px 10px;
+  background: var(--hz-surface-alt-bg); border: 1px solid var(--hz-border); border-radius: 6px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25); font: 12px 'Segoe UI', sans-serif; color: var(--hz-text);
+}
+#hz-preset-pop.visible { display: block; }
+#hz-preset-pop .hz-preset-grid {
+  display: grid; grid-template-columns: auto repeat(10, 34px); gap: 6px; align-items: center;
+}
+#hz-preset-pop .hz-preset {
+  width: 34px; height: 22px; box-sizing: border-box; border: 2px solid; border-radius: 6px;
+  cursor: pointer; font: bold 11px/18px 'Segoe UI', sans-serif; text-align: center;
+}
+#hz-preset-pop .hz-preset.active { outline: 2px solid var(--hz-accent-color); outline-offset: 1px; }
+#hz-preset-pop button.hz-auto-btn {
+  margin-top: 8px; font: inherit; color: var(--hz-text); background: none; border: none;
+  cursor: pointer; padding: 0; display: inline-flex; align-items: center; gap: 6px;
+}
 #hz-color-pop {
   position: absolute; z-index: 30; display: none; padding: 8px; width: 192px;
   background: var(--hz-surface-alt-bg); border: 1px solid var(--hz-border); border-radius: 6px;
@@ -126,6 +172,7 @@ export function installStyleBar(getMind) {
 
   function openPop(key, anchor) {
     if (popKey === key && pop.classList.contains("visible")) return closePop();
+    presetPop.classList.remove("visible");
     popKey = key;
     const current = commonValue(key);
     for (const s of gridSwatches) s.classList.toggle("active", current !== null && s.dataset.color === current);
@@ -147,7 +194,60 @@ export function installStyleBar(getMind) {
     if (key) apply({ [key]: value });
   }
 
-  document.addEventListener("mousedown", closePop);
+  // ── Preset popover ─────────────────────────────────────────────────────
+  const presetPop = document.createElement("div");
+  presetPop.id = "hz-preset-pop";
+  shield(presetPop);
+  const presetGrid = document.createElement("div");
+  presetGrid.className = "hz-preset-grid";
+  const presetCells = [];
+  for (const [variant, index] of [["Pastel", 1], ["Vif", 2]]) {
+    presetGrid.appendChild(label(variant));
+    for (const entry of PRESET_COLORS) {
+      const st = presetStyle(entry[index]);
+      const cell = document.createElement("span");
+      cell.className = "hz-preset";
+      cell.textContent = "Aa";
+      cell.title = `${entry[0]} ${variant.toLowerCase()}`;
+      Object.assign(cell.style, { background: st.background, borderColor: st.borderColor, color: st.color });
+      cell.addEventListener("click", () => pickPreset(st));
+      presetCells.push({ cell, st });
+      presetGrid.appendChild(cell);
+    }
+  }
+  const noPreset = document.createElement("button");
+  noPreset.type = "button";
+  noPreset.className = "hz-auto-btn";
+  noPreset.append(swatch(""), "Aucun (style du thème)");
+  noPreset.addEventListener("click", () => pickPreset(NO_PRESET));
+  presetPop.append(presetGrid, noPreset);
+
+  function openPresets(anchor) {
+    if (presetPop.classList.contains("visible")) return closePresets();
+    closePop();
+    const bg = commonValue("background"), border = commonValue("borderColor");
+    for (const { cell, st } of presetCells) {
+      cell.classList.toggle("active", bg === st.background && border === st.borderColor);
+    }
+    const r = anchor.getBoundingClientRect();
+    presetPop.style.left = Math.max(4, Math.min(r.left, window.innerWidth - 470)) + "px";
+    presetPop.style.top = r.bottom + 6 + "px";
+    presetPop.classList.add("visible");
+  }
+
+  function closePresets() {
+    presetPop.classList.remove("visible");
+  }
+
+  function pickPreset(st) {
+    closePresets();
+    apply(st);
+  }
+
+  document.addEventListener("mousedown", () => {
+    closePop();
+    closePresets();
+  });
 
   // ── Bar ────────────────────────────────────────────────────────────────
   function label(text) {
@@ -172,6 +272,13 @@ export function installStyleBar(getMind) {
     b.addEventListener("click", () => openPop(key, b));
     return { key, button: b, swatch: s };
   }
+
+  const presets = document.createElement("button");
+  presets.type = "button";
+  presets.className = "hz-preset-btn";
+  presets.title = "Styles prédéfinis (fond, bordure et texte)";
+  presets.textContent = "Styles";
+  presets.addEventListener("click", () => openPresets(presets));
 
   const size = document.createElement("select");
   size.title = "Taille de la police";
@@ -203,12 +310,13 @@ export function installStyleBar(getMind) {
   const [textColor, background, borderColor] = colorButtons;
 
   bar.append(
+    presets, sep(),
     label("Texte"), size, textColor.button, sep(),
     label("Fond"), background.button, sep(),
     label("Forme"), shape, sep(),
     label("Bordure"), borderWidth, borderColor.button,
   );
-  document.body.append(bar, pop);
+  document.body.append(bar, pop, presetPop);
 
   // ── State ──────────────────────────────────────────────────────────────
   function selected() {
@@ -234,6 +342,7 @@ export function installStyleBar(getMind) {
     bar.classList.toggle("visible", nodes.length > 0);
     if (!nodes.length) {
       closePop();
+      closePresets();
       return;
     }
     showSelect(size, "fontSize", FONT_SIZES);
