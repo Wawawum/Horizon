@@ -99,8 +99,9 @@ Detailed workflows: [docs/agent-workflows.md](docs/agent-workflows.md)
 | [src/horizon/widgets/webeditor.py](src/horizon/widgets/webeditor.py) | `WebMarkdownEditor` (CodeMirror) and `WebHtmlEditor` (CKEditor 5), `horizon-image://` and `horizon-diagram://` schemes |
 | [src/horizon/attachment.py](src/horizon/attachment.py) | `Attachment` + `AttachmentRepository`: files dropped on WYSIWYG notes, archived as BLOBs |
 | [src/horizon/attachment_drop.py](src/horizon/attachment_drop.py) | `parse_drop` (QMimeData → files / Outlook items / links), `DropImporter`, Outlook COM export, page title fetch |
-| [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (draw.io XML + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
+| [src/horizon/diagram.py](src/horizon/diagram.py) | `Diagram` (`kind` draw.io or Mind Elixir, editor document + PNG thumbnail + SVG shown in WYSIWYG notes) + `DiagramRepository` |
 | [src/horizon/widgets/drawio.py](src/horizon/widgets/drawio.py) | `DrawioEditor`: embedded draw.io (`resources/drawio/draw.war`, fetched by `tools/fetch_drawio.py`) served on `horizon-drawio://app`, JSON protocol over QWebChannel |
+| [src/horizon/widgets/mindelixir.py](src/horizon/widgets/mindelixir.py) | `MindElixirEditor`: Mind Elixir mind maps (`resources/horizon-mindmap.bundle.js`, source `web/src/mindmap.js`) |
 | [src/horizon/api_server.py](src/horizon/api_server.py) | Local HTTP REST API using stdlib `http.server` |
 | [src/horizon/mcp_server.py](src/horizon/mcp_server.py) | MCP server entry point |
 | [pyproject.toml](pyproject.toml) | Dependencies and script entry points |

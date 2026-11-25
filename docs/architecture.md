@@ -220,11 +220,20 @@ panel reloads the note from the database and unlocks.
 
 ---
 
-## Diagrams (draw.io)
+## Diagrams (draw.io and Mind Elixir)
 
 [../src/horizon/diagram.py](../src/horizon/diagram.py) stores diagrams in `diagrams`: title,
-optional `project_id`, the draw.io XML, a small PNG `thumbnail` (the list), an `svg` rendering (the
-notes) and `archived`. Diagrams are neither searchable nor tagged.
+optional `project_id`, the editor document in `xml` (draw.io XML, or Mind Elixir's JSON for a mind
+map), a small PNG `thumbnail` (the list), an `svg` rendering (the notes), `archived` and `kind`
+(`drawio` or `mindelixir`, set at creation). Diagrams are neither searchable nor tagged.
+
+Mind maps are edited with Mind Elixir by [../src/horizon/widgets/mindelixir.py](../src/horizon/widgets/mindelixir.py)
+(`MindElixirEditor`), on a page built from `resources/horizon-mindmap.bundle.{js,css}`
+([../web/src/mindmap.js](../web/src/mindmap.js)) and the note editors' profile: no network, no
+archive. It offers the same interface as `DrawioEditor` (`load_document`, `document`,
+`document_changed`, `export_png`, `export_svg`), plus `flush()` to read the map before saving,
+since the page pushes it 300 ms after an operation. Its SVG is drawn from the data by
+`@erseco/mind-elixir-export-svg`, in Horizon's theme at the time of the export.
 
 [../src/horizon/widgets/drawio.py](../src/horizon/widgets/drawio.py) embeds draw.io, so that editing
 works offline and on networks that block diagrams.net. The official release archive
@@ -255,7 +264,9 @@ messages dropped by the origin check) and, on timeout, a JavaScript snapshot of 
 
 [../src/horizon/widgets/diagrams.py](../src/horizon/widgets/diagrams.py) holds the thumbnail grid
 (`DiagramsListWidget`), the editor panel (`DiagramEditorWidget`) and the picker of the WYSIWYG editor
-(`DiagramPickerDialog`): XML autosaved 2 s after a change, thumbnail and SVG re-exported on Back and on
+(`DiagramPickerDialog`). The list's **New** button makes a draw.io diagram; the arrow next to it
+offers both kinds, and mind map tiles carry a badge. `DiagramEditorWidget` stacks both editors and
+shows the one of the diagram's kind (each starts its web page only when first shown): document autosaved 2 s after a change, thumbnail and SVG re-exported on Back and on
 application close (`flush_and_save`) when the XML changed or one of them is missing — then
 `diagram_changed` is emitted.
 
